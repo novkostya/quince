@@ -140,10 +140,11 @@ func (s *Service) Subscriptions() ([]wire.PushSubscription, error) {
 	out := make([]wire.PushSubscription, 0, len(rows))
 	for _, r := range rows {
 		w := wire.PushSubscription{
-			ID:        r.ID,
-			Label:     r.Label,
-			State:     "live",
-			CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339),
+			ID:          r.ID,
+			Label:       r.Label,
+			State:       "live",
+			CreatedAt:   r.CreatedAt.UTC().Format(time.RFC3339),
+			Fingerprint: push.EndpointFingerprint(r.Endpoint),
 		}
 		if r.ExpiredAt != nil {
 			w.State = "expired"

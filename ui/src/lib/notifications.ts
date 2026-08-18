@@ -118,7 +118,8 @@ export function useSubscribe() {
       );
       // THE ID IS WHAT MAKES "this device" ANSWERABLE LATER. It is not a capability — the endpoint
       // and keys never leave this function — so the browser may keep it.
-      rememberSubscription(created.id);
+      // NOTHING IS REMEMBERED LOCALLY. The row is identified by its endpoint fingerprint, which
+      // both sides can compute — see `useThisDevice` for why a stored id was wrong.
       return created;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: notificationsKey }),
@@ -134,11 +135,11 @@ export function useSubscribe() {
 export function useUnsubscribe() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => {
-      const mine = id === rememberedSubscription();
-      await api.del<void>(
-        `/api/notifications/subscriptions/${encodeURIComponent(id)}`,
-      );
+    // `mine` COMES FROM THE CALLER, which already knows: the page renders the row and marks it. The
+    // alternative — deciding here — would mean hashing this browser's endpoint on every removal to
+    // answer a question the render already answered.
+    mutationFn: async ({ id, mine }: { id: string; mine: boolean }) => {
+      await api.del<void>(`/api/notifications/subscriptions/${encodeURIComponent(id)}`);
       if (!mine) {
         // ANOTHER DEVICE'S ROW IS A SERVER-SIDE REMOVAL AND NOTHING ELSE. This used to fall through
         // to the browser half below unconditionally, so turning off the iPhone FROM the Mac
@@ -146,7 +147,6 @@ export function useUnsubscribe() {
         // silent, which is the exact state D8's expiry machinery exists to make visible.
         return;
       }
-      forgetSubscription();
       // BEST EFFORT, AND AFTER the server call. If the browser half fails the row is still gone
       // server-side, which is the half that decides whether anything is sent.
       try {
@@ -164,7 +164,6 @@ export function useUnsubscribe() {
     onSettled: () => qc.invalidateQueries({ queryKey: notificationsKey }),
   });
 }
-
 // useSendTest asks quince to push one notification to every live subscription, right now.
 //
 // IT IS WHAT MAKES THE FEATURE INSTALLABLE BY A PERSON. Without it the only proof that
@@ -187,49 +186,32 @@ export function useSendTest() {
 // --- which subscription belongs to THIS browser ---
 //
 // THE PAGE USED TO ANSWER THIS WITH "IS ANY SUBSCRIPTION LIVE", AND THAT IS A LIE ON EVERY DEVICE
-// BUT ONE. Operator-reported 2026-08-18: subscribe on an iPhone, then open quince on a Mac, and the
-// Mac says *"This device — On"* about a device that has no subscription at all. Worse, it is a trap:
-// the only control offered is "Turn off", so the way to enable the Mac was to turn OFF the iPhone —
-// deleting a working subscription — and then turn on. Afterwards the iPhone claimed On, also falsely.
+// BUT ONE. Subscribe on an iPhone, open quince on a Mac, and the Mac said *"This device — On"* about
+// a device with no subscription at all — and offered only "Turn off", so enabling the Mac meant
+// deleting the iPhone's working subscription first.
 //
-// The state-honesty rule is explicit that nothing claims more than was proven, and "some device
-// somewhere is subscribed" was being rendered as "this one is".
+// THE SECOND ANSWER WAS AN ID IN `localStorage`, AND IT WAS WRONG IN A WAY ONLY HARDWARE SHOWED. The
+// id was written at subscribe time, so a subscription created before that code existed had none —
+// and its own device then reported **Off while subscribed and receiving**. Operator-reported
+// 2026-08-18, from an iPhone looking at its own row. A cleared profile and a private window fail the
+// same way.
 //
-// THE SERVER CANNOT ANSWER IT, BY DESIGN. An endpoint is capability-grade and never comes back from
-// the API (spec D8), so there is nothing in the list to compare a browser's own subscription
-// against. The id quince mints at subscribe time is the one non-capability handle both sides hold,
-// so the browser keeps it.
+// THE ANSWER IS THE ENDPOINT'S FINGERPRINT, and it is stateless. The browser holds its own endpoint;
+// the server holds every endpoint; both hash and compare, and neither sends one. A SHA-256 of a
+// high-entropy URL is not reversible and cannot be pushed to, which is what lets it appear in a
+// response D8 forbids endpoints from appearing in. It survives everything the stored id did not.
 
-const subscriptionIDKey = "quince.push.subscription-id";
-
-// rememberSubscription records the id quince assigned to THIS browser's subscription.
+// fingerprintOf hashes an endpoint the same way `push.EndpointFingerprint` does, server-side.
 //
-// `localStorage` AND NOT A COOKIE OR THE DB: it must be per-browser-profile, survive a reload, and
-// never travel with a request. It holds an opaque id and nothing that could push to anybody.
-function rememberSubscription(id: string) {
-  try {
-    localStorage.setItem(subscriptionIDKey, id);
-  } catch {
-    /* Private browsing can refuse. The consequence is a page that says Off while the browser is
-       subscribed, which is the SAFE direction to be wrong: it offers to turn on, and re-subscribing
-       is idempotent server-side (the row is keyed on endpoint and revived, not duplicated). */
-  }
-}
-
-function forgetSubscription() {
-  try {
-    localStorage.removeItem(subscriptionIDKey);
-  } catch {
-    /* Same as above; a stale id is checked against the server list before it is believed. */
-  }
-}
-
-function rememberedSubscription(): string | null {
-  try {
-    return localStorage.getItem(subscriptionIDKey);
-  } catch {
-    return null;
-  }
+// `crypto.subtle` NEEDS A SECURE CONTEXT, which is already a hard precondition here: Web Push does
+// not work over plain http at all, so there is no reachable state where this is unavailable and push
+// is not.
+async function fingerprintOf(endpoint: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(endpoint));
+  // base64url without padding — the encoding every other field in this protocol uses.
+  let binary = "";
+  for (const byte of new Uint8Array(digest)) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 // useThisDevice answers whether THIS browser is subscribed, and which row is its own.
@@ -240,19 +222,20 @@ function rememberedSubscription(): string | null {
 // receive nothing — and saying On there is the same lie in the other direction.
 export function useThisDevice() {
   const q = useNotifications();
-  const browser = useQuery({
-    queryKey: ["push", "browser-subscription"],
+  const mine = useQuery({
+    queryKey: ["push", "this-device-fingerprint"],
     queryFn: async () => {
-      if (!("serviceWorker" in navigator)) return false;
+      if (!("serviceWorker" in navigator)) return null;
       const reg = await navigator.serviceWorker.ready;
-      return (await reg.pushManager.getSubscription()) !== null;
+      const sub = await reg.pushManager.getSubscription();
+      if (!sub) return null;
+      return await fingerprintOf(sub.endpoint);
     },
     enabled: pushSupport() === "supported",
   });
 
-  const id = rememberedSubscription();
-  const mine = (q.data?.subscriptions ?? []).find(
-    (s) => s.id === id && s.state === "live",
+  const row = (q.data?.subscriptions ?? []).find(
+    (s) => mine.data != null && s.fingerprint === mine.data && s.state === "live",
   );
-  return { on: Boolean(browser.data && mine), id: mine?.id ?? null };
+  return { on: Boolean(row), id: row?.id ?? null };
 }

@@ -904,6 +904,19 @@ type PushSubscription struct {
 	CreatedAt  string `json:"created_at"`
 	ExpiredAt  string `json:"expired_at,omitempty"`
 	LastSentAt string `json:"last_sent_at,omitempty"`
+	// Fingerprint identifies WHICH row belongs to the browser reading this list, without the list
+	// ever carrying an endpoint.
+	//
+	// A SHA-256 OF THE ENDPOINT, base64url. The browser holds its own endpoint and can hash it; the
+	// server holds every endpoint and hashes each. Neither has to send one. This is NOT a capability:
+	// an endpoint is a high-entropy URL, so the digest is not reversible and cannot be pushed to,
+	// which is what lets it appear in a response that D8 forbids endpoints from appearing in.
+	//
+	// IT REPLACES A LOCALLY REMEMBERED ID, which was wrong in a way that only hardware showed: the id
+	// was stored at subscribe time, so every subscription created before that code existed — and every
+	// cleared profile, and every private window — reported its own device as Off while it was
+	// subscribed and receiving. Operator-reported 2026-08-18: an iPhone looking at its own row.
+	Fingerprint string `json:"fingerprint"`
 }
 
 // NotificationsResponse is GET /api/notifications (qn.12, contracts §1).

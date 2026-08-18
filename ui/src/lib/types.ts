@@ -721,6 +721,9 @@ export interface PushSubscriptionSummary {
   created_at: string;
   expired_at?: string;
   last_sent_at?: string;
+  /** SHA-256 of the endpoint, base64url — how a browser recognises its OWN row without the list
+   *  ever carrying an endpoint. Not a capability: the digest is one-way and cannot be pushed to. */
+  fingerprint: string;
 }
 
 export interface NotificationsResponse {
