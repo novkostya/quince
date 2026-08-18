@@ -1,7 +1,7 @@
 import { ChevronLeft } from "lucide-react";
 import { BackLink } from "@/components/BackLink";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { Button } from "@/components/ui/button";
 import { isIOS, pushSupport } from "@/lib/pwa";
 import {
@@ -49,21 +49,22 @@ export function NotificationsInstallPage() {
         <ChevronLeft size={16} strokeWidth={1.75} />
         Settings
       </BackLink>
-      <h1 className="mt-2 text-xl font-semibold tracking-tight">Notifications</h1>
+      <h1 className="mt-2 text-xl font-semibold tracking-tight">
+        Notifications
+      </h1>
       <p className="mt-1 text-sm text-muted">
-        quince can tell you when a device is due for a backup, and when one needs you.
+        quince can tell you when a device is due for a backup, and when one
+        needs you.
       </p>
 
       <div className="mt-6 max-w-xl space-y-6">
         {support === "unsupported_platform" && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                Notifications are unavailable on this browser
-                <Badge tone="warn">Unavailable</Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-fg-muted">
+          <section>
+            <SectionHeading className="flex items-center gap-2">
+              Notifications are unavailable on this browser
+              <Badge tone="warn">Unavailable</Badge>
+            </SectionHeading>
+            <div className="mt-3 space-y-3 text-sm text-muted">
               {/* LOCKDOWN MODE IS NAMED AS LIKELY, NOT ASSERTED (quince#510, spec D7 and G7).
                   WebKit disables service workers and the Push API declaratively in Lockdown Mode on
                   any certificate, and service workers have shipped since iOS 11.3 — so on a current
@@ -74,52 +75,52 @@ export function NotificationsInstallPage() {
                   fiddle with settings that cannot help. */}
               {ios ? (
                 <p>
-                  This is most likely Lockdown Mode, which turns off web notifications for every
-                  website. quince cannot work around it.
+                  This is most likely Lockdown Mode, which turns off web
+                  notifications for every website. quince cannot work around it.
                 </p>
               ) : (
-                <p>This browser does not support web notifications. quince cannot work around it.</p>
+                <p>
+                  This browser does not support web notifications. quince cannot
+                  work around it.
+                </p>
               )}
               <p>
-                Open quince to see which devices are due — the Devices list shows how long it has
-                been since each one was backed up.
+                Open quince to see which devices are due — the Devices list
+                shows how long it has been since each one was backed up.
               </p>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
         )}
 
         {support === "unsupported_ios_version" && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                This iPhone or iPad needs a newer iOS
-                <Badge tone="warn">Unavailable</Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-fg-muted">
+          <section>
+            <SectionHeading className="flex items-center gap-2">
+              This iPhone or iPad needs a newer iOS
+              <Badge tone="warn">Unavailable</Badge>
+            </SectionHeading>
+            <div className="mt-3 space-y-3 text-sm text-muted">
               {/* NOT the Lockdown Mode copy, and that is the point of this state existing. Lockdown
                   Mode removes service workers as well, so having one rules it out — naming it here
                   would send someone to check a setting that is not the cause. */}
               <p>
-                quince is on your Home Screen, but notifications for web apps need iOS 16.4 or later.
+                quince is on your Home Screen, but notifications for web apps
+                need iOS 16.4 or later.
               </p>
               <p>
-                Open quince to see which devices are due — the Devices list shows how long it has
-                been since each one was backed up.
+                Open quince to see which devices are due — the Devices list
+                shows how long it has been since each one was backed up.
               </p>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
         )}
 
         {support === "needs_install" && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                Add quince to your Home Screen
-                <Badge tone="accent">Step 1</Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-fg-muted">
+          <section>
+            <SectionHeading className="flex items-center gap-2">
+              Add quince to your Home Screen
+              <Badge tone="accent">Step 1</Badge>
+            </SectionHeading>
+            <div className="mt-3 space-y-3 text-sm text-muted">
               {/* THE LITERAL GESTURE, WITH THE GLYPH NAMED. "Install" is not a word that appears
                   anywhere in iOS, so an instruction using it sends a person looking for a button
                   that does not exist.
@@ -130,21 +131,23 @@ export function NotificationsInstallPage() {
                   installing can rescue. This card previously carried an "install from your address
                   bar" line that was reachable ONLY when it was wrong. */}
               <p>
-                On iPhone and iPad, notifications only work once quince has been added to your Home
-                Screen.
+                On iPhone and iPad, notifications only work once quince has been
+                added to your Home Screen.
               </p>
               <ol className="list-decimal space-y-1 pl-5">
                 <li>
-                  Tap the Share button — the square with an arrow pointing up, in Safari&rsquo;s
-                  toolbar.
+                  Tap the Share button — the square with an arrow pointing up,
+                  in Safari&rsquo;s toolbar.
                 </li>
                 <li>
                   Scroll down and tap <strong>Add to Home Screen</strong>.
                 </li>
-                <li>Open quince from your Home Screen and come back to this page.</li>
+                <li>
+                  Open quince from your Home Screen and come back to this page.
+                </li>
               </ol>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
         )}
 
         {support === "supported" && <NotificationsControls />}
@@ -171,55 +174,66 @@ function NotificationsControls() {
   // WITH THE OTHER HOOKS, ABOVE EVERY EARLY RETURN. Placed where it is used, it sat below the
   // `permission === "denied"` branch, and a hook called conditionally changes order between renders.
   const thisDevice = useThisDevice();
-  const permission = typeof Notification === "undefined" ? "default" : Notification.permission;
+  const permission =
+    typeof Notification === "undefined" ? "default" : Notification.permission;
 
   // PERMISSION DENIED IS TERMINAL FROM HERE, and saying so is the honest thing. The platform will
   // not re-prompt after a denial, so a button would do nothing — the remedy is outside quince.
   if (permission === "denied") {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            Notifications are blocked for quince
-            <Badge tone="warn">Blocked</Badge>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="text-fg-muted">
+      <section>
+        <SectionHeading className="flex items-center gap-2">
+          Notifications are blocked for quince
+          <Badge tone="warn">Blocked</Badge>
+        </SectionHeading>
+        <div className="mt-3 space-y-3 text-sm text-muted">
           <p>
-            You turned notifications off for quince. quince cannot ask again — turn them back on in
-            iOS Settings → Notifications → quince, then come back to this page.
+            You turned notifications off for quince. quince cannot ask again —
+            turn them back on in iOS Settings → Notifications → quince, then
+            come back to this page.
           </p>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
     );
   }
 
   const live = (q.data?.subscriptions ?? []).filter((s) => s.state === "live");
-  const expired = (q.data?.subscriptions ?? []).filter((s) => s.state !== "live");
+  const expired = (q.data?.subscriptions ?? []).filter(
+    (s) => s.state !== "live",
+  );
 
   // THIS DEVICE, NOT ANY DEVICE. `live.length > 0` was answering "is somebody subscribed" and
   // rendering it as "you are" — see `useThisDevice` for what that cost on a second device.
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            This device
-            {thisDevice.on ? <Badge tone="ok">On</Badge> : <Badge tone="neutral">Off</Badge>}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-fg-muted">
+      <section>
+        <SectionHeading className="flex items-center gap-2">
+          This device
           {thisDevice.on ? (
-            <p>quince will notify this device when a backup is due or needs you.</p>
+            <Badge tone="ok">On</Badge>
           ) : (
-            <p>Turn on notifications to hear when a device is due for a backup, or needs you.</p>
+            <Badge tone="neutral">Off</Badge>
+          )}
+        </SectionHeading>
+        <div className="mt-3 space-y-3 text-sm text-muted">
+          {thisDevice.on ? (
+            <p>
+              quince will notify this device when a backup is due or needs you.
+            </p>
+          ) : (
+            <p>
+              Turn on notifications to hear when a device is due for a backup,
+              or needs you.
+            </p>
           )}
           {/* THE PROMPT MUST HANG OFF A REAL TAP — a platform requirement, not a preference, which
               is why this is a button and not something the page does on mount. */}
           {!thisDevice.on && (
             <Button
-              onClick={() => q.data && subscribe.mutate(q.data.vapid_public_key)}
+              onClick={() =>
+                q.data && subscribe.mutate(q.data.vapid_public_key)
+              }
               disabled={!q.data || subscribe.isPending}
             >
               {subscribe.isPending ? "Turning on…" : "Turn on notifications"}
@@ -254,11 +268,13 @@ function NotificationsControls() {
                   )}
                   {sendTest.data.results.map((r) => (
                     <li key={r.label + r.state}>
-                      {r.state === "sent" && <span>Sent to {r.label}. Check its lock screen.</span>}
+                      {r.state === "sent" && (
+                        <span>Sent to {r.label}. Check its lock screen.</span>
+                      )}
                       {r.state === "expired" && (
                         <span className="text-warn">
-                          {r.label} is no longer reachable — turn notifications on again on that
-                          device.
+                          {r.label} is no longer reachable — turn notifications
+                          on again on that device.
                         </span>
                       )}
                       {r.state === "error" && (
@@ -271,7 +287,11 @@ function NotificationsControls() {
                               over the top of it threw away the one fact a person could act on, and
                               made a permanent misconfiguration look like a transient blip. Found on
                               the first real hardware send, 2026-08-18. */}
-                          {r.error ? <> {r.error}</> : <> Try again in a moment.</>}
+                          {r.error ? (
+                            <> {r.error}</>
+                          ) : (
+                            <> Try again in a moment.</>
+                          )}
                         </span>
                       )}
                     </li>
@@ -279,66 +299,78 @@ function NotificationsControls() {
                 </ul>
               )}
               {sendTest.isError && (
-                <p className="text-danger">quince could not send the test. Try again in a moment.</p>
+                <p className="text-danger">
+                  quince could not send the test. Try again in a moment.
+                </p>
               )}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
       {/* AN EXPIRED SUBSCRIPTION IS SHOWN, NOT HIDDEN (spec D8). A device that quietly stopped
           receiving is the failure whose first symptom would otherwise be a missed backup, and the
           remedy — re-enable on THAT device — needs the device named. */}
       {expired.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              A device stopped receiving
-              <Badge tone="warn">Needs attention</Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-fg-muted">
+        <section>
+          <SectionHeading className="flex items-center gap-2">
+            A device stopped receiving
+            <Badge tone="warn">Needs attention</Badge>
+          </SectionHeading>
+          <div className="mt-3 space-y-3 text-sm text-muted">
             <p>
-              These devices are no longer reachable. Open quince on each one and turn notifications
-              on again.
+              These devices are no longer reachable. Open quince on each one and
+              turn notifications on again.
             </p>
             <ul className="space-y-1">
               {expired.map((s) => (
-                <li key={s.id} className="flex items-center justify-between gap-3">
+                <li
+                  key={s.id}
+                  className="flex items-center justify-between gap-3"
+                >
                   <span>{s.label}</span>
-                  <Button variant="ghost" onClick={() => unsubscribe.mutate(s.id)}>
+                  <Button
+                    variant="ghost"
+                    onClick={() => unsubscribe.mutate(s.id)}
+                  >
                     Remove
                   </Button>
                 </li>
               ))}
             </ul>
-          </CardContent>
-        </Card>
+          </div>
+        </section>
       )}
 
       {live.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Devices receiving notifications</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <section>
+          <SectionHeading>Devices receiving notifications</SectionHeading>
+          <div className="mt-3 space-y-3 text-sm text-muted">
             <ul className="space-y-1 text-fg-muted">
               {live.map((s) => (
-                <li key={s.id} className="flex items-center justify-between gap-3">
+                <li
+                  key={s.id}
+                  className="flex items-center justify-between gap-3"
+                >
                   {/* THE CURRENT DEVICE IS MARKED. Two Macs, or two iPhones, produce the same
                       label, and "Turn off" beside the wrong one is a destructive misclick. */}
                   <span>
                     {s.label}
-                    {s.id === thisDevice.id ? <span className="text-muted"> · this device</span> : null}
+                    {s.id === thisDevice.id ? (
+                      <span className="text-muted"> · this device</span>
+                    ) : null}
                   </span>
-                  <Button variant="ghost" onClick={() => unsubscribe.mutate(s.id)}>
+                  <Button
+                    variant="ghost"
+                    onClick={() => unsubscribe.mutate(s.id)}
+                  >
                     Turn off
                   </Button>
                 </li>
               ))}
             </ul>
-          </CardContent>
-        </Card>
+          </div>
+        </section>
       )}
     </div>
   );
