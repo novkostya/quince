@@ -29,7 +29,10 @@ export function useNotifications() {
 // alphabet substitutions and the padding are mandatory. Getting this wrong yields
 // `InvalidCharacterError` at subscribe time, which names neither the field nor the cause.
 function urlBase64ToUint8Array(base64url: string): Uint8Array {
-  const padded = base64url.padEnd(base64url.length + ((4 - (base64url.length % 4)) % 4), "=");
+  const padded = base64url.padEnd(
+    base64url.length + ((4 - (base64url.length % 4)) % 4),
+    "=",
+  );
   const raw = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
   const out = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
@@ -66,7 +69,11 @@ function deviceLabel(): string {
             : /Linux/.test(ua)
               ? "Linux"
               : "Browser";
-  const browser = /CriOS|Chrome/.test(ua) ? "Chrome" : /Firefox/.test(ua) ? "Firefox" : "Safari";
+  const browser = /CriOS|Chrome/.test(ua)
+    ? "Chrome"
+    : /Firefox/.test(ua)
+      ? "Firefox"
+      : "Safari";
   return `${platform} · ${browser}`;
 }
 
@@ -83,7 +90,11 @@ export function useSubscribe() {
       if (permission !== "granted") {
         // A REFUSAL IS NOT AN ERROR TO SWALLOW. The caller renders the reason, because "denied" and
         // "dismissed" have different remedies and only the user can act on either.
-        throw new Error(permission === "denied" ? "permission_denied" : "permission_dismissed");
+        throw new Error(
+          permission === "denied"
+            ? "permission_denied"
+            : "permission_dismissed",
+        );
       }
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.subscribe({
@@ -94,11 +105,17 @@ export function useSubscribe() {
         applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
       });
       const json = sub.toJSON();
-      const created = await api.post<{ id: string }>("/api/notifications/subscriptions", {
-        endpoint: sub.endpoint,
-        keys: { p256dh: json.keys?.p256dh ?? "", auth: json.keys?.auth ?? "" },
-        label: deviceLabel(),
-      });
+      const created = await api.post<{ id: string }>(
+        "/api/notifications/subscriptions",
+        {
+          endpoint: sub.endpoint,
+          keys: {
+            p256dh: json.keys?.p256dh ?? "",
+            auth: json.keys?.auth ?? "",
+          },
+          label: deviceLabel(),
+        },
+      );
       // THE ID IS WHAT MAKES "this device" ANSWERABLE LATER. It is not a capability — the endpoint
       // and keys never leave this function — so the browser may keep it.
       rememberSubscription(created.id);
@@ -118,12 +135,18 @@ export function useUnsubscribe() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      await api.del<void>(`/api/notifications/subscriptions/${encodeURIComponent(id)}`);
-      if (id === rememberedSubscription()) {
-        // Only when it is OUR row. Turning off another device from this one must not make this
-        // browser forget its own subscription — which would then render as Off while still live.
-        forgetSubscription();
+      const mine = id === rememberedSubscription();
+      await api.del<void>(
+        `/api/notifications/subscriptions/${encodeURIComponent(id)}`,
+      );
+      if (!mine) {
+        // ANOTHER DEVICE'S ROW IS A SERVER-SIDE REMOVAL AND NOTHING ELSE. This used to fall through
+        // to the browser half below unconditionally, so turning off the iPhone FROM the Mac
+        // cancelled the MAC's own push registration — leaving the Mac subscribed server-side and
+        // silent, which is the exact state D8's expiry machinery exists to make visible.
+        return;
       }
+      forgetSubscription();
       // BEST EFFORT, AND AFTER the server call. If the browser half fails the row is still gone
       // server-side, which is the half that decides whether anything is sent.
       try {
@@ -134,7 +157,11 @@ export function useUnsubscribe() {
         /* The platform's own bookkeeping; nothing quince can do about it and nothing it breaks. */
       }
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: notificationsKey }),
+    // `onSettled`, NOT `onSuccess`. A DELETE that 404s means this page is showing a row the server
+    // no longer has — which is exactly when a refetch is most needed, and exactly when `onSuccess`
+    // does nothing. Operator-reported 2026-08-18: *"turn off there does nothing"*, from a list that
+    // had gone stale behind a device re-subscribing.
+    onSettled: () => qc.invalidateQueries({ queryKey: notificationsKey }),
   });
 }
 
@@ -151,7 +178,8 @@ export function useUnsubscribe() {
 export function useSendTest() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.post<NotificationsTestResponse>("/api/notifications/test", {}),
+    mutationFn: () =>
+      api.post<NotificationsTestResponse>("/api/notifications/test", {}),
     onSuccess: () => qc.invalidateQueries({ queryKey: notificationsKey }),
   });
 }
@@ -223,6 +251,8 @@ export function useThisDevice() {
   });
 
   const id = rememberedSubscription();
-  const mine = (q.data?.subscriptions ?? []).find((s) => s.id === id && s.state === "live");
+  const mine = (q.data?.subscriptions ?? []).find(
+    (s) => s.id === id && s.state === "live",
+  );
   return { on: Boolean(browser.data && mine), id: mine?.id ?? null };
 }
