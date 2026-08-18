@@ -2,13 +2,14 @@ import { useId, useState } from "react";
 import type { ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Config, ConfigFieldError } from "@/lib/types";
-import { configKey, updateConfig } from "@/lib/config";
+import { configKey, updateConfig, useConfigDraft } from "@/lib/config";
 import { APIError } from "@/lib/api";
 import { setTheme, type Theme } from "@/lib/theme";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { ConfigStaleNotice } from "./ConfigStaleNotice";
 
 // Field pairs a visible <Label> with its control, and ASSOCIATES THEM (quince#629).
 //
@@ -78,64 +79,13 @@ function Field({
 // nothing asserts the TS `Config` type covers every Go key.
 export function ConfigEditor({ config }: { config: Config }) {
   const qc = useQueryClient();
-  const [draft, setDraft] = useState<Config>(config);
+  // THE DRAFT, AND THE MACHINERY THAT KEEPS IT HONEST ABOUT THE SERVER MOVING (quince#764), now
+  // live in `useConfigDraft` — `/settings/notifications` edits the same document since quince#1212,
+  // and two forms each carrying their own copy of that logic is the defect rather than a variation
+  // on it. The reasoning that grew here moved with it; read it there before changing either caller.
+  const { draft, setDraft, staleElsewhere, takeServerVersion, adopt } = useConfigDraft(config);
   const [errors, setErrors] = useState<ConfigFieldError[]>([]);
   const [saved, setSaved] = useState(false);
-
-  // THE DRAFT FOLLOWS THE SERVER (quince#764). `useState(config)` captures its argument on FIRST
-  // MOUNT and ignores every later value, so without this the editor can hold a document the server
-  // stopped serving minutes ago — and `PUT /api/config` is a FULL-DOCUMENT REPLACE, so saving one
-  // field ships the whole stale draft and reverts everything that changed underneath it.
-  //
-  // Observed on the staging stand: two storages hand-edited to `backend: hardlink`, quince restarted,
-  // one unrelated save, and both were back to `auto` on disk — while the preview panel showed the
-  // correct file. Two documents on one screen, disagreeing.
-  //
-  // ADJUSTED DURING RENDER, NOT IN AN EFFECT. This is React's own pattern for state derived from
-  // props; an effect renders once with the stale value first, and on this form that frame is a save
-  // the user can click.
-  //
-  // ONLY WHEN THE FORM IS CLEAN, and that half is load-bearing. React Query refetches on window
-  // focus, so an unconditional re-sync would wipe whatever was being typed the moment you switched
-  // tabs — trading this bug for a second silent loss in the opposite direction. A dirty form keeps
-  // its draft; TELLING the user it no longer matches the server is quince#764's PR 2, and until that
-  // lands a dirty form can still save a stale section.
-  //
-  // `config !== synced` is a REFERENCE test, deliberately: React Query's structural sharing preserves
-  // identity across a refetch whose content is unchanged, so this fires when the document actually
-  // moved rather than on every poll.
-  // THE STRINGIFY COMPARISON IS KEY-ORDER SENSITIVE, and a false `dirty` silently restores
-  // quince#764 (architect note on quince#765). It is safe because BOTH SIDES COME FROM THE SAME
-  // SERVER DOCUMENT and are only ever updated by SPREAD, which preserves key insertion order — so a
-  // clean draft stringifies identically to `synced`. A future handler that rebuilds a nested section
-  // from an object literal in a different key order breaks that: the form reads dirty when nobody
-  // touched it, the re-sync stops, and the bug is back for that section **with no test failing**,
-  // because the tests reach this through spreads. Written down because the assumption is invisible
-  // and its failure is silent.
-  const [synced, setSynced] = useState<Config>(config);
-  const [staleElsewhere, setStaleElsewhere] = useState(false);
-  if (config !== synced) {
-    const dirty = JSON.stringify(draft) !== JSON.stringify(synced);
-    setSynced(config);
-    if (dirty) {
-      // THE FORM IS NOT OVERWRITTEN AND THE USER IS TOLD. Keeping the draft protects the edit in
-      // progress; saying so is what stops the save silently shipping a stale section — the half PR 1
-      // deliberately left open.
-      setStaleElsewhere(true);
-    } else {
-      setDraft(config);
-      setStaleElsewhere(false);
-    }
-  }
-
-  // Taking the server's document DISCARDS the edit in progress, so it is an explicit action rather
-  // than something that happens to you — which is the whole distinction this pair of changes draws.
-  const takeServerVersion = () => {
-    setDraft(config);
-    setSynced(config);
-    setStaleElsewhere(false);
-    setErrors([]);
-  };
 
   const mutation = useMutation({
     mutationFn: (c: Config) => updateConfig(c),
@@ -143,13 +93,8 @@ export function ConfigEditor({ config }: { config: Config }) {
       setErrors([]);
       setSaved(true);
       setTheme(resp.config.ui.theme as Theme);
-      // THE SAVE ENDS THE DIVERGENCE, whichever way it went. The response IS the new server document
-      // — `PUT` returns the same body `GET` does — so adopting it here leaves the form, `synced` and
-      // the server agreeing, and clears a notice whose cause the save has just resolved. Without
-      // this, a form that was stale-then-saved would keep warning about a document it has replaced.
-      setDraft(resp.config);
-      setSynced(resp.config);
-      setStaleElsewhere(false);
+      // The response IS the new server document, so adopting it ends any divergence (see `adopt`).
+      adopt(resp.config);
       void qc.invalidateQueries({ queryKey: configKey });
     },
     onError: (err: unknown) => {
@@ -301,30 +246,13 @@ export function ConfigEditor({ config }: { config: Config }) {
         )}
       </Field>
 
-      {/* THE CONFIGURATION MOVED WHILE YOU WERE EDITING (quince#764). Above the Save row on purpose:
-          it is a fact about what Save will do, and a reader who meets it after pressing the button
-          has already shipped the stale section.
-
-          It says what will happen rather than only what happened, because `PUT /api/config` is a
-          full-document replace — saving now overwrites the change somebody else made. The action is
-          the other direction and is labelled with its cost: taking the new version discards this
-          edit. Neither side is dropped without being chosen, which is the rule this pair of changes
-          exists to establish. */}
       {staleElsewhere ? (
-        <div
-          role="status"
-          className="rounded-card border border-line bg-accent-soft p-3 text-sm text-warn"
-        >
-          <div className="font-medium">The configuration changed elsewhere</div>
-          <p className="mt-1 text-xs">
-            Something else — a hand-edit, the CLI, another tab — changed <code>config.yml</code> since
-            this form loaded. Saving now replaces it with what you see here. Your unsaved edits are
-            kept until you choose.
-          </p>
-          <Button type="button" className="mt-2" onClick={takeServerVersion}>
-            Discard my edits and load the new version
-          </Button>
-        </div>
+        <ConfigStaleNotice
+          onTakeServerVersion={() => {
+            takeServerVersion();
+            setErrors([]);
+          }}
+        />
       ) : null}
 
       <div className="flex items-center gap-3">
