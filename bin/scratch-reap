@@ -11,14 +11,34 @@
 # three hold, and any one of them failing leaves it alone:
 #
 #   1. the working tree is CLEAN            — nothing uncommitted
-#   2. every commit is reachable from origin/main — so the work exists in the repository, not just here
+#   2. every commit is IN main BY PATCH     — so the work exists in the repository, not just here
 #   3. its branch is GONE from origin        — so nobody is still reviewing it
 #
-# (2) is deliberately not "is it pushed". A merged branch is deleted, so its upstream ref no longer
-# resolves and an "unpushed?" check against `@{u}` would either error or report everything as
-# unpushed. Reachability from `origin/main` answers the question that actually matters — does this
-# work exist anywhere but here — and it answers it the same way for a merged branch and a rebased
-# one.
+# (2) IS A PATCH-ID QUESTION AND NOT A REACHABILITY ONE, which is the whole of quince#823. It was
+# `rev-list --count origin/main..<branch>`, and that is wrong for EVERY merge strategy this project
+# permits. §6 mandates rebase-and-merge and allows squash; both REWRITE the commit, so the object on
+# `main` has a different sha and the local commit is not an ancestor of anything. The count is
+# therefore non-zero for a branch whose work landed hours ago, and the clone is kept forever.
+#
+# THE COST WAS MEASURED ON BOTH BOXES BEFORE IT WAS UNDERSTOOD: 70 of 126 clones on the runner —
+# 9.7 GB — were kept with their branch gone from origin AND their change on `main`. On the architect
+# box the dominant reason differed (detached HEAD, 58%), and this criterion was present there too.
+# Two independent measurements, converging on one criterion.
+#
+# `git cherry origin/main <branch>` asks the question that was meant: it prints `-` for a commit
+# whose PATCH is already upstream and `+` for one that is not, so a rebased commit matches its
+# rewritten twin. Measured on three real merged branches (quince#1231, #1233, #1236) and one
+# unmerged: `rev-list` said 2, 2, 1 commits ahead where `cherry` said all `-`; the unmerged branch
+# reported `+` from both. Same answer where it mattered, opposite answer where it was broken.
+#
+# WHAT IT STILL WILL NOT REAP, and this is a limit rather than an oversight: a SQUASH of several
+# commits. `cherry` compares patch-ids one commit at a time, and a squashed commit's patch is the
+# SUM of the branch's — matching nothing individually. Those clones stay, correctly under this
+# tool's own rule, since it cannot prove the work exists elsewhere. Rebase is the documented
+# default, so this is the exception rather than the common case, and it fails in the safe direction.
+#
+# "Is it pushed" is still the wrong question, for the reason it always was: a merged branch is
+# deleted, so `@{u}` no longer resolves and an unpushed check would report everything as unpushed.
 #
 # IT REPORTS WHAT IT SKIPPED AND WHY. A reaper that silently declines is the same defect class as a
 # check that cannot fail: the disk stays full and nobody knows which clone is holding it, so the
@@ -40,7 +60,7 @@ usage: scratch-reap [--prune] [--root <dir>] [--quiet]
   --prune       actually delete. Without it, nothing is removed and every decision is printed.
   --quiet       print only what would be, or was, deleted.
 
-  A clone is deleted only when ALL of: clean tree · every commit reachable from origin/main ·
+  A clone is deleted only when ALL of: clean tree · every commit patch already in origin/main ·
   branch gone from origin. Anything else is kept, with the reason.
 
   exit 0 nothing to do or done · 1 usage/refusal · 2 DID NOT RUN — judged no clones at all while
@@ -123,11 +143,24 @@ for d in "$ROOT"/*; do
 		continue
 	fi
 
-	ahead=$(git -C "$d" rev-list --count origin/main.."$branch" 2>/dev/null || printf 1)
+	# PATCH-ID, NOT REACHABILITY (quince#823). `git cherry` prints `-` for a commit whose patch is
+	# already upstream and `+` for one that is not, so a rebase-merged commit is recognised despite
+	# its sha having changed. `rev-list --count origin/main..<branch>` counted every such commit as
+	# outstanding, which kept 70 of 126 finished clones on one box and 9.7 GB with them.
+	#
+	# A FAILED COMPARISON IS A KEEP, never a zero. `grep -c` prints 0 and exits 1 when nothing
+	# matches, which is the answer we want for a fully-landed branch — so the two cases have to be
+	# told apart by whether `cherry` itself succeeded, not by the count.
+	if ! cherry=$(git -C "$d" cherry origin/main "$branch" 2>/dev/null); then
+		kept=$((kept + 1))
+		say "  KEEP   $name — could not compare $branch against origin/main, so whether its work landed is UNKNOWN"
+		continue
+	fi
+	ahead=$(printf '%s\n' "$cherry" | grep -c '^+' || true)
 	case "$ahead" in '' | *[!0-9]*) ahead=1 ;; esac
 	if [ "$ahead" -ne 0 ]; then
 		kept=$((kept + 1))
-		say "  KEEP   $name — $ahead commit(s) on $branch not reachable from origin/main"
+		say "  KEEP   $name — $ahead commit(s) on $branch whose patch is not in origin/main"
 		continue
 	fi
 
@@ -140,10 +173,10 @@ for d in "$ROOT"/*; do
 	if [ "$PRUNE" = yes ]; then
 		rm -rf "$d"
 		reaped=$((reaped + 1))
-		printf '  REAPED %s — %s is gone from origin and every commit is in main\n' "$name" "$branch"
+		printf '  REAPED %s — %s is gone from origin and every commit has its patch in main\n' "$name" "$branch"
 	else
 		reaped=$((reaped + 1))
-		printf '  would reap %s — %s is gone from origin and every commit is in main\n' "$name" "$branch"
+		printf '  would reap %s — %s is gone from origin and every commit has its patch in main\n' "$name" "$branch"
 	fi
 done
 

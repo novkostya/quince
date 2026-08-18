@@ -72,6 +72,24 @@ git -C "$ROOT/open" push -q origin r1/open
 mkdir -p "$ROOT/notaclone"
 printf 'notes\n' >"$ROOT/notaclone/notes.md"
 
+
+# (6) REBASE-MERGED — THE CASE THE SUITE DID NOT HAVE, AND THE ONE THE REAPER MEETS IN REALITY
+# (quince#823). Case (1) resets to `origin/main`, so its branch is a fast-forward and the old
+# reachability test answered it correctly; that is why this suite was green while the tool reaped
+# 0 of 126 clones on the runner box and 0 of 150 on the architect box.
+#
+# Canon mandates rebase-and-merge, which REWRITES the commit: the object on `main` carries the same
+# diff under a different sha. `rev-list --count origin/main..<branch>` counts that as outstanding
+# work forever. Simulated here the way the forge does it — the same patch committed onto main under
+# a different message, and the branch never pushed, standing in for `--delete-branch`.
+clone_at rebased r1/rebased
+printf 'landed\n' >>"$ROOT/rebased/f"
+git -C "$ROOT/rebased" commit -qam "the work, as the author wrote it"
+git -C "$WORK/seed" pull -q origin main
+printf 'landed\n' >>"$WORK/seed/f"
+git -C "$WORK/seed" commit -qam "the work, as the forge rewrote it"
+git -C "$WORK/seed" push -q origin main
+
 out=$WORK/out
 "$REAP" --root "$ROOT" >"$out" 2>&1 || true
 
@@ -83,6 +101,7 @@ assert_line() {
 assert_line 'would reap finished' "a merged-and-deleted clone is reaped" "did not offer to reap the finished clone"
 assert_line 'KEEP   dirty' "uncommitted changes are KEPT" "would have deleted uncommitted work"
 assert_line 'KEEP   ahead' "commits not in main are KEPT" "would have deleted unmerged commits"
+assert_line 'would reap rebased' "a REBASE-MERGED clone is reaped — same patch, different sha" "kept a clone whose work is on main under a rewritten sha; this is quince#823, the defect that held 9.7 GB"
 assert_line 'KEEP   open' "a branch still on origin is KEPT" "would have deleted a live branch"
 assert_line 'skip   notaclone' "a non-clone is skipped and counted separately" "mishandled a non-clone"
 
@@ -94,9 +113,13 @@ else
 fi
 
 # And --prune must actually act, or every refusal above is vacuous.
+# `rebased` is in the removed set too, and naming it here is what makes this assertion cover the
+# quince#823 case at the ACTING end rather than only in the report — a reaper that prints "would
+# reap" and then declines to delete would pass every line above it.
 "$REAP" --root "$ROOT" --prune >"$out.p" 2>&1 || true
-if [ ! -d "$ROOT/finished" ] && [ -d "$ROOT/dirty" ] && [ -d "$ROOT/ahead" ] && [ -d "$ROOT/open" ]; then
-	ok "--prune removes exactly the finished clone and nothing else"
+if [ ! -d "$ROOT/finished" ] && [ ! -d "$ROOT/rebased" ] &&
+	[ -d "$ROOT/dirty" ] && [ -d "$ROOT/ahead" ] && [ -d "$ROOT/open" ]; then
+	ok "--prune removes exactly the two finished clones and nothing else"
 else
 	bad "--prune removed the wrong set"
 	cat "$out.p"
