@@ -128,4 +128,42 @@ describe("the certificate confirmation page", () => {
       screen.queryByRole("link", { name: /back to the certificate step/i }),
     ).not.toBeInTheDocument();
   });
+
+  // DECLINING IS AN ANSWER, NOT A NAVIGATION (quince#1158). The page used to offer one button and a
+  // link that merely went back — leaving the trial running, on an origin the trial itself was what
+  // made reachable.
+  it("ends the trial when the answer is no", async () => {
+    const post = vi.spyOn(api, "post").mockResolvedValue({ cancelled: true });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /No, drop it/i }));
+
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith("/api/onboarding/certificate/cancel", { token: "tok-abc" }),
+    );
+    expect(await screen.findByText(/Dropped\./)).toBeInTheDocument();
+    expect(screen.getByText(/nothing\s+was saved/i)).toBeInTheDocument();
+  });
+
+  // AND THE WAY BACK LEAVES THE DYING ORIGIN. This page is on the https origin the trial created; a
+  // router link would keep the user there after the certificate serving it has gone.
+  it("sends you back to the plain-http address after declining", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({ cancelled: true });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /No, drop it/i }));
+
+    const back = await screen.findByRole("link", { name: /Back to the certificate step/i });
+    expect(back.getAttribute("href")).toMatch(/^http:\/\//);
+    expect(back.getAttribute("href")).toContain("/onboarding/https/certificate");
+  });
+
+  // THE STRAY LINK IS GONE from the live state: going back is one of the two answers now, and the
+  // one that leaves a trial running was the version worth removing.
+  it("offers no bare link out while the trial is live", async () => {
+    renderPage();
+    await screen.findByRole("button", { name: /Yes, keep it/i });
+
+    expect(screen.queryByRole("link", { name: /Back to the certificate step/i })).not.toBeInTheDocument();
+  });
 });

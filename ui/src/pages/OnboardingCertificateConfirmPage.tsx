@@ -22,7 +22,7 @@ import { api } from "@/lib/api";
 // window where anyone reaching the port could claim the whole thing outright (contracts §1).
 export function OnboardingCertificateConfirmPage() {
   const [token, setToken] = useState<string | null>(null);
-  const [state, setState] = useState<"idle" | "busy" | "done">("idle");
+  const [state, setState] = useState<"idle" | "busy" | "done" | "declined">("idle");
   const [error, setError] = useState<string | null>(null);
   const [secure, setSecure] = useState<boolean | null>(null);
 
@@ -45,6 +45,30 @@ export function OnboardingCertificateConfirmPage() {
     }
   }
 
+  // DECLINING IS THE OTHER ANSWER, and it ends the trial rather than navigating away from it. The
+  // link that used to sit at the bottom of this page merely went back to the certificate step — on
+  // THIS origin, which the trial certificate is what makes reachable — so the user would have been
+  // left reading a form served by the pair they had just refused, on an address that stops existing
+  // when the window closes.
+  async function decline() {
+    setState("busy");
+    setError(null);
+    try {
+      await api.post("/api/onboarding/certificate/cancel", { token });
+      setState("declined");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setState("idle");
+    }
+  }
+
+  // WHERE "NO" LEADS: the http origin, on this host and port, which is where the user came from and
+  // where quince answers once the trial is dropped. Composed rather than remembered — this page is
+  // on a different origin from the one that applied, so nothing it could have stored reaches here.
+  function plainOrigin(): string {
+    return `http://${window.location.host}/onboarding/https/certificate`;
+  }
+
   return (
     <div className="min-h-dvh bg-bg pb-16 pl-[max(1.5rem,env(safe-area-inset-left))] pr-[max(1.5rem,env(safe-area-inset-right))] pt-[max(2.5rem,env(safe-area-inset-top))] text-fg">
       <div className="mx-auto w-full max-w-2xl">
@@ -56,6 +80,21 @@ export function OnboardingCertificateConfirmPage() {
             This link has no confirmation token, so there is nothing for it to confirm. Go back to the
             certificate step and try again — the link it gives you carries one.
           </p>
+        ) : state === "declined" ? (
+          <div role="status" className="mt-4 rounded-card border border-line bg-card px-3 py-3 text-sm">
+            <p>
+              <strong>Dropped.</strong> quince has gone back to the certificate it had, and nothing
+              was saved.
+            </p>
+            {/* THE WAY BACK IS AN ORDINARY LINK ON THE http ORIGIN, not a router navigation: this
+                page is on the https origin the trial created, and that origin has just stopped
+                answering. A client-side route would leave the user on a dead address. */}
+            <p className="mt-3">
+              <a className="underline" href={plainOrigin()}>
+                Back to the certificate step
+              </a>
+            </p>
+          </div>
         ) : state === "done" ? (
           <div role="status" className="mt-4 rounded-card border border-ok bg-card px-3 py-3 text-sm">
             <p>
@@ -95,7 +134,18 @@ export function OnboardingCertificateConfirmPage() {
             ) : null}
             <div className="mt-4">
               <Button onClick={() => void confirm()} disabled={state === "busy" || secure === false}>
-                {state === "busy" ? "Confirming…" : "Yes, keep it"}
+                {state === "busy" ? "Working…" : "Yes, keep it"}
+              </Button>
+              {/* THE OTHER ANSWER, AND IT ENDS THE TRIAL. Declining used to mean waiting ten minutes
+                  or navigating away and leaving it running. It is offered only here because only
+                  here is it safe: reaching this page proves the trial certificate works, so the
+                  request has a channel to travel over — which the apply page does not. */}
+              <Button
+                variant="outline"
+                onClick={() => void decline()}
+                disabled={state === "busy" || secure === false}
+              >
+                No, drop it
               </Button>
             </div>
             {error ? (
@@ -110,16 +160,10 @@ export function OnboardingCertificateConfirmPage() {
           </>
         )}
 
-        {/* BACKWARDS IS OFFERED ONLY WHILE THERE IS SOMETHING TO GO BACK FOR. Once the pair is kept
-            the step is over, and a link labelled *back to the certificate step* on a finished screen
-            reads as the only way out of it — which is how a success state becomes a dead end. */}
-        {state === "done" ? null : (
-          <p className="mt-6 text-sm">
-            <Link className="underline" to="/onboarding/https/certificate">
-              Back to the certificate step
-            </Link>
-          </p>
-        )}
+        {/* NO STRAY LINK BACK. It pointed at the certificate step on THIS origin — the one the trial
+            certificate makes reachable and the window closing takes away — and it left the trial
+            running, which is what made it worse than nothing. Going back is now an ANSWER: "No, drop
+            it" ends the trial and then offers the http address, where quince will still be. */}
       </div>
     </div>
   );

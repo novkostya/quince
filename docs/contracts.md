@@ -572,6 +572,15 @@ POST /api/onboarding/certificate/confirm → {token}
      // nothing else. csrfExempt, because it arrives on a DIFFERENT ORIGIN from
      // the page that applied. 409 not_armed covers all of: nothing running, the
      // window closed, superseded by a later apply.
+POST /api/onboarding/certificate/cancel  → {token}
+     → 200 {cancelled: true, config_written: false}
+     // PRE-AUTH, 409 once auth.Configured(). THE CONFIRM'S OTHER ANSWER, and
+     // REFUSED WITH 426 UNLESS r.TLS != nil for the same reason: the page that
+     // declines is reached over the trial certificate, so arriving there is the
+     // proof the channel works. csrfExempt, same different-origin argument.
+     // IT WRITES NOTHING — it puts the Keeper back to the pair config.yml already
+     // names, which is what leaves it safe pre-auth. 409 not_armed covers all of:
+     // nothing running, the window closed, superseded by a later apply.
 GET  /api/onboarding/probe/nonce  → {nonce}
      // PRE-AUTH, SAME-ORIGIN, and NEVER CORS-readable. The asymmetry IS the gate.
 GET  /api/onboarding/probe?nonce= → {nonce, detected}
