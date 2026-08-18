@@ -15,7 +15,11 @@ const APPLIED: CertificateApplied = {
   confirm_origin: "https://quince.example:8968",
   confirm_host_covered: true,
   confirm_token: "tok-abc",
-  expires_at: "2026-08-14T14:10:00Z",
+  // RELATIVE TO NOW, NOT A FIXED INSTANT. A hardcoded deadline is in the past on every run after the
+  // day it was written, so every test using this fixture would silently exercise the EXPIRED trial
+  // rather than the live one it means to describe. The tests that care about the boundary set their
+  // own deadline explicitly.
+  expires_at: futureISO(600),
   expires_seconds: 600,
   config_written: false,
 };
@@ -140,6 +144,48 @@ describe("the certificate trial", () => {
 // direction 2026-08-18. With the name left empty the confirm origin is the address this page is on,
 // so a pair that does not cover it produces a browser warning on every visit, for as long as the
 // install stands. The remedy is one field away, so the control stays visible and says which.
+// THE WINDOW CLOSING IS A STATE, NOT A NUMBER REACHING ZERO. Found on the rig, 2026-08-18: a page
+// left open past ten minutes read *"quince is serving it now. Confirm within no time left to keep
+// it."* — the pair had rolled back, there was nothing to confirm, and the advice to wait described
+// something that had already happened.
+describe("when the trial window has closed", () => {
+  it("says the trial is over and that nothing was written", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({ ...APPLIED, expires_at: futureISO(-5) });
+    renderApply();
+    fireEvent.click(screen.getByRole("button", { name: /Try it now/i }));
+
+    expect(await screen.findByText(/gone back to what it was serving/i)).toBeInTheDocument();
+    expect(screen.getByText(/is exactly as it was/i)).toBeInTheDocument();
+    // AND STOPS ASSERTING A LIVE TRIAL — the three claims that were false at zero.
+    expect(screen.queryByText(/quince is serving it now/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/no time left/i)).not.toBeInTheDocument();
+    // THE DEAD LINK IS GONE TOO. Offering it invites a 409 the user did nothing to deserve.
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  // A WAY BACK, because the alternative is reloading the page and retyping two paths. Pressing it
+  // returns to the pre-apply card with the same files still in hand.
+  it("offers another attempt, which returns to the trial offer", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({ ...APPLIED, expires_at: futureISO(-5) });
+    renderApply();
+    fireEvent.click(screen.getByRole("button", { name: /Try it now/i }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /Try again/i }));
+    expect(screen.getByRole("button", { name: /Try it now/i })).toBeInTheDocument();
+    expect(screen.queryByText(/gone back to what it was serving/i)).not.toBeInTheDocument();
+  });
+
+  // AND A LIVE TRIAL IS UNTOUCHED — the countdown still renders while there is time on it.
+  it("still counts down while the window is open", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({ ...APPLIED, expires_at: futureISO(125) });
+    renderApply();
+    fireEvent.click(screen.getByRole("button", { name: /Try it now/i }));
+
+    expect(await screen.findByText(/quince is serving it now/i)).toBeInTheDocument();
+    expect(screen.queryByText(/gone back to what it was serving/i)).not.toBeInTheDocument();
+  });
+});
+
 describe("the dead-end guard", () => {
   it("refuses to offer a trial that would point at an uncovered address", () => {
     renderApply({ hostname: "", currentHost: "192.0.2.10", currentHostCovered: false });
