@@ -150,3 +150,56 @@ it("the Sign-in row is constrained to the same width as the config form", async 
   expect(maxWidth(row)).toBeDefined();
   expect(maxWidth(row)).toBe(maxWidth(form as Element));
 });
+
+// THE ROUTE EXISTED AND NOTHING LINKED TO IT (Operator-reported 2026-08-18). qn.12 registered
+// `/settings/notifications` in the router and never gave Settings an entry, so the only way to the
+// whole notifications feature was typing the URL. A screen nobody can reach is a screen that does
+// not exist, and no existing test could fail: the router had the route, the page rendered, and its
+// own suite mounted it directly.
+it("offers a way to reach Notifications, which is the only route to the feature", async () => {
+  vi.spyOn(api, "get").mockResolvedValue({
+    config: {
+      backup: { preferred_transport: "usb", require_encryption: true },
+      storage: null,
+      sessions: { ttl_minutes: 60, allow_insecure_transport: false },
+      reconcile: { interval_minutes: 360 },
+      ui: { theme: "system" },
+    },
+    warnings: [],
+    source: { path: "/data/config.yml", mtime: null },
+  });
+
+  renderPage();
+
+  const row = await screen.findByRole("link", { name: /notifications/i });
+  expect(row).toHaveAttribute("href", "/settings/notifications");
+});
+
+// AND IT SHARES Sign-in'S CONSTRAINT. Two rows of the same kind, one narrower than the other, is the
+// drift the Sign-in width test exists to catch — asserted between the rows rather than against a
+// literal, for the reason that test already gives.
+it("the Notifications row is constrained like the Sign-in row", async () => {
+  vi.spyOn(api, "get").mockResolvedValue({
+    config: {
+      backup: { preferred_transport: "usb", require_encryption: true },
+      storage: null,
+      sessions: { ttl_minutes: 60, allow_insecure_transport: false },
+      reconcile: { interval_minutes: 360 },
+      ui: { theme: "system" },
+    },
+    warnings: [],
+    source: { path: "/data/config.yml", mtime: null },
+  });
+
+  renderPage();
+  await screen.findByRole("heading", { name: "Current configuration" });
+
+  const maxWidth = (el: Element) =>
+    el.className.split(/\s+/).find((c) => c.startsWith("max-w-"));
+
+  const signIn = screen.getByRole("link", { name: /sign-in/i });
+  const notifications = screen.getByRole("link", { name: /notifications/i });
+
+  expect(maxWidth(notifications)).toBeDefined();
+  expect(maxWidth(notifications)).toBe(maxWidth(signIn));
+});

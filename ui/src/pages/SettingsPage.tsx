@@ -80,6 +80,26 @@ export function SettingsPage() {
             <ChevronRight size={18} strokeWidth={1.75} className="shrink-0 text-muted" />
           </Link>
 
+          {/* THE PAGE EXISTED AND NOTHING LINKED TO IT. qn.12 shipped `/settings/notifications` in
+              the router and never gave it an entry here, so the only route to the whole feature was
+              typing the URL — reported by the Operator, who could not find it. A screen nobody can
+              reach is a screen that does not exist.
+
+              SAME ROW SHAPE AS Sign-in, deliberately: these are the two things in Settings that are
+              not config fields, and a second visual treatment would imply a distinction that is not
+              there. `SettingsPage.test.tsx` asserts the shared max-width, so both rows move together
+              or the test fails. */}
+          <Link
+            to="/settings/notifications"
+            className="mt-3 flex max-w-md items-center justify-between rounded-lg border border-line px-3 py-2.5 text-sm transition-colors hover:bg-elevated"
+          >
+            <span>
+              <span className="font-medium">Notifications</span>
+              <span className="mt-0.5 block text-muted">Hear when a device needs backing up</span>
+            </span>
+            <ChevronRight size={18} strokeWidth={1.75} className="shrink-0 text-muted" />
+          </Link>
+
           {/* IN THIS COLUMN, NOT ABOVE THE GRID. Above, they pushed both columns down for as long
               as the query was in flight — the same defect as the Sign-in row, arriving on every
               load rather than permanently. */}
