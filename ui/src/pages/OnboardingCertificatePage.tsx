@@ -82,11 +82,17 @@ export function OnboardingCertificatePage() {
           until a certificate has proved itself over https.
         </p>
 
+        {/* THE PLACEHOLDERS ARE THE PATHS THE SHIPPED EXAMPLES PRODUCE, and that is the whole
+            requirement they have to meet. `deploy/compose.hardened.yml` and `deploy/compose.nas.yml`
+            both carry `./quince/certs:/certs:ro`, and `deploy/tls.md` names `/certs/quince.pem` and
+            `/certs/quince.key` in the `tls:` block a user copies. A placeholder from a different
+            convention teaches a path that does not exist on any install this project describes —
+            worse than an empty box, because it reads as instruction. */}
         <div className="mt-6 space-y-4">
           <Field
             id="cert-file"
             label="Certificate file"
-            placeholder="/etc/quince/tls/fullchain.pem"
+            placeholder="/certs/quince.pem"
             value={certFile}
             onChange={(v) => {
               setCertFile(v);
@@ -96,7 +102,7 @@ export function OnboardingCertificatePage() {
           <Field
             id="key-file"
             label="Key file"
-            placeholder="/etc/quince/tls/privkey.pem"
+            placeholder="/certs/quince.key"
             value={keyFile}
             onChange={(v) => {
               setKeyFile(v);
@@ -218,7 +224,7 @@ function Field({
 // THE SERVER'S SENTENCE IS SHOWN, NOT REPLACED (quince#514, and quince#940's whole sweep). quince
 // knows which of the two files failed and which names the certificate carries; a client composing its
 // own prose from the enum cannot, and would say "certificate problem" where the server said
-// "/etc/quince/tls/privkey.pem: private key does not match".
+// "/certs/quince.key: private key does not match".
 function OfflineResult({ probe }: { probe: CertificateProbe }) {
   const ok = probe.outcome === "usable";
   // THE LIST IS READ THROUGH A FALLBACK EVEN THOUGH THE TYPE PROMISES ONE. A field this page reads
