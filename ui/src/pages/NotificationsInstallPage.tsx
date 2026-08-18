@@ -57,7 +57,7 @@ export function NotificationsInstallPage() {
         needs you.
       </p>
 
-      <div className="mt-6 max-w-xl space-y-6">
+      <div className="mt-6 max-w-xl space-y-8">
         {support === "unsupported_platform" && (
           <section>
             <SectionHeading className="flex items-center gap-2">
@@ -206,7 +206,7 @@ function NotificationsControls() {
   // rendering it as "you are" — see `useThisDevice` for what that cost on a second device.
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-8">
       <section>
         <SectionHeading className="flex items-center gap-2">
           This device
@@ -346,7 +346,7 @@ function NotificationsControls() {
         <section>
           <SectionHeading>Devices receiving notifications</SectionHeading>
           <div className="mt-3 space-y-3 text-sm text-muted">
-            <ul className="space-y-1 text-fg-muted">
+            <ul className="space-y-1">
               {live.map((s) => (
                 <li
                   key={s.id}
