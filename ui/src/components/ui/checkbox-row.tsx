@@ -35,6 +35,17 @@ import { cn } from "@/lib/cn";
 //
 // NESTED, NOT `htmlFor`. Radix associates implicitly this way and a checkbox's label belongs beside
 // it rather than above it, so the association reason `Field` exists for is already satisfied.
+//
+// `type` IS NOT OVERRIDABLE, AND THE SPREAD ORDER IS WHAT ENFORCES IT. `{...input}` comes BEFORE
+// the attribute, so a caller writing `<CheckboxRow type="radio">` — which type-checks, since
+// `InputHTMLAttributes` carries `type` — gets a checkbox rather than a silent radio. The name of
+// this component is a promise, and quince#1227's open question is whether anything hand-rolls the
+// same alignment with a radio or a switch: if it does, this row is what somebody will reach for,
+// and the reach must not quietly succeed.
+//
+// `className` LANDS ON THE LABEL, not on the input. That is right for the geometry — the label is
+// what carries the flex row and the spacing a caller wants to adjust — and it is not derivable from
+// the signature, which is why it is written here.
 export function CheckboxRow({
   className,
   children,
@@ -43,7 +54,7 @@ export function CheckboxRow({
   return (
     <label className={cn("flex items-start gap-2.5 text-sm", className)}>
       <span className="flex h-[calc(var(--type-sm)*var(--type-sm-line))] shrink-0 items-center">
-        <input type="checkbox" {...input} />
+        <input {...input} type="checkbox" />
       </span>
       {children}
     </label>
