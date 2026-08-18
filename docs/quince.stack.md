@@ -732,7 +732,7 @@ preferred** — this paragraph carries the numbers deliberately, because *"we ch
 re-opening on the dependency grounds the measurement already closes:
 
 - **Reading and comparing the whole file costs 12.19 µs** on a realistic 218-byte `config.yml`; a
-  bare `stat` costs 2.33 µs. At one tick per two seconds that is roughly 0.0006% of a core, so the
+  bare `stat` costs 2.33 µs. At one tick per ten seconds that is roughly 0.0001% of a core, so the
   cheap option and the correct one are the same option, and the saving from a stat-first check buys
   nothing while costing a whole class of reasoning about mtime granularity.
 - **A watch on the file PATH is dead after one write**, measured: `ATTRIB`, `DELETE_SELF`, `IGNORED`,

@@ -310,7 +310,7 @@ A tick that finds changed bytes calls `Load`. On `!OK`:
 - **`s.source` is updated** to the new mtime, so `GET /api/config` does not claim the running config
   came from a file that has since changed.
 - **The record from D2 is updated to the bad bytes.** Otherwise every subsequent tick re-reads the
-  same broken file, re-`Load`s it and re-logs, once every 2 s, forever.
+  same broken file, re-`Load`s it and re-logs, once per poll, forever.
 
 **Recovery is symmetric and needs saying:** fixing the file makes the next tick's bytes differ again,
 `Load` returns `OK`, and the config applies. Nothing needs restarting to escape the banner, which is
