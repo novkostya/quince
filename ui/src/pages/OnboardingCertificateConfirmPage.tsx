@@ -140,7 +140,7 @@ export function OnboardingCertificateConfirmPage() {
               <Button onClick={() => void confirm()} disabled={state === "busy" || secure === false}>
                 {state === "busy" ? "Working…" : "Yes, keep it"}
               </Button>
-              {/* THE OTHER ANSWER, AND IT ENDS THE TRIAL. Declining used to mean waiting ten minutes
+              {/* THE OTHER ANSWER, AND IT ENDS THE TRIAL. Declining used to mean waiting the window out
                   or navigating away and leaving it running. It is offered only here because only
                   here is it safe: reaching this page proves the trial certificate works, so the
                   request has a channel to travel over — which the apply page does not. */}

@@ -19,8 +19,8 @@ const APPLIED: CertificateApplied = {
   // day it was written, so every test using this fixture would silently exercise the EXPIRED trial
   // rather than the live one it means to describe. The tests that care about the boundary set their
   // own deadline explicitly.
-  expires_at: futureISO(600),
-  expires_seconds: 600,
+  expires_at: futureISO(180),
+  expires_seconds: 180,
   config_written: false,
 };
 

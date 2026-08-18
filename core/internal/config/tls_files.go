@@ -15,7 +15,7 @@ import "github.com/novkostya/quince/core/internal/wire"
 //
 // The first version of this function handed back the pair it displaced, so an unconfirmed apply could
 // be undone. That shape wrote `config.yml` at the START of the ceremony and wrote it a SECOND time to
-// undo — leaving a certificate that never worked visible in a hand-edited file for ten minutes
+// undo — leaving a certificate that never worked visible in a hand-edited file for the whole window
 // (Operator, 2026-08-14, on quince#977).
 //
 // The trial now lives in `tlsx.Keeper`, which is what actually serves TLS and needs no file to do it.

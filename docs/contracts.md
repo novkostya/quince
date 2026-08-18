@@ -603,7 +603,7 @@ less. **THE LINE MOVES ONCE, EXPLICITLY** — two settings, not a general pre-au
 ruling was first built in.** Operator, 2026-08-14: *"we're not going to actually write tls setting
 entry to config.yml for that 30 seconds and only write config once probe has succeeded?"* The first
 implementation wrote the pair at APPLY and wrote the file a second time to undo it — leaving a
-certificate that never worked visible in a hand-edited file for ten minutes. **D12 says `config.yml`
+certificate that never worked visible in a hand-edited file for the whole window. **D12 says `config.yml`
 holds only what the user set, and a certificate somebody tried and abandoned was never something they
 set.**
 
@@ -644,13 +644,21 @@ both is `CLOCK_BOOTTIME` (`mach_continuous_time` on Darwin), which Go does not e
 the two is the same guarantee from clocks the standard library has. It fails in the safe direction:
 expiring early costs one retry, expiring late leaves a certificate the browser rejects.
 
-**TEN MINUTES, measured rather than inherited from §5's parenthesis.** Junos `commit confirmed`
-defaults to 10 minutes for the same *do not lock yourself out* problem; NetworkManager's `nmcli`
-checkpoint to 15 seconds — **the default tracks who confirms**, a script or a human, and ours is a
-human opening a browser. The mechanism contributes nothing: the apply → https-confirm round trip
-measured 11.5–19.8 ms.
+**THREE MINUTES — Operator ruling 2026-08-18, amending the ten of 2026-08-14.** The prior art still
+frames it: Junos `commit confirmed` defaults to 10 minutes for the same *do not lock yourself out*
+problem, NetworkManager's `nmcli` checkpoint to 15 seconds — **the default tracks who confirms**, a
+script or a human. The mechanism contributes nothing: the apply → https-confirm round trip measured
+11.5–19.8 ms, so the whole number is human time.
 
-**WHAT IT COSTS, AND WHERE THAT IS VISIBLE.** For up to ten minutes the daemon serves a certificate
+**WHAT CHANGED IS A PREMISE.** The ten rested on *"too long leaves somebody looking at a certificate
+their browser rejects — bounded, ends by itself, and VISIBLE to them."* Walked on hardware, it is not
+visible: while a trial is live the plain half redirects to https, so the page the user applied from is
+dead and the new one will not load. They see **nothing at all** until the window closes, and that cost
+falls entirely on the user whose certificate did not work. The length also buys less than it did — the
+reach probe now catches an unreachable name **before** a trial starts, leaving issuer trust, which the
+browser answers the moment the link opens.
+
+**WHAT IT COSTS, AND WHERE THAT IS VISIBLE.** For the length of a trial the daemon serves a certificate
 `config.yml` does not name. That is a divergence between configured and running, which `no silent
 caps or fallbacks` forbids leaving unstated — so `GET /api/health` carries
 **`tls_trial_expires_at`** while it holds. `GET /api/config` cannot say it, because the config is not

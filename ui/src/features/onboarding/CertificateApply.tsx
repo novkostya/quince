@@ -19,6 +19,12 @@ import type { CertificateApplied } from "@/lib/types";
 // hatch, which is precisely the user most likely to be configuring a certificate, it never fires.
 // The ruling chose a deliberate navigation for everybody rather than a mechanism that works for
 // some. THE FACT PROVEN IS THE SAME: a request arrived on quince's own TLS half with this token.
+// THE SHIPPED WINDOW, which the offer card has to state BEFORE an apply has returned one. Every
+// other mention reads `expires_seconds` off the response — this is the only place a client has to
+// know it in advance, and `trial-window.test.ts` reads `certTrialWindow` out of the Go source and
+// fails if the two drift apart.
+export const TRIAL_WINDOW_SECONDS = 180;
+
 export function CertificateApply({
   certFile,
   keyFile,
@@ -84,9 +90,12 @@ export function CertificateApply({
       {/* SAID BEFORE THE BUTTON, NOT AFTER. This is the reassurance that makes it safe to press, and
           a user who only learns it once the page has changed has already taken the risk they were
           being reassured about. */}
+      {/* THE LENGTH COMES FROM THE APPLY, NOT FROM A SENTENCE. `expires_seconds` is the same window
+          the daemon armed, so the copy cannot drift from `certTrialWindow` the way a written-out
+          a written-out length did when the ruling changed. */}
       <p className="mt-2 text-muted">
-        You have ten minutes to open it over https and confirm. If you do not, quince goes back to
-        what it had and nothing is saved.
+        You have {minutes(TRIAL_WINDOW_SECONDS)} to open it over https and confirm. If you do not,
+        quince goes back to what it had and nothing is saved.
       </p>
       {/* THE COST TO **THIS** PAGE, WHICH NOTHING SAID. The moment a certificate is serving,
           `plainHalf` starts redirecting http to https, so every request from this page is sent to an
@@ -96,7 +105,7 @@ export function CertificateApply({
 
           AND THE FAST EXIT IS NAMED. `certTrial` calls a mid-window restart fail-safe by design: the
           trial evaporates and the daemon comes back on what `config.yml` names. Offering only "wait
-          ten minutes" under-sells a guarantee the daemon already makes. */}
+          the window out" under-sells a guarantee the daemon already makes. */}
       <p className="mt-2 text-muted">
         This page will stop working while you do — use the link quince gives you. Restarting quince
         cancels the whole thing at once.
@@ -195,8 +204,8 @@ function ConfirmInstructions({
           a restart does the same thing in seconds, because a trial is held in memory and evaporates
           with the process — fail-safe by construction rather than by a handler running. */}
       <p className="mt-3 text-muted">
-        If it will not load, do nothing — quince goes back on its own in a few minutes and nothing
-        is saved. Restarting quince does it at once.
+        If it will not load, do nothing — quince goes back on its own in {minutes(applied.expires_seconds)}{" "}
+        and nothing is saved. Restarting quince does it at once.
       </p>
     </div>
   );
@@ -222,6 +231,12 @@ function useCountdown(deadline: string): number {
 // ONLY EVER CALLED WITH TIME ON THE CLOCK. Zero is a different screen — see the expired branch in
 // `ConfirmInstructions` — so this no longer carries a phrase for it. The one it had, "no time left",
 // is what made the expired card read *"Confirm within no time left to keep it."*
+// minutes renders a window length for prose.
+function minutes(seconds: number): string {
+  const m = Math.max(1, Math.round(seconds / 60));
+  return m === 1 ? "a minute" : `${m} minutes`;
+}
+
 function formatRemaining(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
