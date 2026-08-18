@@ -443,16 +443,27 @@ expect "supervisor with GH_TOKEN in the environment is refused" 1 "in the enviro
 expect "supervisor with NO credential at all still starts, and says what is lost" 0 "cannot act under its own name" -- \
 	QUINCE_RUNNER_ROLE=supervisor
 
-# THE EXEMPTION IS RULED, AND THE LINE MUST SAY WHICH (quince#375, Operator 2026-08-01). This case
-# pinned the literal "unruled gap" for one PR, while the justification's premise was withdrawn and the
-# answer was owed. The ruling is now in: no private layer here, the journal pre-push hook carries the
-# control. So the string moves with it — pinning "unruled gap" after a ruling would hold the arm at
-# the wrong claim, which is this file's own defect class one turn later.
+# THE LINE MUST NAME THE RULING IN FORCE, AND THIS CASE PINNED AN OVERTURNED ONE FOR WEEKS.
 #
-# WHAT IS PINNED IS STILL THE ANNOUNCEMENT, not the behaviour, and that is the point: an exemption a
-# reader cannot distinguish from an unexamined default is worth no more than the default. The line has
-# to say it was DECIDED.
-expect "the private-layer exemption says it was RULED, not merely unchecked" 0 "RULED 2026-08-01" -- \
+# It asserted the literal `RULED 2026-08-01` — the exemption ruling — which the Operator OVERTURNED
+# on 2026-08-02 (quince#375): the supervisor box gets the FULL private layer, and CLAUDE.md states
+# it with no exception to remember. So this case was not merely stale; it was holding the arm AT the
+# superseded claim, and would have failed any correction of it. A test that pins the wrong sentence
+# is worse than no test, because it makes fixing the sentence look like breaking the suite.
+#
+# That is this file's own defect class two turns on. The comment here previously congratulated
+# itself for moving the string when the ruling landed — *"pinning 'unruled gap' after a ruling would
+# hold the arm at the wrong claim"* — and then did not move it when the ruling was reversed.
+#
+# WHAT IS PINNED IS STILL THE ANNOUNCEMENT, not the behaviour, and that is the point: an exemption —
+# or an obligation — a reader cannot distinguish from an unexamined default is worth no more than
+# the default. The line has to say it was DECIDED, and by which ruling.
+#
+# EXIT 0 IS PART OF THE ASSERTION. The layer is REQUIRED here and CANNOT BE PLACED: `provision`
+# refuses this role, so refusing to start would brick the box over a state no operator can fix. The
+# arm reports and does not refuse, and it becomes `bad` in the same change that teaches `provision`
+# the role — the last outstanding item of quince#375.
+expect "the private-layer arm names the ruling IN FORCE, not the one it overturned" 0 "RULED 2026-08-02" -- \
 	QUINCE_RUNNER_ROLE=supervisor
 
 # AND IT MUST POINT AT WHAT ACTUALLY CARRIES THE CONTROL. The ruling's own reasoning is that requiring
