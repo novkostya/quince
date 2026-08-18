@@ -144,7 +144,18 @@ export function OnboardingCertificatePage() {
             the files can move between the two calls. Offering the button for a pair that will be
             refused would be a promise the product does not keep. */}
         {offline?.outcome === "usable" ? (
-          <CertificateApply certFile={certFile.trim()} keyFile={keyFile.trim()} hostname={hostname.trim()} />
+          <CertificateApply
+            certFile={certFile.trim()}
+            keyFile={keyFile.trim()}
+            hostname={hostname.trim()}
+            // FROM THE PROBE, NOT FROM THE BROWSER. `window.location.hostname` is the same string
+            // most of the time and is the wrong source: the coverage answer beside it came from the
+            // daemon comparing the leaf to the host IT saw, and a page deciding on its own would be a
+            // second implementation of one question — able to disagree with the sentence directly
+            // above the button.
+            currentHost={offline.current_host}
+            currentHostCovered={offline.current_host_covered}
+          />
         ) : offline ? (
           <p className="mt-6 text-sm text-muted">
             Nothing has been saved. Fix what the check reported and run it again — quince serves a
