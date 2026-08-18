@@ -2,6 +2,7 @@ package device
 
 import (
 	"log/slog"
+	"sort"
 	"sync"
 
 	"github.com/novkostya/quince/core/internal/bus"
@@ -240,6 +241,35 @@ func (r *Registry) SourceFor(udid, transport string) (string, bool) {
 		}
 	}
 	return best, best != ""
+}
+
+// TransportsForSource answers WHAT THIS MUXER IS CURRENTLY SERVING (quince#1219 item E) — the
+// transports it holds a live presence edge on, across every device, sorted for a stable payload.
+//
+// IT REPLACES AN ASSUMPTION WITH A FACT. `/api/health` used to give each muxer a `role` of `usb`
+// or `wifi`, chosen from which config key its address came out of — which assumes one daemon per
+// transport. A muxer serving both has no single role, and under a `muxers:` list there is no key
+// to read one from.
+//
+// AN EMPTY RESULT IS THE HONEST ANSWER, not a gap: a muxer that is connected but has no devices
+// attached is serving nothing yet, and reporting a transport it merely might carry would be the
+// same assumption in a new spelling. `state` is what says whether the muxer is reachable; this
+// says what is coming over it.
+func (r *Registry) TransportsForSource(sourceID string) []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	seen := map[string]bool{}
+	for _, edges := range r.sources[sourceID] {
+		for transport := range edges {
+			seen[transport] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for transport := range seen {
+		out = append(out, transport)
+	}
+	sort.Strings(out) // map order is randomised; a health payload must not shuffle between reads
+	return out
 }
 
 // --- event application (demo lock discipline: mutate under lock, publish after unlock) ---

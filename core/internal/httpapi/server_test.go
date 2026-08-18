@@ -119,8 +119,8 @@ type twoMuxers struct{}
 func (twoMuxers) Rescan(context.Context) (bool, string) { return true, "" }
 func (twoMuxers) MuxersHealth() []MuxerHealth {
 	return []MuxerHealth{
-		{Name: "usbmuxd", Role: "usb", Managed: true, State: "running", Rescan: true},
-		{Name: "netmuxd", Role: "wifi", Managed: true, State: "degraded", Detail: "keeps exiting", Rescan: false},
+		{Address: "/var/run/usbmuxd", Transports: []string{"usb"}, Managed: true, State: "running", Rescan: true},
+		{Address: "127.0.0.1:27015", Transports: []string{"wifi"}, Managed: true, State: "degraded", Detail: "keeps exiting", Rescan: false},
 	}
 }
 
@@ -153,11 +153,11 @@ func TestHealthReportsEveryMuxer(t *testing.T) {
 	if len(got.Muxers) != 2 {
 		t.Fatalf("muxers = %+v; want 2 entries", got.Muxers)
 	}
-	if got.Muxers[0].Name != "usbmuxd" || !got.Muxers[0].Rescan {
-		t.Errorf("usb entry = %+v; want usbmuxd with rescan", got.Muxers[0])
+	if got.Muxers[0].Address != "/var/run/usbmuxd" || !got.Muxers[0].Rescan {
+		t.Errorf("usb entry = %+v; want the muxer at /var/run/usbmuxd with rescan", got.Muxers[0])
 	}
-	if got.Muxers[1].Name != "netmuxd" || got.Muxers[1].State != "degraded" || got.Muxers[1].Rescan {
-		t.Errorf("wifi entry = %+v; want a degraded netmuxd that rescan does not touch", got.Muxers[1])
+	if got.Muxers[1].Address != "127.0.0.1:27015" || got.Muxers[1].State != "degraded" || got.Muxers[1].Rescan {
+		t.Errorf("wifi entry = %+v; want the degraded muxer that rescan does not touch", got.Muxers[1])
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -208,8 +209,8 @@ func TestSupervisorStartsAndStops(t *testing.T) {
 			if st.State != StateRunning || !st.Managed {
 				t.Fatalf("status = %+v; want running+managed", st)
 			}
-			if st.Name != spec.Name || st.Role != spec.Role {
-				t.Fatalf("status names the wrong daemon: %+v", st)
+			if st.Address != spec.Address {
+				t.Fatalf("status names the wrong muxer: %+v; want address %q", st, spec.Address)
 			}
 
 			cancel()
@@ -396,18 +397,19 @@ func TestGroupRescanRestartsOnlyTheUSBMuxer(t *testing.T) {
 // external ones as managed:false, never an empty list that reads as "no muxers".
 func TestGroupStatuses(t *testing.T) {
 	g := NewGroup()
-	g.Supervise(fakeSupervisor(fakeSpec("usbmuxd", RoleUSB, "unix", filepath.Join(t.TempDir(), "m.sock"), "serve"), ""))
-	g.AddUnmanaged("netmuxd", RoleWiFi, "127.0.0.1:27015", connectedClient())
+	managedAddr := filepath.Join(t.TempDir(), "m.sock")
+	g.Supervise(fakeSupervisor(fakeSpec("usbmuxd", RoleUSB, "unix", managedAddr, "serve"), ""))
+	g.AddUnmanaged("127.0.0.1:27015", connectedClient())
 
 	got := g.Statuses()
 	if len(got) != 2 {
 		t.Fatalf("statuses = %+v; want 2 entries", got)
 	}
-	if got[0].Name != "usbmuxd" || !got[0].Managed || !got[0].Rescan {
-		t.Fatalf("managed entry = %+v; want usbmuxd managed with rescan", got[0])
+	if got[0].Address != managedAddr || !got[0].Managed || !got[0].Rescan {
+		t.Fatalf("managed entry = %+v; want the managed muxer at %q with rescan", got[0], managedAddr)
 	}
-	if got[1].Name != "netmuxd" || got[1].Managed || got[1].State != StateExternal || got[1].Detail == "" {
-		t.Fatalf("unmanaged entry = %+v; want netmuxd external with a reason", got[1])
+	if got[1].Address != "127.0.0.1:27015" || got[1].Managed || got[1].State != StateExternal || got[1].Detail == "" {
+		t.Fatalf("unmanaged entry = %+v; want the external muxer at 127.0.0.1:27015 with a reason", got[1])
 	}
 }
 
@@ -432,7 +434,7 @@ func connectedClient() Dialer { return &fakeDialer{connected: true} }
 func TestExternalStateFollowsTheDialingClient(t *testing.T) {
 	g := NewGroup()
 	dialer := &fakeDialer{}
-	g.AddUnmanaged("netmuxd", RoleWiFi, "/run/mux/usbmuxd", dialer)
+	g.AddUnmanaged("/run/mux/usbmuxd", dialer)
 
 	// Before the first dial lands: not connected, nothing to report. `unreachable` here would be
 	// a failure claim about an attempt nobody has made.
@@ -470,7 +472,7 @@ func TestExternalStateFollowsTheDialingClient(t *testing.T) {
 // the healthy-looking word that would hide it.
 func TestExternalWithNoDialerSaysSo(t *testing.T) {
 	g := NewGroup()
-	g.AddUnmanaged("netmuxd", RoleWiFi, "127.0.0.1:27015", nil)
+	g.AddUnmanaged("127.0.0.1:27015", nil)
 	got := g.Statuses()[0]
 	if got.State == StateExternal {
 		t.Fatalf("an undialed muxer reported %q — the one word that hides the bug", got.State)
@@ -569,8 +571,8 @@ func TestHelperProcess(t *testing.T) {
 func TestRescanRereadsTheExternalMuxer(t *testing.T) {
 	usb, wifi := &fakeDialer{connected: true}, &fakeDialer{connected: true}
 	g := NewGroup()
-	g.AddUnmanaged("usbmuxd", RoleUSB, "/run/mux/usbmuxd", usb)
-	g.AddUnmanaged("netmuxd", RoleWiFi, "127.0.0.1:27015", wifi)
+	g.AddUnmanaged("/run/mux/usbmuxd", usb)
+	g.AddUnmanaged("127.0.0.1:27015", wifi)
 
 	accepted, reason := g.Rescan(rescanCtx(t))
 	if !accepted {
@@ -592,7 +594,7 @@ func TestRescanRereadsTheExternalMuxer(t *testing.T) {
 // collapses distinguishable causes is a defect even when every word of it is true).
 func TestRescanDistinguishesUndialedFromUnconfigured(t *testing.T) {
 	undialed := NewGroup()
-	undialed.AddUnmanaged("usbmuxd", RoleUSB, "/run/mux/usbmuxd", nil)
+	undialed.AddUnmanaged("/run/mux/usbmuxd", nil)
 	accepted, reason := undialed.Rescan(rescanCtx(t))
 	if accepted || !strings.Contains(reason, "no dialer") {
 		t.Errorf("undialed rescan = (%v, %q); want a refusal naming the missing dialer", accepted, reason)
@@ -602,5 +604,45 @@ func TestRescanDistinguishesUndialedFromUnconfigured(t *testing.T) {
 	accepted, reason = empty.Rescan(rescanCtx(t))
 	if accepted || !strings.Contains(reason, "no muxer is configured") {
 		t.Errorf("unconfigured rescan = (%v, %q); want a refusal naming the absent config", accepted, reason)
+	}
+}
+
+// TestStatusesReportTheTransportsEachMuxerServes (quince#1219 item E): the entry says what a muxer
+// is CURRENTLY carrying, read at render time from the device registry, rather than a `role` label
+// chosen from which config key its address came out of.
+func TestStatusesReportTheTransportsEachMuxerServes(t *testing.T) {
+	g := NewGroup()
+	g.AddUnmanaged("/run/mux/usbmuxd", connectedClient()) // one muxer, both transports
+	g.AddUnmanaged("127.0.0.1:27015", connectedClient())  // and one carrying nothing yet
+	g.SetTransports(func(address string) []string {
+		if address == "/run/mux/usbmuxd" {
+			return []string{"usb", "wifi"}
+		}
+		return nil
+	})
+
+	got := g.Statuses()
+	if len(got) != 2 {
+		t.Fatalf("statuses = %+v; want 2 entries", got)
+	}
+	if want := []string{"usb", "wifi"}; !reflect.DeepEqual(got[0].Transports, want) {
+		t.Fatalf("transports = %v; want %v — one muxer CAN serve both, which is what `role` could not say",
+			got[0].Transports, want)
+	}
+	if len(got[1].Transports) != 0 {
+		t.Fatalf("idle muxer transports = %v; want none — it is reachable and carrying nothing",
+			got[1].Transports)
+	}
+}
+
+// TestStatusesWithNoTransportSourceReportNone: an unwired group (--demo, tests) must say "nothing",
+// never guess. muxsup reports on muxers and does not own the device table.
+func TestStatusesWithNoTransportSourceReportNone(t *testing.T) {
+	g := NewGroup()
+	g.AddUnmanaged("/run/mux/usbmuxd", connectedClient())
+
+	got := g.Statuses()
+	if len(got) != 1 || len(got[0].Transports) != 0 {
+		t.Fatalf("statuses = %+v; want one entry reporting no transports", got)
 	}
 }

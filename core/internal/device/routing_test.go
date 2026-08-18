@@ -1,6 +1,7 @@
 package device
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/novkostya/quince/core/internal/muxd"
@@ -164,5 +165,64 @@ func TestSourceForBreaksTiesStably(t *testing.T) {
 			t.Fatalf("call %d: SourceFor = %q; want %q. Equal timestamps must resolve to the lexicographically smaller sourceID — a map-order answer sends one device's ops to a different daemon per call",
 				i, got, want)
 		}
+	}
+}
+
+// TestTransportsForSourceReportsWhatThatMuxerServes (quince#1219 item E). `/api/health` used to
+// give each muxer a `role` chosen from which config key its address came out of — an assumption
+// that one daemon serves each transport. This is the measurement that replaces it.
+func TestTransportsForSourceReportsWhatThatMuxerServes(t *testing.T) {
+	reg, _ := newTestRegistry(t)
+	reg.Sink(srcUSB).Apply(attach(udidA, muxd.TransportUSB))
+	reg.Sink(srcWiFi).Apply(attach(udidB, muxd.TransportWiFi))
+
+	for _, tc := range []struct {
+		source string
+		want   []string
+	}{{srcUSB, []string{"usb"}}, {srcWiFi, []string{"wifi"}}} {
+		if got := reg.TransportsForSource(tc.source); !reflect.DeepEqual(got, tc.want) {
+			t.Fatalf("TransportsForSource(%s) = %v; want %v", tc.source, got, tc.want)
+		}
+	}
+}
+
+// TestTransportsForSourceReportsBOTHForOneMuxerServingBoth is the case `role` could not express,
+// and the reason item E exists: netmuxd serves USB and Wi-Fi over ONE socket, which is the
+// hardened shape rather than an edge case. Sorted, because map order is randomised and a health
+// payload that shuffles between reads is a payload nobody can diff.
+func TestTransportsForSourceReportsBOTHForOneMuxerServingBoth(t *testing.T) {
+	reg, _ := newTestRegistry(t)
+	reg.Sink(srcUSB).Apply(attach(udidA, muxd.TransportUSB))
+	reg.Sink(srcUSB).Apply(attach(udidB, muxd.TransportWiFi))
+
+	want := []string{"usb", "wifi"}
+	for i := range 50 { // sorted, so repetition catches an order that depends on map iteration
+		if got := reg.TransportsForSource(srcUSB); !reflect.DeepEqual(got, want) {
+			t.Fatalf("call %d: TransportsForSource = %v; want %v every time", i, got, want)
+		}
+	}
+}
+
+// TestTransportsForSourceIsEmptyWhenNothingIsAttached: a reachable muxer with no devices is
+// serving nothing, and saying so is the honest answer. Reporting a transport it merely might
+// carry would be the same assumption `role` made, in a new spelling.
+func TestTransportsForSourceIsEmptyWhenNothingIsAttached(t *testing.T) {
+	reg, _ := newTestRegistry(t)
+	if got := reg.TransportsForSource(srcUSB); len(got) != 0 {
+		t.Fatalf("TransportsForSource on an idle muxer = %v; want nothing", got)
+	}
+}
+
+// TestTransportsForSourceDropsADetachedTransport: it is read at render time, so health cannot go
+// stale between a device leaving and somebody looking — the property qn.6p D5 established for
+// muxer state and this extends to what it carries.
+func TestTransportsForSourceDropsADetachedTransport(t *testing.T) {
+	reg, _ := newTestRegistry(t)
+	reg.Sink(srcUSB).Apply(attach(udidA, muxd.TransportUSB))
+	reg.Sink(srcUSB).Apply(attach(udidB, muxd.TransportWiFi))
+	reg.Sink(srcUSB).Apply(detach(udidB, muxd.TransportWiFi))
+
+	if got, want := reg.TransportsForSource(srcUSB), []string{"usb"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("after the Wi-Fi device left: %v; want %v", got, want)
 	}
 }

@@ -17,7 +17,7 @@ type stubMuxer struct {
 
 func (s stubMuxer) Rescan(context.Context) (bool, string) { return s.accepted, s.reason }
 func (stubMuxer) MuxersHealth() []MuxerHealth {
-	return []MuxerHealth{{Name: "usbmuxd", Role: "usb", Managed: true, State: "running", Rescan: true}}
+	return []MuxerHealth{{Address: "/var/run/usbmuxd", Transports: []string{"usb"}, Managed: true, State: "running", Rescan: true}}
 }
 
 // TestRescanManagedReturns202: with a managed muxer, POST /api/devices/rescan is accepted (202).

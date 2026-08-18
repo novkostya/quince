@@ -144,18 +144,28 @@ const (
 	ModePublicDemo = "public_demo" // --public-demo: fixtures, password preset, Secure left alone
 )
 
-// MuxerHealth is one muxer daemon's slice of /api/health: which daemon, the transport it serves,
-// whether quince manages it, its state (running | degraded | starting | stopped | external), a
-// human detail (last exit reason / why degraded / why external), and whether
-// POST /api/devices/rescan applies to it (USB only — restarting netmuxd would tear a live Wi-Fi
-// backup).
+// MuxerHealth is one muxer's slice of /api/health (contracts §10): its ADDRESS, which is its
+// identity; the transports it is CURRENTLY SERVING; whether quince manages it; its state
+// (running | degraded | starting | stopped | external); a human detail (last exit reason / why
+// degraded / why external); and whether POST /api/devices/rescan applies to it (USB only —
+// restarting netmuxd would tear a live Wi-Fi backup).
+//
+// IT CARRIED `name` AND `role` UNTIL quince#1219 ITEM E, and both were assumptions rather than
+// facts: each was a literal chosen by which config key the address came out of, so the payload
+// asserted one daemon per transport. A muxer serving both — the hardened shape — has no single
+// role, and under a `muxers:` list there is no daemon name to report at all.
+//
+// `transports` IS ALWAYS PRESENT, NEVER OMITTED, and is `[]` rather than null when a muxer has
+// nothing attached: absent would read as "unknown", and empty is a measurement — this muxer is
+// reachable and no device is coming over it. §10 says this shape is not frozen until qn.7's panel
+// consumes it, which is why the reshape lands now rather than after v0.1.
 type MuxerHealth struct {
-	Name    string `json:"name"`
-	Role    string `json:"role"` // usb | wifi
-	Managed bool   `json:"managed"`
-	State   string `json:"state"`
-	Detail  string `json:"detail,omitempty"`
-	Rescan  bool   `json:"rescan"`
+	Address    string   `json:"address"`
+	Transports []string `json:"transports"`
+	Managed    bool     `json:"managed"`
+	State      string   `json:"state"`
+	Detail     string   `json:"detail,omitempty"`
+	Rescan     bool     `json:"rescan"`
 }
 
 // NewRouter assembles the full handler: security middleware wraps a root mux that mounts
