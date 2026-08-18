@@ -62,13 +62,17 @@ usage: forge-watch <verb>
   to a paragraph someone remembers. `dead` and `absent` proceed and say which they were.
 
   Every tick's output is printed whether or not it wakes anybody; the filter decides what WAKES,
-  never what is SEEN. Two kinds of line do not wake:
+  never what is SEEN. Three kinds of line do not wake:
     - the baseline. `first-observation` (and the `queue-empty` that accompanies it) is the
       observation that establishes the baseline, not a change from it — exiting on it would make
       arming a watch a busy loop of arm-exit-arm.
     - `fetch-failed`, until --fail-after of them in a row (default 3). One failed fetch is a missed
       tick, not news; a run of them is. Meanwhile the heartbeat does not advance across a failing
       tick, so such a watcher ages into `wedged` and says so there too.
+    - `queue-truncated`, always. It is a CONDITION rather than an edge — true continuously while the
+      window is full and its oldest row is open — so waking on it means exiting on tick 1 of every
+      arm, forever, and never reaching tick 2 (quince#1189, quince#1190). It is still printed on
+      every tick: the report is correct, the exit was not.
 
   `--max-wait` (default 1200s) makes TERMINATION the heartbeat: the loop exits idle, the session
   wakes, re-arms, and the only channel involved is the one measured to work. It does not replace the
@@ -3394,6 +3398,30 @@ wake_worthy() {
 		# is a missed read, a run of them is a watch that is not watching, and `--fail-after` is what
 		# tells those apart. Printed either way.
 		/^event=trunk-fetch-failed/ { next }
+		# `queue-truncated` is a CONDITION, not an edge, and that is the distinction this arm draws
+		# (quince#1189, quince#1190, quince-devlog#276). Every other wake here is something that
+		# HAPPENED — a review cast, a branch merged, a check going red — handled once and gone. This
+		# one is a property of the current window: true continuously until the queue shrinks, and
+		# therefore true again on the next arm. Waking on it means arm → exit → arm → exit, forever,
+		# which is a watch that never reaches tick 2 and so can observe nothing that happens between
+		# ticks. Measured on both boxes 2026-08-18: ten open PRs, a full window whose oldest row was
+		# open, and six consecutive arms each dying in under fifteen seconds having reported nothing.
+		#
+		# It is worse than an ordinary spurious wake, because the idle bound is what distinguishes a
+		# quiet forge from a broken watch and a tick-1 exit can never reach it.
+		#
+		# PRINTED EITHER WAY, which is the whole point — the report is correct and must not be
+		# dropped. A query that silently covers a subset is the quince-devlog#3 shape, and this line is
+		# that rule applied to the window this tool itself reads. Same treatment, and same argument, as
+		# `fetch-failed` and the three failed-read events above: one is a caveat on the report, a run
+		# of them is a watch that is not watching, and `--fail-after` is what tells those apart.
+		#
+		# IT DOES NOT MAKE THE TRUNCATION HARMLESS. The predicate above still cannot distinguish "the
+		# oldest row is open AND more open ones are behind it" from "the oldest row is open and there
+		# is nothing behind it", so it fires when nothing is hidden. Answering the real question —
+		# comparing the open count against the window — is quince#1189 shape 2 and is a separate
+		# change with a separate cost; this one restores the loop.
+		/^event=queue-truncated/ { next }
 		/^event=queue-empty/ { if (base[repo($0)]) next }
 		/^event=/ { print }
 	' "$1" "$1"
