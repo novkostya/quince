@@ -30,14 +30,18 @@ func (d Deps) handleDeviceNotifications() http.HandlerFunc {
 				"enabled is required and must be true or false")
 			return
 		}
-		status, reason := d.DeviceNotifs.SetNotificationsEnabled(r.PathValue("udid"), *req.Enabled)
+		stored, status, reason := d.DeviceNotifs.SetNotificationsEnabled(r.PathValue("udid"), *req.Enabled)
 		if status != http.StatusOK {
 			writeError(w, d.Log, status, statusCode(status), reason)
 			return
 		}
-		// THE BODY ECHOES WHAT WAS STORED, not what was asked for. They are the same value today and
-		// the echo costs nothing; what it buys is that a client never has to assume its own request
-		// succeeded in order to render the control it just moved.
-		writeJSON(w, d.Log, http.StatusOK, map[string]bool{"enabled": *req.Enabled})
+		// THE BODY ECHOES WHAT WAS STORED — `stored`, returned by the write, not `*req.Enabled`.
+		//
+		// That distinction is the whole point of the return value. What the echo buys is that a
+		// client never has to assume its own request succeeded in order to render the control it
+		// just moved; echoing the REQUEST would make that guarantee true only for as long as the
+		// store cannot alter a bool, which is a property nobody is holding still (quince#1281
+		// review). The two values are equal today, and this is what keeps them equal.
+		writeJSON(w, d.Log, http.StatusOK, map[string]bool{"enabled": stored})
 	}
 }

@@ -259,13 +259,21 @@ func (p *Provider) flipDevice(udid string, mutate func(*wire.Device)) {
 //
 // The demo world holds no DB, so the value lives on the device itself — which is exactly what the
 // real registry serves it as, so the wire shape and the announcement match production.
-func (p *Provider) SetNotificationsEnabled(udid string, enabled bool) (int, string) {
+func (p *Provider) SetNotificationsEnabled(udid string, enabled bool) (bool, int, string) {
 	p.mu.RLock()
 	_, ok := p.devices[udid]
 	p.mu.RUnlock()
 	if !ok {
-		return http.StatusNotFound, "no such device"
+		return false, http.StatusNotFound, "no such device"
 	}
 	p.flipDevice(udid, func(d *wire.Device) { d.NotificationsEnabled = enabled })
-	return http.StatusOK, ""
+	// READ BACK, rather than returning the argument. The demo world holds the value on the
+	// device, so this is the same act the live implementation performs against the app DB — and
+	// a stub that returned its own input would make the handler test pass over a claim the real
+	// path does not make.
+	dev, ok := p.Device(udid)
+	if !ok {
+		return false, http.StatusNotFound, "no such device"
+	}
+	return dev.NotificationsEnabled, http.StatusOK, ""
 }

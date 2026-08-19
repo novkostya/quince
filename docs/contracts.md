@@ -1205,6 +1205,12 @@ PUT  /api/devices/{udid}/notifications
      // one of the three op routes, and a lock over a row write would buy nothing. Same
      // reading as PUT /api/config and PUT /api/auth/password.
      //
+     // "THE STORED VALUE" IS LITERAL AND IS TRUE BY CONSTRUCTION, not by coincidence. The
+     // body carries what quince RECORDED, which the write reports back — never the value
+     // the request carried. The two are equal today because storage cannot alter a bool;
+     // they are equal for a REASON, so a client may build on the guarantee. If storage ever
+     // gains a policy that refuses or coerces, the body follows it and this stays true.
+     //
      // 422: `enabled` absent. It is NOT defaulted, and that is the point — the value is a
      // boolean, so an omitted key and `false` decode identically, and defaulting would let
      // an empty PUT silently MUTE a device. There is nothing to guess at, so it refuses.
