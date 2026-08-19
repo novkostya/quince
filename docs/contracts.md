@@ -3621,11 +3621,11 @@ the URL a user bookmarks, and serving the app on both a plain and a TLS origin i
 different cookie behaviour — the same `secureCookie` split that makes this rung necessary, now
 inside one deployment.
 
-**The deployment constraint that shapes it.** `deploy/compose.nas.yml` documents that Wi-Fi is
-quince's primary use case, that netmuxd finds devices only by mDNS, that multicast does not cross a
-bridged container network, and therefore that the answer is `network_mode: host` with the `ports:`
-block deleted. **On the deployment that matters there is no port forwarding at all** — so a second
-listener is a second host bind, and a second collision surface on a box where nothing can be
+**The deployment constraint that shapes it.** The retired single-container example documented that
+Wi-Fi is quince's primary use case, that netmuxd finds devices only by mDNS, that multicast does not
+cross a bridged container network, and therefore that the answer is `network_mode: host` with the
+`ports:` block deleted. **On the deployment that matters there is no port forwarding at all** — so a
+second listener is a second host bind, and a second collision surface on a box where nothing can be
 remapped.
 
 **The Operator's leaning, recorded and not decided:** *"environment variable, single port for both

@@ -156,8 +156,8 @@ ENV QUINCE_DATA=/data QUINCE_CACHE=/cache QUINCE_LISTEN=:8968
 # the missing directory nor the variable that pointed at it.
 #
 # It went unnoticed because NOTHING HAD EVER RUN THIS IMAGE AS-IS. `make demo` overrides both
-# (`-e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp`, and /tmp exists); compose.nas.yml and
-# compose.lab.yml BIND-MOUNT over both, and a bind mount creates its target. So every existing
+# (`-e QUINCE_DATA=/tmp -e QUINCE_CACHE=/tmp`, and /tmp exists); the shipped compose example
+# BIND-MOUNTS over both, and a bind mount creates its target. So every existing
 # path either replaced the values or covered the paths, and these defaults were dead config that
 # read as live. The public demo on fly.io (quince#494) is the first deployment to run the image
 # with no mounts and no overrides, and it crash-looped to its restart limit.
