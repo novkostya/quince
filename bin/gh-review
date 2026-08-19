@@ -335,10 +335,56 @@ payload=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' "$((now - 60))" "$((now + 540)
 signature=$(printf '%s.%s' "$header" "$payload" | openssl dgst -sha256 -binary -sign "$KEY_FILE" | b64url)
 jwt="$header.$payload.$signature"
 
-installations=$(curl -sS --fail-with-body -H "Authorization: Bearer $jwt" -H "$AH" \
-	"$API/app/installations" 2>&1) || die "could not list installations" \
-	"$(printf '%s' "$installations" | head -n 3)" \
-	"Most likely: the key does not match app id $APP_ID, or the key has been revoked."
+# app_api calls the App API and CLASSIFIES a failure rather than asserting a cause (quince#1133).
+#
+# THE HINT USED TO BE UNCONDITIONAL, AND IT NAMED THE ONE CAUSE THAT MAKES A SESSION STOP. A
+# transient GitHub 504 printed *"the key does not match app id N, or the key has been revoked"*,
+# and canon tells a session that cannot mint to STOP, because it cannot author. So a retryable blip
+# was routed into a hard stop — while GitHub's own body said *"please try resubmitting your
+# request."* Measured 2026-08-17: the immediate retry of the identical command succeeded.
+#
+# `forge-watch` CONSUMES THIS PROGRAMMATICALLY, which is the second cost and the one with no human
+# in the loop to disbelieve the prose: the same string reached it as `issue-fetch-failed`, and an
+# issue a session had DECLARED dropped out of the watch set for that tick.
+#
+# `-w '\n%{http_code}'` IS WHAT MAKES CLASSIFICATION POSSIBLE, and the status is READ rather than
+# inferred. `--fail-with-body` sets a non-zero exit for every failure alike, so the exit code
+# discriminates nothing, and the prose in the body is not a signal to parse — that is the derived
+# signal this project already has an issue open about. curl reports `000` when it never got an HTTP
+# response at all, which is what keeps a transport failure distinct from a 5xx.
+#
+# NO AUTOMATIC RETRY, DELIBERATELY. A wrapper that silently retries hides the rate of forge
+# flakiness from the only sessions positioned to notice it. Naming the cause correctly is the fix;
+# deciding to retry is the seat's.
+app_api() {
+	_what=$1
+	shift
+	_resp=$(curl -sS --fail-with-body -w '\n%{http_code}' -H "Authorization: Bearer $jwt" \
+		-H "$AH" "$@" 2>&1) && _rc=0 || _rc=$?
+	# The status is the LAST line and the body is everything before it, on both paths — `-w` writes
+	# after the body, and after curl's own error line when there is no body at all.
+	_status=$(printf '%s' "$_resp" | tail -n 1)
+	_body=$(printf '%s' "$_resp" | sed '$d')
+	if [ "$_rc" -eq 0 ]; then
+		printf '%s' "$_body"
+		return 0
+	fi
+	case "$_status" in
+	401 | 403) die "$_what" "$(printf '%s' "$_body" | head -n 3)" \
+		"HTTP $_status — GitHub rejected the credential itself." \
+		"Most likely: the key does not match app id $APP_ID, or the key has been revoked." ;;
+	5??) die "$_what" "$(printf '%s' "$_body" | head -n 3)" \
+		"HTTP $_status — GitHub did not answer. This is TRANSIENT: retry the same command." \
+		"The credential was NOT rejected, and this is not a reason to stop." ;;
+	000) die "$_what" "$(printf '%s' "$_body" | head -n 3)" \
+		"No HTTP response — the request never reached GitHub (DNS, TLS, or the network)." \
+		"This is TRANSIENT: retry. The credential was NOT rejected." ;;
+	*) die "$_what" "$(printf '%s' "$_body" | head -n 3)" \
+		"HTTP $_status. This wrapper does not know what that means here, and will not guess." ;;
+	esac
+}
+
+installations=$(app_api "could not list installations" "$API/app/installations")
 
 count=$(printf '%s' "$installations" | jq -r 'if type=="array" then length else 0 end')
 case "$count" in
@@ -360,10 +406,8 @@ esac
 
 install_id="${QUINCE_REVIEW_INSTALLATION_ID:-$(printf '%s' "$installations" | jq -r '.[0].id')}"
 
-token=$(curl -sS --fail-with-body -X POST -H "Authorization: Bearer $jwt" -H "$AH" \
-	"$API/app/installations/$install_id/access_tokens" 2>&1) || die \
-	"could not mint an installation token for installation $install_id" \
-	"$(printf '%s' "$token" | head -n 3)"
+token=$(app_api "could not mint an installation token for installation $install_id" \
+	-X POST "$API/app/installations/$install_id/access_tokens")
 
 GH_TOKEN=$(printf '%s' "$token" | jq -r '.token // empty')
 [ -n "$GH_TOKEN" ] || die "installation $install_id returned no token" \

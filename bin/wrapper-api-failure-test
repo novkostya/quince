@@ -1,0 +1,164 @@
+#!/bin/sh
+# wrapper-api-failure-test — a failed App-API call must name what ACTUALLY happened (quince#1133).
+#
+# THE DEFECT. All three App wrappers asserted one cause for every failure of `GET /app/installations`:
+#
+#   gh-coder: could not list installations
+#   gh-coder: {"message": "We couldn't respond to your request in time. Sorry about that. …"}
+#   curl: (22) The requested URL returned error: 504
+#   gh-coder: Most likely: the key does not match app id 4423627, or the key has been revoked.
+#
+# The immediate retry of the identical command succeeded. Nothing was wrong with the key, and
+# GitHub's own body said *"please try resubmitting your request"* — but canon tells a session that
+# cannot mint to STOP, because it cannot author. So the wording routed a retryable blip into a hard
+# stop, and the session it hurts is the one following canon correctly.
+#
+# `forge-watch` CONSUMES THE SAME STRING PROGRAMMATICALLY, with no human in the loop to disbelieve
+# the prose: it surfaced as `issue-fetch-failed` and a DECLARED issue dropped out of the watch set
+# for that tick.
+#
+# WHAT THIS SUITE DRIVES, AND WHY IT CANNOT BE READ OFF THE SOURCE. The fix is a `case`, and its
+# correctness is entirely about WHICH FAILURES IT SEPARATES:
+#
+#   401 / 403         -> the credential really was rejected; the OLD wording is right, and only here
+#   5xx               -> transient; say retry, and say the credential was NOT rejected
+#   no HTTP response  -> transient; a transport failure, still not the credential
+#   anything else     -> print the status and assert NO cause
+#   success           -> return the body, with the status line stripped back off
+#
+# The last one is the negative control that matters most: `-w '\n%{http_code}'` appends a line to
+# curl's output, so a fix that classifies correctly and forgets to strip it hands malformed JSON to
+# `jq` on EVERY call — a total outage of all three seats, reached by fixing this bug.
+#
+# THE FUNCTION IS EXTRACTED FROM THE SHIPPED FILE, NOT COPIED INTO THIS ONE. Three wrappers carry
+# the same block, so a copy here would be a fourth that can drift from all of them. Sourcing what
+# each file actually contains is also what lets the last test assert the three have not diverged.
+#
+# Synthetic and hermetic: a stub `curl` on PATH. No network, no credential, no real wrapper run.
+set -eu
+
+cd "$(dirname "$0")/.."
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+
+WRAPPERS="bin/gh-coder bin/gh-review bin/gh-analyst"
+
+# run drives the extracted `app_api` against a stubbed curl and prints what the caller would see.
+#
+# stdout and stderr are COMBINED on purpose: `die` writes to stderr and the success path writes to
+# stdout, and every assertion below is about which of the two a case produced.
+run() { # run <wrapper> <curl-exit> <status> <body>
+	_w=$1 _exit=$2 _status=$3 _body=$4
+	cat > "$WORK/curl" <<CURLEOF
+#!/bin/sh
+printf '%s\n%s' '$_body' '$_status'
+exit $_exit
+CURLEOF
+	chmod +x "$WORK/curl"
+	{
+		printf 'set -eu\n'
+		# SC2016 is CORRECT ABOUT THE MECHANISM AND WRONG ABOUT THE INTENT HERE: this line is
+		# being WRITTEN INTO a script that runs later, so `$1` and `$@` must reach that file
+		# unexpanded and be bound by the harness's own `die` when it is called. Expanding them
+		# now would bake this suite's argv into the stub.
+		# shellcheck disable=SC2016
+		printf 'die() { printf "wrapper: %%s\\n" "$1" >&2; shift; for l in "$@"; do printf "wrapper: %%s\\n" "$l" >&2; done; exit 1; }\n'
+		printf 'APP_ID=4423627\njwt=irrelevant\nAH="Accept: application/vnd.github+json"\n'
+		sed -n '/^app_api() {$/,/^}$/p' "$_w"
+		printf 'app_api "could not list installations" "https://api.invalid/app/installations"\n'
+	} > "$WORK/harness.sh"
+	( PATH="$WORK:$PATH"; sh "$WORK/harness.sh" 2>&1 ) || :
+}
+
+# says / says_not assert on the COMBINED output of one run.
+says() { # says <label> <needle> <output>
+	case "$3" in
+	*"$2"*) ok "$1" ;;
+	*) bad "$1 — expected to find: $2" ;;
+	esac
+}
+says_not() { # says_not <label> <needle> <output>
+	case "$3" in
+	*"$2"*) bad "$1 — must NOT say: $2" ;;
+	*) ok "$1" ;;
+	esac
+}
+
+for w in $WRAPPERS; do
+	printf '\n%s\n' "$w"
+
+	# THE REPORTED CASE. This is the whole issue: a 504 must not accuse the credential.
+	out=$(run "$w" 22 504 '{"message":"We could not respond to your request in time."}')
+	says     "504 says it is transient" "TRANSIENT" "$out"
+	says     "504 tells the reader to retry" "retry" "$out"
+	says_not "504 does not accuse the key" "has been revoked" "$out"
+	says     "504 still prints the status it saw" "HTTP 504" "$out"
+
+	out=$(run "$w" 22 500 '{"message":"Server Error"}')
+	says     "500 says it is transient" "TRANSIENT" "$out"
+	says_not "500 does not accuse the key" "has been revoked" "$out"
+
+	# THE CASE THE OLD WORDING WAS WRITTEN FOR, and it must survive the fix — a check that only
+	# stopped saying "revoked" would be wrong in the other direction.
+	out=$(run "$w" 22 401 '{"message":"Bad credentials"}')
+	says     "401 keeps the credential wording" "has been revoked" "$out"
+	says_not "401 is not called transient" "TRANSIENT" "$out"
+
+	out=$(run "$w" 22 403 '{"message":"Forbidden"}')
+	says     "403 keeps the credential wording" "has been revoked" "$out"
+	says_not "403 is not called transient" "TRANSIENT" "$out"
+
+	# NO HTTP RESPONSE AT ALL. curl reports 000, which is what keeps a transport failure distinct
+	# from a 5xx rather than collapsing into the unknown arm.
+	out=$(run "$w" 6 000 'curl: (6) Could not resolve host: api.github.com')
+	says     "a transport failure is named as one" "never reached GitHub" "$out"
+	says     "...and is called transient" "TRANSIENT" "$out"
+	says_not "...and does not accuse the key" "has been revoked" "$out"
+
+	# AN UNKNOWN STATUS ASSERTS NOTHING. Guessing is what this whole change is against, so the
+	# fallback must refuse to name a cause rather than fall back on the old one.
+	out=$(run "$w" 22 418 '{"message":"teapot"}')
+	says     "an unknown status is printed" "HTTP 418" "$out"
+	says     "...and no cause is asserted" "will not guess" "$out"
+	says_not "...and the key is not accused" "has been revoked" "$out"
+	says_not "...and it is not called transient" "TRANSIENT" "$out"
+
+	# THE NEGATIVE CONTROL. Success must return the BODY ONLY — the appended status line has to be
+	# stripped, or every call in every seat hands malformed JSON to jq.
+	out=$(run "$w" 0 200 '[{"id":123}]')
+	says     "success returns the body" '"id":123' "$out"
+	says_not "success strips the appended status line" "200" "$out"
+	if printf '%s' "$out" | jq -e 'type == "array"' >/dev/null 2>&1; then
+		ok "success is still parseable as the JSON the caller expects"
+	else
+		bad "success is still parseable as the JSON the caller expects"
+	fi
+done
+
+# THE THREE WRAPPERS MUST NOT DIVERGE. They are separate self-contained scripts by design, which is
+# exactly why one of them can be fixed and the others left carrying the defect — the state this
+# issue was filed in, where the reporter had read one file and would not claim a defect in two they
+# had not opened.
+printf '\ndivergence\n'
+ref=$(sed -n '/^app_api() {$/,/^}$/p' bin/gh-coder)
+for w in $WRAPPERS; do
+	if [ "$(sed -n '/^app_api() {$/,/^}$/p' "$w")" = "$ref" ]; then
+		ok "$w carries the same app_api"
+	else
+		bad "$w has diverged from bin/gh-coder's app_api"
+	fi
+done
+
+printf '\nwrapper-api-failure-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]
