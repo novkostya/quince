@@ -39,9 +39,9 @@ func TestPlannedMuxers(t *testing.T) {
 		external string
 	}{
 		{
-			name:     "the default is one external muxer",
+			name:     "the defaults are two external muxers, in order",
 			muxers:   config.Default().ResolvedMuxers(),
-			external: "UNIX:/var/run/usbmuxd",
+			external: "UNIX:/var/run/usbmuxd,UNIX:/var/run/mux/usbmuxd",
 		},
 		{
 			name:     "two muxers are two entries, in list order",
@@ -117,8 +117,15 @@ func TestPlannedMuxersDefaultConfig(t *testing.T) {
 	}
 	// The USB muxer is still REACHED, just not owned. An absent external entry would leave health
 	// with nothing to report, and design §10 says an absent entry reads as "no muxer".
-	if len(plan.external) != 1 || plan.external[0].address != "UNIX:/var/run/usbmuxd" {
-		t.Fatalf("default externals = %+v; want exactly the default muxer address dialed", plan.external)
+	// BOTH defaults are dialled, not just the standard one (quince#1256). The second is where the
+	// shipped compose stack puts its socket; whichever answers is used, and the other is reported
+	// `absent` rather than as a fault, which is what lets a default name more than one candidate.
+	if len(plan.external) != 2 {
+		t.Fatalf("default externals = %+v; want both default muxer addresses dialled", plan.external)
+	}
+	if plan.external[0].address != "UNIX:/var/run/usbmuxd" ||
+		plan.external[1].address != "UNIX:/var/run/mux/usbmuxd" {
+		t.Fatalf("default externals = %+v; want the standard path first, then the sidecar path", plan.external)
 	}
 }
 

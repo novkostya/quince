@@ -328,23 +328,45 @@ const (
 	MuxerManaged  = "managed"
 )
 
-// DefaultMuxerAddress is where quince looks for a muxer when the operator has not said. It is
-// libusbmuxd's OWN default — measured from the shipped binary, `-S … Default: /var/run/usbmuxd` —
-// so one value serves both *"I ran your sidecar"* and *"I already had a muxer"*, and a compose file
-// is enough: nobody hand-edits config.yml before first launch.
-const DefaultMuxerAddress = "/var/run/usbmuxd"
+// The DEFAULT muxer addresses — the two places a muxer is found when the operator has not said
+// (quince#1256, ruled 2026-08-19). Both are tried; whichever answers is used; the other is reported
+// `absent` rather than as a fault, which is what makes a multi-entry default possible at all.
+const (
+	// DefaultMuxerAddress is libusbmuxd's OWN default — measured from the shipped binary,
+	// `-S … Default: /var/run/usbmuxd`. It is what a muxer somebody ALREADY RUNS listens on, so a
+	// host with usbmuxd needs no config and every other libimobiledevice tool on that box —
+	// `idevice_id`, `ideviceinfo`, a human debugging by hand — finds the same socket quince does.
+	DefaultMuxerAddress = "/var/run/usbmuxd"
+	// DefaultSidecarMuxerAddress is where the SHIPPED compose stack puts its muxer's socket.
+	//
+	// It is a private path rather than the standard one so the stack can bind it NARROWLY: the
+	// socket has to land where quince looks, and `/var/run/usbmuxd` means mounting the container's
+	// whole `/run`, because `/var/run` is a symlink to it. A subdirectory can be mounted at
+	// `/run/mux` instead, leaving the container's own runtime directory untouched.
+	//
+	// THE COST, STATED RATHER THAN DISCOVERED: in that shape the socket is NOT at the path
+	// libimobiledevice tools compile in, so `idevice_id -l` inside quince's container finds
+	// nothing without `USBMUXD_SOCKET_ADDRESS` set. In the host-muxer shape above, it still works.
+	// The trade is confined to the deployment that already involves a sidecar.
+	DefaultSidecarMuxerAddress = "/var/run/mux/usbmuxd"
+)
 
 // ResolvedMuxers is the muxer list as quince ACTUALLY USES IT: what the operator wrote, or the
-// single built-in default when they wrote nothing.
+// built-in defaults when they wrote nothing.
 //
 // ABSENT AND EMPTY ARE DIFFERENT, and that is the whole reason `muxers:` is a pointer. No key means
-// *"I have not thought about this"* → the default. `muxers: []` means *"none"* → none, and quince
+// *"I have not thought about this"* → the defaults. `muxers: []` means *"none"* → none, and quince
 // then sees no devices and says so at startup rather than quietly substituting a muxer the operator
 // removed on purpose.
 //
-// THE DEFAULT LIVES HERE RATHER THAN IN Default() so that it is never WRITTEN. `MarshalDeclared`
-// keeps a non-empty sequence even when nothing declared it, so a default entry in Default() would
-// land in every config.yml as a key nobody set — the opposite of D12's promise that the file
+// **IT REPLACES, IT DOES NOT EXTEND.** Writing one entry drops BOTH defaults — including the one
+// you were relying on. That is the sharp edge of a multi-entry default and it is silent, so it is
+// documented in `contracts.md`'s schema beside the key. An operator adding a Wi-Fi muxer to the
+// stock setup must write the muxer they already had as well.
+//
+// THE DEFAULTS LIVE HERE RATHER THAN IN Default() so that they are never WRITTEN. `MarshalDeclared`
+// keeps a non-empty sequence even when nothing declared it, so default entries in Default() would
+// land in every config.yml as keys nobody set — the opposite of D12's promise that the file
 // carries only what the user set.
 //
 // NOT A REVERSAL OF qn.6c, AND THE TEST IS THE FAILURE MODE rather than the taxonomy (ruled,
@@ -356,7 +378,10 @@ const DefaultMuxerAddress = "/var/run/usbmuxd"
 // durable; neither property is present here.
 func (c Config) ResolvedMuxers() []MuxerConfig {
 	if c.Muxers == nil {
-		return []MuxerConfig{{Address: DefaultMuxerAddress}}
+		return []MuxerConfig{
+			{Address: DefaultMuxerAddress},
+			{Address: DefaultSidecarMuxerAddress},
+		}
 	}
 	return *c.Muxers
 }
