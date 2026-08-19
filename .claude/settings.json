@@ -69,6 +69,7 @@
       "Bash(make home-resolution-test)",
       "Bash(make wrapper-boundary-test)",
       "Bash(make wrapper-body-test)",
+      "Bash(make gh-review-commit-id-test)",
       "Bash(make pr-title-refs-test)",
       "Bash(make pr-title-check)",
       "Bash(make pr-title-check *)",
