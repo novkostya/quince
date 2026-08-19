@@ -287,6 +287,19 @@ rather than folded into the first.
 must say what that will mean before Save is pressed. A notice that appears only after the document
 is written is a report, not a warning.
 
+**THERE IS A SIXTH CAUSE SINCE quince#1270, AND IT IS NOT IN THE TABLE ABOVE BECAUSE IT IS NOT THIS
+RUNG'S.** `device_off` — the subject device's own notifications switch is off, so nothing about that
+device arrives whatever the categories say. It is recorded here rather than left for a reader to
+discover, because this table is where somebody looks for the complete set, and a table that silently
+stopped being complete is worse than one that says where the rest is.
+
+**It shares `category_off`'s exception and takes it one step further.** It is a fact about the
+CONFIGURATION rather than about this browser, so it renders beside `category_off` on
+`/settings/notifications` — and its remedy is on neither of those screens, so it carries a LINK to
+the device's own page. **The two are never folded together.** Both mean *nothing will arrive*, their
+remedies are on different screens, and one sentence covering both sends the user to the wrong one —
+the quince#940 defect. Both can be true at once, and both render.
+
 **These are computed client-side and reported honestly.** The server never guesses at a browser's
 capabilities; it knows only whether a live subscription exists.
 

@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
+import { useShallow } from "zustand/react/shallow";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Config, ConfigFieldError } from "@/lib/types";
 import { configKey, updateConfig, useConfigDraft } from "@/lib/config";
@@ -9,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { Field } from "@/features/settings/ConfigEditor";
 import { ConfigStaleNotice } from "@/features/settings/ConfigStaleNotice";
+import { useDevicesStore } from "@/stores/devices";
 
 // The `notifications:` section of `config.yml`, on the page that is about notifications (quince#1212).
 //
@@ -140,6 +143,7 @@ export function NotificationSettings({ config }: { config: Config }) {
       <div>
         <SectionHeading>What quince tells you</SectionHeading>
         <CategoryCoverageNotice notifications={draft.notifications} />
+        <DeviceCoverageNotice />
         <ul className="mt-3 flex flex-col gap-3">
           {CATEGORIES.map((c) => (
             <li key={c.key}>
@@ -323,6 +327,57 @@ function CategoryCoverageNotice({ notifications }: { notifications: Config["noti
           ? "Every kind below is switched off, so a device that has subscribed will never receive anything. Turn on at least one."
           : "Both reminders below are off. quince will still tell you when a backup fails or needs you — but it will never tell you one is due, which is what makes Wi-Fi backups happen on their own."}
       </p>
+    </div>
+  );
+}
+
+// DeviceCoverageNotice — `device_off`, the SIXTH status cause (quince#1270).
+//
+// IT MUST BE DISTINCT FROM `category_off` AND MUST NOT BE FOLDED INTO IT. Both mean "nothing will
+// arrive"; their remedies are on different screens — the switches directly below for one, one
+// device's own page for the other. A message that cannot tell them apart sends the user to the
+// wrong screen, which is the quince#940 defect exactly: one true, useless sentence over
+// distinguishable states with different fixes. Both notices can be true at once and both render.
+//
+// IT NAMES THE DEVICES AND LINKS TO THEM, because "troubleshooting is ACTIONABLE" is the rule and
+// the remedy here is somewhere else. `category_off` can say *turn one on below*; this one cannot,
+// so it carries the way there instead.
+//
+// IT READS THE DEVICES STORE, NOT THE DRAFT, and the asymmetry with `CategoryCoverageNotice` is
+// deliberate rather than an oversight. That notice reads the draft because this form is where those
+// values are EDITED, so it must warn before Save. These values are not edited here at all — they are
+// saved the moment the box on the device page moves — so the store IS the saved state, and it stays
+// live through `device.updated`.
+//
+// A NAME, NEVER A UDID: Operator-private, and meaningless to a reader besides. Same fallback chain
+// as `DeviceNotificationsControl` and `notify.deviceName`.
+function DeviceCoverageNotice() {
+  const muted = useDevicesStore(
+    useShallow((s) => s.order.map((u) => s.byUdid[u]).filter((d) => d && !d.notifications_enabled)),
+  );
+  if (muted.length === 0) return null;
+
+  return (
+    <div role="status" className="mt-3 rounded-card border border-line bg-accent-soft p-3 text-sm text-warn">
+      <div className="font-medium">
+        {muted.length === 1
+          ? "quince will not notify you about one of your devices"
+          : `quince will not notify you about ${muted.length} of your devices`}
+      </div>
+      <p className="mt-1 text-xs">
+        Notifications are switched off for {muted.length === 1 ? "it" : "them"} on
+        {muted.length === 1 ? " its" : " their"} own page — no reminders and no failures, whatever
+        the categories below say. Turn {muted.length === 1 ? "it" : "them"} back on there:
+      </p>
+      <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+        {muted.map((d) => (
+          <li key={d.udid}>
+            <Link className="underline underline-offset-2" to={`/devices/${d.udid}`}>
+              {d.name || d.model || "an unnamed device"}
+            </Link>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
