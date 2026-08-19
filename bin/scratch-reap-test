@@ -90,6 +90,20 @@ printf 'landed\n' >>"$WORK/seed/f"
 git -C "$WORK/seed" commit -qam "the work, as the forge rewrote it"
 git -C "$WORK/seed" push -q origin main
 
+
+# (7) UNJUDGEABLE — a DETACHED HEAD, and the case that guards the counter this change adds
+# (quince#1247 review). `gh pr checkout` leaves a clone detached once the PR's branch is deleted, so
+# this is the ordinary shape on the seat that clones most: 244 of 459 there.
+#
+# THE COUNTER HAD NO TEST AND THE REVIEWER PROVED IT — folding `unjudged` back into `kept` and
+# deleting the field from both summary lines left the suite green at 13. A change that adds an output
+# field and rewrites two summaries added no case, and the thing left unguarded was the claim it
+# exists to make: `kept` means the reaper LOOKED AND DECIDED NO; `unjudged` means it COULD NOT
+# ANSWER. Collapsing them is quince#41's shape, which is what the ruling asked for the number to
+# prevent.
+clone_at detached r1/detached
+git -C "$ROOT/detached" checkout -q --detach HEAD
+
 out=$WORK/out
 "$REAP" --root "$ROOT" >"$out" 2>&1 || true
 
@@ -104,6 +118,16 @@ assert_line 'KEEP   ahead' "commits not in main are KEPT" "would have deleted un
 assert_line 'would reap rebased' "a REBASE-MERGED clone is reaped — same patch, different sha" "kept a clone whose work is on main under a rewritten sha; this is quince#823, the defect that held 9.7 GB"
 assert_line 'KEEP   open' "a branch still on origin is KEPT" "would have deleted a live branch"
 assert_line 'skip   notaclone' "a non-clone is skipped and counted separately" "mishandled a non-clone"
+
+assert_line '?      detached' "a detached HEAD is UNJUDGED, not kept" "a clone the reaper cannot judge was reported as a decision"
+
+# ASSERT THE NUMBERS, NOT THE WORD (quince#1247 review). A test matching /unjudged/ passes against a
+# summary that always prints `0 unjudged`, which is the same vacuous-green this suite exists to
+# refuse. Both figures are pinned: one unjudgeable clone, and `kept` UNCHANGED at three — the dirty
+# one, the ahead one and the still-open branch. If the counter were folded back into `kept` this
+# would read `4 kept, 0 unjudged` and fail on both halves.
+assert_line '1 unjudged' "the summary counts the unjudgeable clone separately" "the unjudged count is missing or zero — folding it into kept is the defect this guards"
+assert_line '3 kept' "…and kept is unchanged, so the unjudgeable clone did not land in it" "the unjudgeable clone was counted as kept"
 
 # Report-only must not touch anything.
 if [ -d "$ROOT/finished" ]; then
