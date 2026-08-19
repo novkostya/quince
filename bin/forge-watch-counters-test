@@ -215,5 +215,109 @@ else
 	ok "a state that has never been armed prints no loop line (the control)"
 fi
 
+# ---------------------------------------------------------------------------
+# (6) EXIT CLASSES (quince#1265). Everything above pins `arms` and `wakes`, and the gap between them
+# was the whole defect: three idle bounds and three failing exits produce the same `arms − wakes` and
+# mean opposite things — the loop working versus the loop escalating.
+#
+# EVERY ARM AGAINST THIS STATE ENDS AT THE IDLE BOUND — the stub answers an empty queue, so nothing
+# can wake — which makes `idle == arms` the invariant, and it holds however many arms the cases above
+# have run by the time control reaches here.
+#
+# PINNED ON THE INVARIANT RATHER THAN ON A LITERAL, and the first version was the literal. It asserted
+# `idle = 3` and read 4, being wrong about its own suite rather than about the tool: case (4b)'s
+# `--all` arm covers this repo too. A count pinned to a moment in a suite that grows breaks on
+# unrelated edits, and a test that cries wolf is one somebody eventually deletes.
+#
+# It is not vacuous. `arms > 0` is asserted alongside, so an unbumped counter fails rather than
+# matching a zero; a bump on the wrong exit path breaks the equality; and `step` erasing it breaks it
+# too — which is exactly what happened, reading 1 after three bounds, because the carry-forward at
+# `bin/forge-watch:399` names its keys explicitly and did not yet name this one.
+_idle=$(jq -r '.idle // 0' "$STATE" 2>/dev/null || printf 0)
+_armsnow=$(jq -r '.arms // 0' "$STATE" 2>/dev/null || printf 0)
+if [ "$_armsnow" -gt 0 ] && [ "$_idle" = "$_armsnow" ]; then
+	ok "every arm in this suite ended at the idle bound and every one is counted (idle=$_idle=arms)"
+else
+	bad "idle=$_idle arms=$_armsnow — an idle exit is uncounted, counted on the wrong path, or erased by step"
+fi
+
+# (6b) AND IT IS REPORTED, not merely stored. quince-devlog#173's complaint was never that the idle
+# exit did not happen — it was that the evidence "exists only in session scratch". A counter nothing
+# prints reproduces that exactly.
+if grep -qE '^loop: 3 arm\(s\), 0 wake\(s\), 3 idle bound\(s\), 0 failing exit\(s\), 0 prevented ' "$WORK/st"; then
+	ok "the loop line reports idle bounds and failing exits as their own figures"
+else
+	bad "the loop line does not carry the exit classes"
+	grep '^loop:' "$WORK/st" | sed 's/^/    | /'
+fi
+
+# (6c) A FAILING EXIT IS `failing` AND NOT `idle`, which is the discrimination the issue asks for.
+# A gh that cannot answer, with --fail-after 1, so the loop escalates on its first tick rather than
+# reaching the bound. --max-wait is left long enough that an idle exit would be the WRONG answer and
+# would be visible as one, rather than the two racing.
+# IT MUST AUTHENTICATE AND THEN FAIL THE FETCH, which is not the same as failing everything. `watch`
+# probes `api rate_limit` once at arm time and REFUSES a wrapper that cannot authenticate (quince#429)
+# — so a stub that fails unconditionally never arms, and the case measures the arm-time guard instead
+# of the exit class. That is what the first version of this stub did: exit 1, no arm, `failing=0`.
+#
+# The distinction is the point of the case. `--fail-after` is about ticks that cannot fetch on a watch
+# that armed cleanly; the quince#429 refusal is about one that should never arm at all.
+cat >"$WORK/gh-broken" <<'BROKEN'
+#!/bin/sh
+case "$1 ${2:-}" in
+"api rate_limit") printf '4999\n'; exit 0 ;;
+esac
+printf 'stub: cannot reach the forge\n' >&2
+exit 1
+BROKEN
+chmod +x "$WORK/gh-broken"
+FAILSTATE="$WORK/failing.json"
+printf '{}\n' >"$FAILSTATE"
+# `|| _frc=$?` and NOT a bare invocation: this suite runs under `set -e` and exit 7 is the POINT of
+# the case, so the unguarded form aborts the whole file — silently, because a suite that dies before
+# its summary prints looks like a suite that ended. It did exactly that here, taking (6c) through
+# (6f) with it while the twelve cases above still printed `ok`.
+_frc=0
+./bin/forge-watch watch --repo "$REPO" --state "$FAILSTATE" --gh "$WORK/gh-broken" --no-issues \
+	--interval 1 --max-wait 60 --fail-after 1 >"$WORK/outfail" 2>&1 || _frc=$?
+_f=$(jq -r '.failing // 0' "$FAILSTATE" 2>/dev/null || printf 0)
+_fi=$(jq -r '.idle // 0' "$FAILSTATE" 2>/dev/null || printf 0)
+if [ "$_frc" = 7 ] && [ "$_f" = 1 ] && [ "$_fi" = 0 ]; then
+	ok "a failing-tick exit counts as failing and NOT as an idle bound (exit 7, failing=1, idle=0)"
+else
+	bad "exit=$_frc failing=$_f idle=$_fi — expected 7/1/0"
+	tail -3 "$WORK/outfail" | sed 's/^/    | /'
+fi
+
+# (6d) AND THE FAILING PATH PRINTS THE LEDGER AT ALL. It printed none before quince#1265 — the one
+# exit where the cumulative figures say the most was the one that reported nothing.
+if grep -qE '^loop: 1 arm\(s\), 0 wake\(s\), 0 idle bound\(s\), 1 failing exit\(s\), ' "$WORK/outfail"; then
+	ok "the failing exit reports the totals — previously the only exit path that printed none"
+else
+	bad "the failing exit still prints no loop line"
+	tail -4 "$WORK/outfail" | sed 's/^/    | /'
+fi
+
+# (6e) THE LINE SAYS WHEN THE NEW FIGURES START, which is constraint 4 applied to a counter added to
+# a ledger that already had history. A state file armed before this change carries `arms` and `wakes`
+# with `idle` and `failing` at zero, so a reader subtracting them gets a plausible wrong number —
+# quince#296's exact cost. The caveat is what stops that subtraction being made silently.
+if grep -q 'so arms from before that are in neither' "$WORK/st"; then
+	ok "the line declares that pre-quince#1265 arms are in neither new figure (constraint 4)"
+else
+	bad "the new figures are printed with no statement of when they began counting"
+	grep '^loop:' "$WORK/st" | sed 's/^/    | /'
+fi
+
+# (6f) AND THAT A REFUSED ARM IS IN NONE OF THEM. `watch_preflight` dies before `watch_arm`, so a
+# refusal reaches no counter — stated because the retirement record that asked for this feature
+# (quince-devlog#287) assumed the opposite, and a reader doing that arithmetic would be wrong.
+if grep -q 'an arm refused at preflight is in none of these figures' "$WORK/st"; then
+	ok "the line states that a refused arm is in no counter"
+else
+	bad "nothing says where a refused arm lands, and the obvious guess is wrong"
+	grep '^loop:' "$WORK/st" | sed 's/^/    | /'
+fi
+
 printf '\nforge-watch-counters-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

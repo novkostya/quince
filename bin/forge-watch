@@ -396,7 +396,13 @@ step() {
 	# the new state, and an observation has no `.arms` — so without this the counter was incremented
 	# by `watch_arm` and erased by the very next tick. Found by measuring a live arm and reading back
 	# `arms=unset`, not by reading the code: the increment was correct and its persistence was not.
-	_prev_counts=$(jq -c '{arms: (.arms // 0), wakes: (.wakes // 0), prevented: (.prevented // 0)}' "$_prev" 2>/dev/null || printf 'null')
+	#
+	# THE LIST IS EXPLICIT AND THAT IS THE HAZARD: A NEW COUNTER MUST BE ADDED HERE OR IT SILENTLY
+	# RESETS EVERY TICK. quince#1265's `idle` and `failing` were added to `loop_totals` and to their
+	# exit paths first, and read back as 1 after three idle bounds — the last arm's bump surviving and
+	# the two before it erased. That is the defect above, reproduced by the change that cites it, and
+	# it was caught by the suite rather than by review because the increment is correct in isolation.
+	_prev_counts=$(jq -c '{arms: (.arms // 0), wakes: (.wakes // 0), prevented: (.prevented // 0), idle: (.idle // 0), failing: (.failing // 0)}' "$_prev" 2>/dev/null || printf 'null')
 	[ -n "$_prev_counts" ] || _prev_counts=null
 
 	_now_prs=$(printf '%s' "$_now" | jq -c '.prs // []')
@@ -416,7 +422,7 @@ step() {
 			--argjson watch "$_prev_watch" --argjson counts "$_prev_counts" '
 			. + {observed: true}
 			| if $watch == null then . else .watch = $watch end
-			| if $counts == null then . else (.arms = $counts.arms | .wakes = $counts.wakes | .prevented = $counts.prevented) end
+			| if $counts == null then . else (.arms = $counts.arms | .wakes = $counts.wakes | .prevented = $counts.prevented | .idle = $counts.idle | .failing = $counts.failing) end
 			| if $decl == null then . else
 				(.issues.items // []) as $ni
 				| ([$ni[].number]) as $seen
@@ -898,7 +904,7 @@ step() {
 		# the channel this whole feature exists to make reliable. Absence is reported by
 		# `issue-fetch-failed`; it is never allowed to mean "nothing there".
 		| if $watch == null then . else .watch = $watch end
-		| if $counts == null then . else (.arms = $counts.arms | .wakes = $counts.wakes | .prevented = $counts.prevented) end
+		| if $counts == null then . else (.arms = $counts.arms | .wakes = $counts.wakes | .prevented = $counts.prevented | .idle = $counts.idle | .failing = $counts.failing) end
 		| if $decl == null then . else
 			(.issues.items // []) as $ni
 			| ([$ni[].number]) as $seen
@@ -1091,18 +1097,45 @@ loop_state_files() { # <all> <repo> <state>
 	fi
 }
 
-bump_wakes() { # <all> <repo> <state>
-	loop_state_files "$1" "$2" "$3" | while IFS= read -r _bw_f; do
-		[ -f "$_bw_f" ] || continue
+bump_counter() { # <key> <all> <repo> <state>
+	_bc_k=$1
+	shift
+	loop_state_files "$1" "$2" "$3" | while IFS= read -r _bc_f; do
+		[ -f "$_bc_f" ] || continue
 		# NOT `jq … && mv … || rm`, which reads as if-then-else and is not one: the `rm` also fires
 		# when `mv` fails, and a half-written counter is worth less than none. SC2015 caught the same
 		# shape in quince#265 and it is the second time tonight.
-		if jq -c '.wakes = ((.wakes // 0) + 1)' "$_bw_f" >"$_bw_f.new" 2>/dev/null; then
-			mv "$_bw_f.new" "$_bw_f"
+		if jq -c --arg k "$_bc_k" '.[$k] = ((.[$k] // 0) + 1)' "$_bc_f" >"$_bc_f.new" 2>/dev/null; then
+			mv "$_bc_f.new" "$_bc_f"
 		else
-			rm -f "$_bw_f.new"
+			rm -f "$_bc_f.new"
 		fi
 	done
+}
+
+bump_wakes() { # <all> <repo> <state>
+	bump_counter wakes "$@"
+}
+
+# EXIT CLASSES (quince#1265). `arms` and `wakes` were the whole ledger, so `arms − wakes` conflated an
+# idle bound with a failing-tick exit — opposite facts about the same loop, one saying it works and
+# one saying it is broken. Six retirement records asked for this separately (quince-devlog#121, #132,
+# #173, #198, #204, #253, #287, #288) and not one had a tracker to point at, because a non-event has
+# no event to file against.
+#
+# A COUNTER AND NOT AN EVENT, deliberately. quince-devlog#121 considered emitting a periodic `alive`
+# object and declined it — it "would make idle cycles visible at the cost of making the queue noisy".
+# That refusal is this change's scope boundary: nothing new is emitted per tick, and the two numbers
+# ride the one-line ledger that already prints on these paths.
+#
+# NOT counted: an arm REFUSED by watch_preflight. It dies before watch_arm, so a refusal never reaches
+# `.arms` either — it is absent from both sides rather than confused with anything on either.
+bump_idle() { # <all> <repo> <state>
+	bump_counter idle "$@"
+}
+
+bump_failing() { # <all> <repo> <state>
+	bump_counter failing "$@"
 }
 
 # THE THIRD THING, and the reason quince#242 could not be closed on its own merge: a tick where
@@ -1118,14 +1151,7 @@ bump_wakes() { # <all> <repo> <state>
 # one did not. Ownership filtering is applied on BOTH sides, because it is a different mechanism and
 # holding it constant is what isolates this one.
 bump_prevented() { # <all> <repo> <state>
-	loop_state_files "$1" "$2" "$3" | while IFS= read -r _bp_f; do
-		[ -f "$_bp_f" ] || continue
-		if jq -c '.prevented = ((.prevented // 0) + 1)' "$_bp_f" >"$_bp_f.new" 2>/dev/null; then
-			mv "$_bp_f.new" "$_bp_f"
-		else
-			rm -f "$_bp_f.new"
-		fi
-	done
+	bump_counter prevented "$@"
 }
 
 # Summed across the watched repos, because an `--all` watch is ONE loop over several state files and
@@ -1134,11 +1160,15 @@ loop_totals() { # <all> <repo> <state>
 	_lt_a=0
 	_lt_w=0
 	_lt_p=0
+	_lt_i=0
+	_lt_f7=0
 	while IFS= read -r _lt_f; do
 		[ -f "$_lt_f" ] || continue
 		_lt_a=$((_lt_a + $(jq -r '.arms // 0' "$_lt_f" 2>/dev/null || printf 0)))
 		_lt_w=$((_lt_w + $(jq -r '.wakes // 0' "$_lt_f" 2>/dev/null || printf 0)))
 		_lt_p=$((_lt_p + $(jq -r '.prevented // 0' "$_lt_f" 2>/dev/null || printf 0)))
+		_lt_i=$((_lt_i + $(jq -r '.idle // 0' "$_lt_f" 2>/dev/null || printf 0)))
+		_lt_f7=$((_lt_f7 + $(jq -r '.failing // 0' "$_lt_f" 2>/dev/null || printf 0)))
 	done <<EOF
 $(loop_state_files "$1" "$2" "$3")
 EOF
@@ -1183,8 +1213,20 @@ EOF
 	# quince#296. A reader follows this citation from a printed line to understand the figure, so
 	# sending them to an issue about denominators to learn what `prevented` measures would be a line
 	# that misleads, inside the fix for a line that misled.
-	printf 'loop: %s arm(s), %s wake(s), %s prevented %s since counting began — prevented = ticks where self-caused suppression was the difference between exiting and continuing (quince#242).\n' \
-		"$_lt_a" "$_lt_w" "$_lt_p" "$_lt_scope"
+	# EXIT CLASSES ARE PRINTED, THE RESIDUAL IS NOT (quince#1265). `idle` and `failing` are the two
+	# non-wake exits the loop can name for itself, and naming them is the whole ask: `arms − wakes`
+	# read as one quantity while covering both, so a reader could not tell a loop proving it can wait
+	# a full bound from one escalating on ticks that cannot fetch. Opposite facts, one number.
+	#
+	# `arms − wakes − idle − failing` is deliberately NOT printed, and the reason is quince#296's, one
+	# revision later. On a state file that predates these counters the two new figures start at zero
+	# while `arms` and `wakes` carry history, so that subtraction yields a PLAUSIBLE wrong number —
+	# a small integer that looks like "crashed arms" and is mostly "arms from last week". quince#296
+	# is the record of what a plausible wrong number costs here: a seat spent a cycle hunting a
+	# regression that did not exist. The caveat below says what the gap contains instead of computing
+	# it, and a residual becomes worth printing once every live state file was created after this.
+	printf 'loop: %s arm(s), %s wake(s), %s idle bound(s), %s failing exit(s), %s prevented %s since counting began — prevented = ticks where self-caused suppression was the difference between exiting and continuing (quince#242); idle/failing count exits 6 and 7 and were added by quince#1265, so arms from before that are in neither, and an arm refused at preflight is in none of these figures.\n' \
+		"$_lt_a" "$_lt_w" "$_lt_i" "$_lt_f7" "$_lt_p" "$_lt_scope"
 }
 
 # ---------------------------------------------------------------------------
@@ -3805,6 +3847,11 @@ watch_loop() {
 			if [ "$_wfails" -ge "$_wfail" ]; then
 				printf 'event=watch-failing consecutive=%s limit=%s\n' "$_wfails" "$_wfail"
 				printf 'forge-watch: watch EXITING — %s ticks in a row could not fetch. The events above name the reason; fix it and arm again.\n' "$_wfails"
+				# Counted and REPORTED here (quince#1265). This exit printed no ledger at all, which is
+				# the path where it says the most: a run of failing exits is the loop escalating, and
+				# it was previously indistinguishable from the idle bound inside `arms − wakes`.
+				bump_failing "$_wall" "$_wrepo" "$_wstate"
+				loop_totals "$_wall" "$_wrepo" "$_wstate"
 				rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc" "$_wact" "$_wactc" "$_wcf" "$_wpm" "$_wpmc"
 				return 7
 			fi
@@ -3819,6 +3866,12 @@ watch_loop() {
 			# cost an arm and an interval — and a counter visible only on the wake path would
 			# understate the loop exactly in the quiet hours the ratio is meant to expose. NOT
 			# counted as a wake: nothing woke.
+			#
+			# It is now counted as ITSELF (quince#1265). Reporting the totals here was never the same
+			# as counting this exit: the line was printed and the exit left no trace in it, so the
+			# strongest evidence the watch works — a full bound ticked with nothing to report — lived
+			# in session scratch and had to be tallied by hand at every retirement.
+			bump_idle "$_wall" "$_wrepo" "$_wstate"
 			loop_totals "$_wall" "$_wrepo" "$_wstate"
 			rm -f "$_wevt" "$_wmap" "$_wmine" "$_wothers" "$_wself" "$_wsupc" "$_wact" "$_wactc" "$_wcf" "$_wpm" "$_wpmc"
 			return 6
