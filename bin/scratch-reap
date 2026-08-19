@@ -109,6 +109,13 @@ say "scratch-reap: root=$ROOT mode=$([ "$PRUNE" = yes ] && printf prune || print
 
 reaped=0
 kept=0
+# UNJUDGED IS NOT KEPT, and the two must not share a number (quince-devlog#286, architect ruling).
+# `kept` means "looked at it and decided no"; `unjudged` means "could not answer". Folding the second
+# into the first is quince#41's shape — a tool that looked at something, could not answer, and let
+# the number vanish into a total that reads as a decision. On the architect box 54% of a 459-clone
+# root is unjudgeable (detached HEAD), and a summary calling those "kept" would report a reaper
+# working well on a root it is nearly blind to.
+unjudged=0
 skipped=0
 
 for d in "$ROOT"/*; do
@@ -125,15 +132,15 @@ for d in "$ROOT"/*; do
 	# The remote is asked once per clone. That is a network call apiece and it is the price of not
 	# guessing: "the branch is gone" is a fact about the forge and cannot be read locally.
 	if ! git -C "$d" fetch --quiet --prune origin 2>/dev/null; then
-		kept=$((kept + 1))
-		say "  KEEP   $name — could not reach origin, so whether its branch is gone is UNKNOWN"
+		unjudged=$((unjudged + 1))
+		say "  ?      $name — could not reach origin, so whether its branch is gone is UNKNOWN"
 		continue
 	fi
 
 	branch=$(git -C "$d" rev-parse --abbrev-ref HEAD 2>/dev/null || printf '')
 	if [ -z "$branch" ] || [ "$branch" = HEAD ]; then
-		kept=$((kept + 1))
-		say "  KEEP   $name — detached or unreadable HEAD; not something to judge automatically"
+		unjudged=$((unjudged + 1))
+		say "  ?      $name — detached or unreadable HEAD; not something to judge automatically"
 		continue
 	fi
 
@@ -152,8 +159,8 @@ for d in "$ROOT"/*; do
 	# matches, which is the answer we want for a fully-landed branch — so the two cases have to be
 	# told apart by whether `cherry` itself succeeded, not by the count.
 	if ! cherry=$(git -C "$d" cherry origin/main "$branch" 2>/dev/null); then
-		kept=$((kept + 1))
-		say "  KEEP   $name — could not compare $branch against origin/main, so whether its work landed is UNKNOWN"
+		unjudged=$((unjudged + 1))
+		say "  ?      $name — could not compare $branch against origin/main, so whether its work landed is UNKNOWN"
 		continue
 	fi
 	ahead=$(printf '%s\n' "$cherry" | grep -c '^+' || true)
@@ -221,8 +228,8 @@ if [ "$((reaped + kept))" -eq 0 ]; then
 fi
 
 if [ "$PRUNE" = yes ]; then
-	printf 'scratch-reap: %s reaped, %s kept, %s not clones\n' "$reaped" "$kept" "$skipped"
+	printf 'scratch-reap: %s reaped, %s kept, %s unjudged, %s not clones\n' "$reaped" "$kept" "$unjudged" "$skipped"
 else
-	printf 'scratch-reap: %s would be reaped, %s kept, %s not clones — pass --prune to act\n' \
-		"$reaped" "$kept" "$skipped"
+	printf 'scratch-reap: %s would be reaped, %s kept, %s unjudged, %s not clones — pass --prune to act\n' \
+		"$reaped" "$kept" "$unjudged" "$skipped"
 fi

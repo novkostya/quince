@@ -167,7 +167,7 @@ telling the truth.
 arms nothing *and* has not flushed is the exact failure the hook exists for. A session that has
 flushed to the forge is the one case where an unwatched queue is correct. Say which you are.
 
-## 6. Stop the watchers deliberately — LAST, and not before
+## 6. Stop the watchers deliberately — not before this, and before §7
 
 ```sh
 bin/forge-watch stop --all                   # every watcher in the declared set (quince#118)
@@ -193,7 +193,66 @@ stop cannot leave a watcher live while reporting success. **Then record that you
 them on purpose**, because §3's ambiguity means the state itself cannot say so: deliberately
 stopped, exited on an event, and crashed all read `dead` / `no_process`.
 
-## 7. Then stop
+
+**"Not before" is unchanged; "last" is no longer true, and §7 is why.** Stopping the watchers is now
+the second-to-last step: §7 reaps this session's clones, and a live watcher holds a path *into* one
+of them (`--gh "$PWD/bin/gh-coder"`). Reaping first can delete the wrapper a running watcher is
+about to exec. The reason for "not before" is untouched — a live watcher is what makes §1's loop
+work — and only the tail moved.
+## 7. Reap this session's finished clones
+
+```sh
+bin/scratch-reap --prune                     # own root only — the default is $HOME/scratch/<runner>
+```
+
+**Ruled by the architect on quince-devlog#286**, after an Operator direction to propose it. The
+reaper has existed since quince#45 and nothing had ever invoked it: 51 runner roots and **21.1 GB**
+accumulated on one box before the architect hit `Quota exceeded` mid-clone at 99% of a 32 GB volume.
+A by-hand sweep of the dead roots removed **109 clones and recovered ~15.5 GB**.
+
+**`--prune`, not a report.** The ruling is explicit and the evidence is the reason: *"a reaper that
+has existed since quince#45 and has never been invoked let 51 roots accumulate, and a report at
+retirement is a thing nobody acts on for the same reason nobody ran the tool."* The safety rule
+carries the weight, and it is measured at scale rather than assumed — across 459 clones on the
+architect root, 240 detached HEADs were clean with every commit already in `main` by patch and
+**zero were dirty**.
+
+**OWN ROOT ONLY.** No `--root`, ever, in this step. The default resolves to `$HOME/scratch/<runner>`
+precisely so one runner never touches another's trees (quince#45, quince#111) — and a retiring
+session cannot know whether another seat's clone is finished. The cross-root sweep that recovered
+the 15.5 GB was an **Operator instruction** and stays exceptional.
+
+**AFTER §1's boundary proof, never before and never instead of it.** §1 asks whether any work exists
+only as an unpushed branch; this deletes clones. Inverting them makes a deletion the thing that
+decides whether work existed. The reaper's own rule refuses a dirty tree and an unmerged branch, but
+that is a second line of defence, not the argument — the argument is that §1 has already run.
+
+**AND AFTER §6, WHICH IS WHY THIS IS §7 AND NOT §5.** A live watcher holds a path *into* a scratch
+clone: both skills arm it as `--gh "$PWD/bin/gh-coder"`, and `$PWD` is the working clone. Reap while
+a watcher is live and you can delete the wrapper it is about to exec — a watcher that reports `live`
+and cannot fetch. §6 stops the watchers; only then is the tree safe to remove.
+
+**REPORT ALL THREE NUMBERS — `N reaped, M kept, K unjudged`** — which is what the summary line now
+prints, and the ruling required it: *"five 'could not compare' clones is exactly quince#41's shape —
+a tool that looked at something, could not answer, and lets the number vanish."* `kept` means it
+looked and decided no; `unjudged` means it could not answer.
+
+**SAY "REDUCED", NOT "CLEARED".** A retirement does not empty its root and must not claim to. The
+reaper correctly keeps a clone whose branch is still open or whose commits are not upstream — 49 of
+90 keeps on the by-hand sweep were exactly that. A session reading *"root cleared"* about a root
+still holding clones learns the wrong thing about its own disk.
+
+**It does not block the retirement.** The reaper KEEPs whatever it cannot judge, so the failure
+direction is safe, and a retirement that stops on an unjudgeable clone is a retirement that does not
+happen. Report the number and carry on.
+
+**On the architect seat this buys little TODAY, and that is known rather than discovered.** 244 of
+459 clones there (54%) sit on a detached HEAD — `gh pr checkout` leaves them that way once the PR's
+branch is deleted — and the reaper refuses to judge a detached HEAD, having no branch to ask either
+question of. The extension that fixes it is quince#823's open half: ask the same patch-id question
+of `HEAD`. Run this step anyway; it is correct, and it stops the growth on the implementer seat now.
+
+## 8. Then stop
 
 No new work. No approvals. **Anything done after §2 is by definition unrecorded** — and if
 something does land after it, that is §1's loop firing, so go back and re-assert rather than
