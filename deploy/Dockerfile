@@ -39,7 +39,7 @@ WORKDIR /src/ui
 RUN pnpm run build
 
 # --- libimobiledevice: pinned tag, built from source with quince's in-tree patches (qn.6b) ---
-# Built from SOURCE (not the Alpine `-progs` package) so four in-tree patches ship in the image:
+# Built from SOURCE (not the Alpine `-progs` package) so five in-tree patches ship in the image:
 #   0001  raises the default receive timeout 30s -> 15min (upstream #1413) — a slow passcode,
 #         large-device transfer, or transient Wi-Fi flap no longer trips a premature receive error.
 #   0002  adds `idevicebackup2 --gate <path>` — pause after the Backup request, before the message
@@ -56,6 +56,10 @@ RUN pnpm run build
 #         (quince#518). The destination is named by the DEVICE at runtime and the handler is not
 #         command-gated, so it is reachable during a backup and no list on quince's side could
 #         exclude it. A no-op when the destination is not aliased.
+#   0005  treats a network device's NetworkAddress as opaque and opens its service connections
+#         through the muxer by DeviceID + port. This removes the cross-kernel sockaddr ABI leak
+#         (notably Apple's Darwin usbmuxd mounted into this Linux container) and leaves link-local
+#         routing and interface scope with the muxer that discovered the device.
 # Only THIS repo is built: Alpine 3.24 ships every -dev dependency at a satisfying version, incl.
 # libtatsu (verified live, qn.6b spike). NOTE (amendment A): 0001 raises the default for EVERY
 # libimobiledevice binary, so quince bounds its non-backup tool ops with a Go-side deadline
