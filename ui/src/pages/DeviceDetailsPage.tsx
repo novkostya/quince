@@ -17,6 +17,7 @@ import {
 } from "@/features/devices/encryptionPolicy";
 import { PairDialog } from "@/features/devices/PairDialog";
 import { WifiSyncControl } from "@/features/devices/WifiSyncControl";
+import { DeviceNotificationsControl } from "@/features/devices/DeviceNotificationsControl";
 import { EncryptionDialog, type EncryptionMode } from "@/features/devices/EncryptionDialog";
 import { JobProgressFull } from "@/features/jobs/JobProgress";
 import { JobLogPane } from "@/features/jobs/JobLogPane";
@@ -196,6 +197,15 @@ export function DeviceDetailsPage() {
               <WifiSyncControl device={device} />
             </div>
           ) : null}
+
+          {/* NOT GATED ON `paired`, unlike the two controls above. Those reach the phone and a
+              lockdown write needs a trusted session; this writes one row in quince's own
+              database. The device this feature exists for — one that is paired, visible, and
+              never going to be backed up — must be settable, and so must an OFFLINE device
+              (qn.6a), which is a phone in a drawer by another name. */}
+          <div className="mt-3">
+            <DeviceNotificationsControl device={device} />
+          </div>
 
           <EncryptionDialog
             udid={device.udid}
