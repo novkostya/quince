@@ -110,14 +110,33 @@ for w in $WRAPPERS; do
 	says_not "500 does not accuse the key" "has been revoked" "$out"
 
 	# THE CASE THE OLD WORDING WAS WRITTEN FOR, and it must survive the fix — a check that only
-	# stopped saying "revoked" would be wrong in the other direction.
+	# stopped saying "revoked" would be wrong in the other direction. 401 really is the credential.
 	out=$(run "$w" 22 401 '{"message":"Bad credentials"}')
 	says     "401 keeps the credential wording" "has been revoked" "$out"
 	says_not "401 is not called transient" "TRANSIENT" "$out"
 
-	out=$(run "$w" 22 403 '{"message":"Forbidden"}')
-	says     "403 keeps the credential wording" "has been revoked" "$out"
-	says_not "403 is not called transient" "TRANSIENT" "$out"
+	# 403 IS THE ONE THIS SUITE GOT WRONG FIRST, and it pinned it (quince#1276 review). GitHub
+	# documents 403 for primary AND secondary rate limits as well as for permission, so the message
+	# that makes a session STOP was being emitted for a condition whose remedy is WAIT — which is
+	# this issue's own failure mode, one status code over, held in place by a passing test.
+	out=$(run "$w" 22 403 '{"message":"API rate limit exceeded for installation"}')
+	says_not "403 does NOT assert the key is revoked" "has been revoked" "$out"
+	says     "403 names the rate-limit cause too" "RATE LIMIT" "$out"
+	says     "403 does not tell the session to stop" "NOT necessarily a reason to stop" "$out"
+	says     "403 still prints the body, which is what discriminates" "rate limit exceeded" "$out"
+
+	# ...AND THE PERMISSION CASE REACHES THE SAME ARM, deliberately. The wrapper does not branch on
+	# prose, so both 403 bodies get the same hedge; what tells them apart is the body it prints.
+	out=$(run "$w" 22 403 '{"message":"Resource not accessible by integration"}')
+	says     "a permission 403 gets the same honest hedge" "Two causes are plausible" "$out"
+	says     "...and its body is printed as the discriminator" "not accessible by integration" "$out"
+
+	# 429 IS THE OTHER DOCUMENTED RATE-LIMIT STATUS and was landing in the will-not-guess bucket —
+	# honest, but a known transient status reported as unknown.
+	out=$(run "$w" 22 429 '{"message":"Too Many Requests"}')
+	says     "429 is called transient" "TRANSIENT" "$out"
+	says     "429 names rate limiting" "rate limiting" "$out"
+	says_not "429 does not accuse the key" "has been revoked" "$out"
 
 	# NO HTTP RESPONSE AT ALL. curl reports 000, which is what keeps a transport failure distinct
 	# from a 5xx rather than collapsing into the unknown arm.

@@ -280,9 +280,30 @@ app_api() {
 		return 0
 	fi
 	case "$_status" in
-	401 | 403) die "$_what" "$(printf '%s' "$_body" | head -n 3)" \
-		"HTTP $_status — GitHub rejected the credential itself." \
+	401) die "$_what" "$(printf '%s' "$_body" | head -n 3)" \
+		"HTTP 401 — GitHub rejected the credential itself." \
 		"Most likely: the key does not match app id $APP_ID, or the key has been revoked." ;;
+	# 403 IS NOT EXCLUSIVELY A REJECTED CREDENTIAL, AND SAYING SO WOULD REPEAT THIS WHOLE BUG ONE
+	# STATUS CODE OVER (quince#1276 review). GitHub documents 403 for PRIMARY AND SECONDARY RATE
+	# LIMITS as well as for permission — *"if you exceed your primary rate limit, you will receive a
+	# 403 or 429 response"* — and the two remedies are opposite: one is stop, the other is wait.
+	#
+	# IT IS REACHABLE HERE RATHER THAN THEORETICAL. Every wrapper call spends two App-API requests
+	# before the real one, `forge-watch` invokes a wrapper every 60s, and installation-token creation
+	# is itself rate-limited.
+	#
+	# SO THIS NAMES BOTH CAUSES AND DOES NOT TELL THE SESSION TO STOP, which is the expensive half.
+	# Pointing at the body is NOT parsing it — the rule this file keeps is that the wrapper must not
+	# branch on prose, and telling a reader which line discriminates costs nothing and decides it.
+	403) die "$_what" "$(printf '%s' "$_body" | head -n 3)" \
+		"HTTP 403 — GitHub refused this request. Two causes are plausible and the message above" \
+		"distinguishes them: a permission this App does not have here, or a RATE LIMIT (GitHub" \
+		"returns 403 for both primary and secondary limits)." \
+		"NOT necessarily a reason to stop — if it is a rate limit, wait and retry." ;;
+	# THE OTHER DOCUMENTED RATE-LIMIT STATUS, and unambiguous where 403 is not.
+	429) die "$_what" "$(printf '%s' "$_body" | head -n 3)" \
+		"HTTP 429 — GitHub is rate limiting this credential." \
+		"This is TRANSIENT: wait and retry. The credential was NOT rejected." ;;
 	5??) die "$_what" "$(printf '%s' "$_body" | head -n 3)" \
 		"HTTP $_status — GitHub did not answer. This is TRANSIENT: retry the same command." \
 		"The credential was NOT rejected, and this is not a reason to stop." ;;
