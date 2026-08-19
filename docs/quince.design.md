@@ -1109,13 +1109,32 @@ with rather than the one it has. **`[]` is a measurement, not a gap**: that muxe
 device is coming over it. The key is always present, never omitted, so a client never has to
 distinguish absent from empty.
 
-`state` ∈ `starting | running | degraded | stopped | external | unreachable`; `detail` carries the
+`state` ∈ `starting | running | degraded | stopped | external | unreachable | absent`; `detail` carries the
 last exit reason / why degraded / why external / why unreachable; `rescan` says whether
 `POST /api/devices/rescan` restarts that daemon (USB only). An external muxer appears with
 `managed: false` rather than being omitted — an absent entry would read as "no muxer". `--demo`
 reports `[]`.
 qn.2b's singular `muxer` object is **gone** (qn.4c clean break, ruled (bz)): with two daemons a
 single aggregate could not say which one was degraded, and two overlapping representations rot.
+
+**`absent` IS A FACT, NOT A FAULT, AND IT IS WHAT MAKES A MULTI-ENTRY DEFAULT POSSIBLE** (Operator
+ruling 2026-08-19, quince#1256). quince ships a DEFAULT `muxers:` list so that a compose file is
+enough; a default naming more than one candidate address means every install carries an entry that
+will never answer. Reporting that as `unreachable` would paint a healthy install red permanently,
+and **a surface that fails on every run stops being read** — which also cuts against *no silent caps
+or fallbacks* from the unexpected side, since that rule exists so REAL degradation stays visible.
+
+**It is not omission either, and that was ruled explicitly.** Omitting an absent default matches
+"nothing was asserted" and throws away the one fact a debugging session wants: *"we looked here and
+found nothing"* and *"this address was never in play"* are different answers, and when no devices
+appear the first question is where quince looked. So the entry is present, with a `detail` that names
+the address and says the silence is normal — the state word alone cannot carry the second half.
+
+**The line is DECLARED vs DEFAULTED, and it needs no schema key**: `config.Config.Muxers` is a
+pointer, so nil means quince supplied the list and non-nil means the operator wrote each address
+down (quince#1246). A **declared** address that does not answer stays `unreachable` — you said it
+was there, it is not, that is a fault. `declared` decides only what SILENCE means: a defaulted muxer
+that actually answers is `external`, like any other.
 
 **`external` IS A PROBED CLAIM, AND `unreachable` IS ITS OTHER HALF** (qn.6p D5, quince#897 item 2).
 It was asserted from configuration alone until then — `AddUnmanaged` built a status reading *"is

@@ -135,7 +135,11 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	// state in /api/health rather than asserting one (qn.6p D5). `type: managed` is refused above,
 	// so the supervised arm of muxsup is unreachable on a shipping build; it is parked against the
 	// return of the all-in-one profile, not dead.
-	group := buildMuxerGroup(muxers, dialerLookup(dialerByAddress), log)
+	// DECLARED vs DEFAULTED decides whether an address that does not answer is a fault or merely
+	// discovery coming up empty (quince#1256). `Muxers` is a pointer, so this is the whole test:
+	// nil means quince supplied the list, non-nil means the operator wrote it down.
+	declared := cfgSvc.Current().Muxers != nil
+	group := buildMuxerGroup(muxers, declared, dialerLookup(dialerByAddress), log)
 	// What each muxer is SERVING is measured from the registry it feeds, not asserted from the
 	// config key its address was written under (quince#1219 item E).
 	group.SetTransports(reg.TransportsForSource)

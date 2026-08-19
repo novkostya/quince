@@ -49,6 +49,26 @@ const (
 	// crash surfaces, and rescan restarts nothing — so "leave it as external" would make the one
 	// available signal incapable of saying anything but fine.
 	StateUnreachable = "unreachable"
+	// StateAbsent is a muxer nobody asked for, at an address nothing is listening on.
+	//
+	// IT IS A FACT, NOT A FAULT, and that is the whole reason it is not `unreachable` (Operator
+	// ruling 2026-08-19, quince#1256). quince ships a DEFAULT muxer list so that a compose file is
+	// enough; a default that names more than one candidate address means every install has one
+	// entry that will never answer. Reporting that as a failure would paint a healthy install red
+	// permanently, and **a surface that fails on every run stops being read** — which also cuts
+	// against *no silent caps or fallbacks* from the unexpected side, since that rule exists so
+	// REAL degradation stays visible.
+	//
+	// IT IS NOT OMISSION EITHER, and that was ruled explicitly. Omitting an absent default matches
+	// "nothing was asserted" and throws away the one fact a debugging session wants: *"we looked
+	// here and found nothing"* and *"this address was never in play"* are different answers, and
+	// when no devices appear the first question is where quince looked.
+	//
+	// THE LINE IS DECLARED vs DEFAULTED, and it is already in the type: `config.Config.Muxers` is
+	// a POINTER, so nil means the built-in list was supplied and non-nil means the operator wrote
+	// each address down (quince#1246). A DECLARED address that does not answer stays
+	// `unreachable` — you said it was there, it is not, that is a fault.
+	StateAbsent = "absent"
 )
 
 // Transport roles a muxer serves (design §3 transports).
@@ -450,6 +470,10 @@ type Group struct {
 // go stale between a muxer dying and somebody noticing (qn.6p D5).
 type unmanagedMuxer struct {
 	address string
+	// declared is TRUE when the operator wrote this address in `muxers:`, FALSE when it came from
+	// the built-in default. It decides only one thing — whether silence here is `unreachable` or
+	// `absent` — and it is the reason those two states can both be honest.
+	declared bool
 	// dialer is the client holding the connection. Nil means nothing is watching this address,
 	// which is itself reported rather than papered over — see status().
 	dialer Dialer
@@ -498,8 +522,8 @@ func (g *Group) Supervise(s *Supervisor) { g.sups = append(g.sups, s) }
 //
 // `dialer` is the client holding the connection to this address. Passing nil is legal and means
 // nothing is watching it; status() says so rather than assuming the best.
-func (g *Group) AddUnmanaged(address string, dialer Dialer) {
-	g.unmanaged = append(g.unmanaged, unmanagedMuxer{address: address, dialer: dialer})
+func (g *Group) AddUnmanaged(address string, declared bool, dialer Dialer) {
+	g.unmanaged = append(g.unmanaged, unmanagedMuxer{address: address, declared: declared, dialer: dialer})
 }
 
 // status renders one external muxer from its dialing client's CURRENT state.
@@ -526,6 +550,14 @@ func (u unmanagedMuxer) status() Status {
 		// of milliseconds at startup. `unreachable` here would be a failure claim about an attempt
 		// nobody has made, and it would render as "is not answering: " with an empty reason.
 		s.State, s.Detail = StateStarting, u.address+" — no connection attempted yet"
+	case !u.declared:
+		// NOBODY ASKED FOR THIS ONE. It came from the built-in list, so its silence is discovery
+		// coming up empty rather than a fault (quince#1256). The detail says what was tried AND
+		// that it is normal, because the state word alone cannot carry the second half — and an
+		// operator who DID expect a muxer here needs to be able to tell that quince looked.
+		s.State = StateAbsent
+		s.Detail = "nothing is listening at " + u.address + ", which is normal unless you expected " +
+			"a muxer there — quince tried it because it is a default, not because you configured it"
 	default:
 		s.State = StateUnreachable
 		s.Detail = u.address + " is not answering: " + detail
