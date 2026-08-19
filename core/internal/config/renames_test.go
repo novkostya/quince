@@ -33,11 +33,16 @@ func TestARenamedStorageKeyNamesItsSuccessorAndItsValue(t *testing.T) {
 		"storage.zfs.seed", // the successor — without it the reader cannot act
 		`"copy"`,           // THE VALUE, which is the half that says something was lost
 		"NOT in force",     // and says so in as many words
-		"qn.5b",            // when, so a reader can date their config
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the renamed-key warning is missing %q:\n%s", want, msg)
 		}
+	}
+	// NO RUNG NUMBER. `qn.5b` dates nothing for the person reading this message — they have never
+	// seen a rung and there is no release that contains the rename. The successor and the lost
+	// value are what make it actionable, and they are asserted above.
+	if strings.Contains(msg, "qn.") {
+		t.Errorf("the renamed-key warning cites a rung at the operator:\n%s", msg)
 	}
 	// AND IT MUST NOT STILL READ AS A PLAIN TYPO. The old sentence is what this replaces; both at
 	// once would be the fix sitting beside the defect.
@@ -158,9 +163,9 @@ func TestEveryRenameSuccessorIsARealKey(t *testing.T) {
 				t.Errorf("successor %q of %q is not a key the schema knows: %s", r.successor, old, w.Message)
 			}
 		}
-		if r.since == "" {
-			t.Errorf("rename %q has no `since` — a reader cannot date their config against it", old)
-		}
+		// NO `since` GUARD. The field is gone: it only ever fed a rung number into a message the
+		// operator reads, and a rung dates nothing for them. What the successor must satisfy is
+		// asserted above — that it parses, and that the schema knows it.
 	}
 }
 
@@ -203,11 +208,14 @@ func TestARenamedSectionNamesItsSuccessorAndEchoesItsChildren(t *testing.T) {
 		"staleness_days: \"7\"",   // THE CHILDREN AND THEIR VALUES, which is what says something was lost
 		"reminder_cooldown_hours", // both of them, not just the first
 		"NOT in force",
-		"qn.12",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the renamed-section warning is missing %q:\n%s", want, msg)
 		}
+	}
+	// NO RUNG NUMBER, for the reason given on the leaf-rename test above.
+	if strings.Contains(msg, "qn.") {
+		t.Errorf("the renamed-section warning cites a rung at the operator:\n%s", msg)
 	}
 	if strings.Contains(msg, "unknown config key") {
 		t.Errorf("the warning still reads as an unrecognised key:\n%s", msg)

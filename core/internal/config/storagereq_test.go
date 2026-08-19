@@ -179,7 +179,7 @@ func TestAParseFailureIsNotReportedAsAnAbsentKey(t *testing.T) {
 	for _, want := range []string{
 		"could not be parsed", // what actually happened
 		"cannot unmarshal",    // the parser's line and type, not thrown away
-		"CHANGED SHAPE",       // why a file that used to work stopped
+		"IS THE LIST ITSELF",  // why a file that used to work stopped
 		"upgrading.md",        // where the before/after is
 	} {
 		if !strings.Contains(out, want) {

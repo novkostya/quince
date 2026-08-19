@@ -197,9 +197,9 @@ func (r StorageRequirement) Explain(w io.Writer, configPath string) error {
 		p("")
 		p("    %s", r.MalformedDetail)
 		p("")
-		p("`storage:` CHANGED SHAPE in qn.6c: it IS the list now, with no `storages:` wrapper and")
-		p("no global `backend`, `zfs` or `retention`. If this file predates that, it parses as the")
-		p("old shape and fails here. deploy/upgrading.md has the before/after.")
+		p("`storage:` IS THE LIST ITSELF — no `storages:` wrapper and no global `backend`, `zfs` or")
+		p("`retention`. An older file written in the previous shape parses as that shape and fails")
+		p("here. deploy/upgrading.md has the before/after.")
 	case r.Missing:
 		p("no `storage:` key in %s — quince does not know where to keep backups.", configPath)
 	default:
@@ -209,7 +209,7 @@ func (r StorageRequirement) Explain(w io.Writer, configPath string) error {
 	suggested := "/backups"
 	if r.LegacyEnv {
 		p("")
-		p("QUINCE_BACKUPS is set to %q and is NO LONGER READ. It was retired in qn.6c: every", r.LegacyEnvValue)
+		p("QUINCE_BACKUPS is set to %q and is NO LONGER READ. Every", r.LegacyEnvValue)
 		p("storage is now declared in config.yml, so nothing is implied by the environment.")
 		p("That variable is almost certainly why this used to work and has now stopped.")
 		if strings.TrimSpace(r.LegacyEnvValue) != "" {
