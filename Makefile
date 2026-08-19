@@ -826,8 +826,29 @@ provision-guard-test: ## provision's identity guard in every credential state (q
 # shell splits it once — so quoting works the way the caller wrote it — and the inner `sh` receives
 # argv it never re-parses. A literal `$` still needs `$$` on the make command line; that is make's
 # rule, not this recipe's, and the help text below says so.
+# A SKIPPED TEST IS A CLAIM THIS LADDER DID NOT CHECK, AND IT USED TO BE INVISIBLE (quince#1223).
+#
+# `go test` without `-v` prints one line per package and says nothing about skips, so a case that
+# skips unconditionally here is indistinguishable from one that ran. The instance that found it:
+# `lockdown_writable_test.go` skips its permissions arm when `Geteuid() == 0`, and `make gates` runs
+# as root — so on the ladder that assertion never executed, and the output was byte-identical to a
+# run where it had.
+#
+# COVERAGE DOES NOT CATCH IT, which is why the number already printed here is not enough. The
+# skipped case shares its lines with cases that do run, so coverage barely moves: it measures lines
+# executed, not claims tested, and a skip removes a claim while its neighbours keep the lines green.
+#
+# REPORTING, NOT REFUSING — the cheapest of the three options quince#1223 lists, and deliberately
+# the one with no policy in it. A skip can be entirely correct (the root case above is), so failing
+# on one would need an allowlist and a way to know what "in CI" means. A number and the names put it
+# in front of a reviewer, who can ask; that is the same posture `stale-refs-report` takes for a
+# question whose right answer is a judgement.
+#
+# `-v` IS WHAT MAKES SKIPS VISIBLE AT ALL, and the cost is paid to a file rather than to the reader:
+# the log is filtered back down to the usual one-line-per-package face on success, and dumped whole
+# on failure, where the extra detail is what somebody wants anyway.
 .PHONY: gates-go
-gates-go: tc-go ## Go: gofmt + vet (incl. -tags lab) + golangci-lint + go test -race (GO_TEST_ARGS="-run 'X|Y' ./pkg/..." to target; shell quoting is honoured, a literal $$ must be doubled)
+gates-go: tc-go ## Go: gofmt + vet (incl. -tags lab) + golangci-lint + go test -race, and REPORTS skips (GO_TEST_ARGS="-run 'X|Y' ./pkg/..." to target; shell quoting is honoured, a literal $$ must be doubled)
 	@[ -z "$(GO_TEST_ARGS_OVERRIDDEN)" ] || sh -c 'printf "gates-go: PARTIAL RUN — go test %s, NOT the whole tree.\ngates-go: this is a targeted debugging run and is NOT a full Go gate; do not report it as one (quince#368).\n" "$$*"' _ $(GO_TEST_ARGS)
 	$(RUN) -w /src/core \
 	  -v $(GO_BUILD_VOL):/root/.cache/go-build -v $(GO_MOD_VOL):/go/pkg/mod \
@@ -837,7 +858,19 @@ gates-go: tc-go ## Go: gofmt + vet (incl. -tags lab) + golangci-lint + go test -
 	    go vet ./...; \
 	    go vet -tags lab ./...; \
 	    golangci-lint run; \
-	    go test -race -cover "$$@"' _ $(GO_TEST_ARGS)
+	    log=$$(mktemp); \
+	    if go test -race -cover -v "$$@" > "$$log" 2>&1; then rc=0; else rc=$$?; fi; \
+	    if [ "$$rc" -eq 0 ]; then grep -E "^(ok|\?)" "$$log" || :; else cat "$$log"; fi; \
+	    skipped=$$(grep -cE "^ *--- SKIP: " "$$log" || :); \
+	    [ -n "$$skipped" ] || skipped=0; \
+	    if [ "$$skipped" -gt 0 ]; then \
+	      printf "gates-go: %s test(s) SKIPPED — each is a claim this ladder did NOT check (quince#1223):\n" "$$skipped"; \
+	      grep -E "^ *--- SKIP: " "$$log" | sed "s/^ *--- SKIP: /gates-go:   /"; \
+	      grep -B1 -E "^ *--- SKIP: " "$$log" | grep -E "^ +[a-z_]+\.go:[0-9]+: " | sed "s/^ */gates-go:     /" || :; \
+	    else \
+	      printf "gates-go: 0 test(s) skipped — every case in the tree ran here.\n"; \
+	    fi; \
+	    exit "$$rc"' _ $(GO_TEST_ARGS)
 
 .PHONY: fmt
 fmt: tc-go ## Go: gofmt -w (auto-format) + go mod tidy (run after editing core)
