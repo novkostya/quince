@@ -9,10 +9,11 @@
 # THIS DEPLOYMENT NEEDS NO MUXER CONFIG AT ALL. The UI Rescan button is a no-op (409) — quince
 # does not own the host muxer.
 #
-# A Wi-Fi muxer is a SECOND ENTRY rather than a second key:
+# A Wi-Fi muxer is a SECOND ENTRY rather than a second key — and adding one means writing the
+# FIRST one too, because `muxers:` replaces the default rather than extending it:
 #
 #   muxers:
-#     - address: /var/run/usbmuxd     # the host usbmuxd, bound in below
+#     - address: /var/run/usbmuxd     # the host usbmuxd, bound in below — no longer implied
 #     - address: 127.0.0.1:27015      # a host-run netmuxd
 #
 # One muxer serving BOTH transports is ONE entry — netmuxd does exactly that, and the old shape

@@ -51,9 +51,12 @@ services:
     volumes:
       - /dev/bus/usb:/dev/bus/usb
 
-      # The socket quince dials. A named volume rather than a host path so both containers agree
-      # on it without either owning a directory on your disk.
-      - mux:/run/mux
+      # THE SOCKET, AT QUINCE'S DEFAULT PATH — which is why this file needs no config.yml.
+      # A named volume rather than a host path, so both containers agree on it without either
+      # owning a directory on your disk. It is mounted at `/run` and the socket is
+      # `/var/run/usbmuxd`, because `/var/run` is a symlink to `/run` in both images — so the
+      # socket lands exactly where libusbmuxd, and therefore quince, looks by default.
+      - mux:/run
 
       # Pairing records, shared with quince. quince PAIRS, so it holds these read-write; the muxer
       # only needs to read them — it matches a Wi-Fi device's advertisement against the record for
@@ -85,7 +88,7 @@ services:
     # below `error` otherwise, and a device that never appears is the thing you will want a log for.
     environment:
       RUST_LOG: info
-    command: ["--socket-path", "/run/mux/usbmuxd", "--plist-storage", "/var/lib/lockdown"]
+    command: ["--socket-path", "/var/run/usbmuxd", "--plist-storage", "/var/lib/lockdown"]
 
   # ── quince ───────────────────────────────────────────────────────────────────────────────────
   # Bridged. Unprivileged. No /dev/bus/usb, no device_cgroup_rules, no host networking. It reaches
@@ -107,7 +110,7 @@ services:
       - ./quince/data:/data
       - ./quince/cache:/cache
       - ./quince/backups:/backups # point at a real share; backend probed at runtime
-      - mux:/run/mux
+      - mux:/run
       # READ-WRITE here: quince is what pairs, so it writes the records the muxer reads. If
       # something else on this box owns them, mount this `:ro` — quince detects that it cannot
       # write, disables Pair with the reason, and goes on reading existing pairings, so a device
@@ -122,11 +125,15 @@ volumes:
   mux:
 
 # ── The config this expects ────────────────────────────────────────────────────────────────────
-# NOTHING. One muxer serving both transports is ONE entry, and it is the default — so with the
-# socket bound where quince already looks, ./quince/data/config.yml needs no muxer key at all.
+# NOTHING. THIS FILE WORKS ON DEFAULTS, and that is a requirement rather than a happy accident
+# (Operator, 2026-08-19): an example compose you have to hand-edit config.yml before launching is
+# not an example, it is a first step.
 #
-# This stack puts the socket at /run/mux/usbmuxd rather than the default /var/run/usbmuxd, so name
-# it once:
+# The muxer socket is bound at /var/run/usbmuxd, which is libusbmuxd's own default and therefore
+# quince's, so `./quince/data/config.yml` needs no muxer key at all. Storage is the only thing you
+# must declare, and the UI asks for it on first run.
+#
+# If you DO move the socket, name it once — one entry, whether it serves one transport or both:
 #
 #   muxers:
 #     - address: /run/mux/usbmuxd
@@ -137,8 +144,9 @@ volumes:
 #
 # THIS USED TO BE TWO KEYS POINTING AT ONE SOCKET (`devices.usbmuxd_socket` and
 # `devices.netmuxd_addr`), with a paragraph here explaining that quince opened one connection
-# because they named the same address. One entry says it once. A `devices:` section is now REFUSED
-# at startup, by name, with the replacement printed — it is not ignored.
+# because they named the same address. One entry says it once, and pointing the socket at the
+# default says it none. A `devices:` section is now REFUSED at startup, by name, with the
+# replacement printed — it is not ignored.
 #
 # ── If you already run a muxer ─────────────────────────────────────────────────────────────────
 # Check before starting anything — two muxers fight over the USB bus:
