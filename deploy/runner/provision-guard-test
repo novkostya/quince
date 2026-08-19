@@ -490,6 +490,54 @@ fi
 #
 # THE FIRST ROW IS THE ONE THAT WAS BROKEN. It is the both-seats case with the new credential, and
 # before this change it exited 0.
+
+# --- 6. THE SUPERVISOR ROLE'S OWN BOUNDARY (quince#375, and quince#1249's review) --------------
+#
+# NOTHING INVOKED THIS ROLE UNTIL NOW, which is the hole the review found: the arm giving supervisor
+# `_analyst_key` as its own and every other seat's credential as `other` had no test. Measured by
+# the reviewer — remove `$_review_key` from the supervisor's `_other_creds` so that box tolerates a
+# reviewer key, and the suite stayed at 26 passed.
+#
+# THAT IS THE EXACT STATE THE RULING NAMED: *"a supervisor box holding `quince-review.pem` beside
+# `quince-analyst.pem` could author as one and approve as the other."* The code refuses it; these
+# rows are what stop the next edit from not refusing it.
+#
+# FOUR ROWS AND A CONTROL, mirroring the two-seats case below rather than inventing a shape. The
+# control is what makes the four mean anything: an arm that refused the analyst key too would pass
+# every refusal above it and be completely broken.
+for _sup_other in "$BOT" "$CODER" "$ARCH" "$REVIEW"; do
+	rm -f "$BOT" "$CODER" "$ARCH" "$REVIEW" "$ANALYST"
+	printf 'a credential\n' >"$ANALYST"
+	place "$_sup_other"
+	out=$(run supervisor)
+	case "$out" in
+	*"BOTH SEATS"*)
+		ok "role supervisor: $(basename "$_sup_other") beside the analyst key is refused"
+		;;
+	*)
+		bad "role supervisor: $(basename "$_sup_other") present and NOT refused — this box could author as one seat and approve as another"
+		printf '       %s\n' "$out" | head -n 2
+		;;
+	esac
+done
+
+# THE CONTROL. Without it, every row above passes against an arm that refuses the analyst key too.
+rm -f "$BOT" "$CODER" "$ARCH" "$REVIEW" "$ANALYST"
+printf 'a credential\n' >"$ANALYST"
+out=$(run supervisor --check-credentials)
+case "$out" in
+*"BOTH SEATS"* | *"ANALYST KEY"*)
+	bad "role supervisor: the analyst key ALONE was refused — that is the seat's OWN credential"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+*"role supervisor"*)
+	ok "role supervisor: the analyst key alone is its OWN credential and passes — the control"
+	;;
+*)
+	bad "role supervisor: analyst key alone produced neither a refusal nor a role line"
+	printf '       %s\n' "$out" | head -n 2
+	;;
+esac
 rm -f "$BOT" "$CODER" "$ARCH" "$REVIEW" "$ANALYST"
 printf 'a credential\n' >"$CODER"
 printf 'a credential\n' >"$ANALYST"
@@ -532,14 +580,19 @@ case "$out" in
 	;;
 esac
 
-# THE ANALYST KEY ALONE IS ALSO A REFUSAL — the supervisor box itself. Not because holding it is
-# wrong, but because this script has no role for that seat, so anything it did there would be a
-# guess. Distinguished from the row above only by what else is present, so both must be driven.
+# THE ANALYST KEY ALONE, ASKED FOR THE WRONG ROLE, IS STILL A REFUSAL — and the reason changed with
+# quince#375. It is no longer *"this script has no role for that seat"*: it does now. What is wrong
+# here is the ARGUMENT — `--role implementer` on a box holding the supervisor's own credential is
+# two seats on one machine, which is what this guard has always been about (quince#234).
+#
+# Distinguished from the row above only by what else is present, so both must be driven. The
+# supervisor-role rows in section 6 are the other half: same box, right role, and there the analyst
+# key is its OWN credential and passes.
 rm -f "$CODER"
 out=$(run implementer)
 case "$out" in
 *"ANALYST KEY"*)
-	ok "the analyst key ALONE is refused too — this script cannot provision that seat either"
+	ok "the analyst key alone, asked for --role implementer, is still two seats on one box"
 	;;
 *)
 	bad "the supervisor box would be provisioned as an implementer"
