@@ -754,7 +754,22 @@ pr-title-refs-test: ## The title check's failure paths, incl. the ruled DID-NOT-
 # `TITLE_ENV=` NEEDS NONE OF THIS and is why the gate was never lost: it makes no forge call at all,
 # so it worked on every box throughout. CI uses that route. This fixes the route that reads the
 # title THE FORGE ACTUALLY HOLDS, which is the one worth having when a title has just been edited.
-PR_TITLE_GH := $(if $(GH_CLI),$(GH_CLI),$(if $(wildcard bin/gh-coder),$(CURDIR)/bin/gh-coder,gh))
+# AN AMBIENT `GH_TOKEN` MEANS BARE `gh`, AND THIS ARM IS WHY THE GATE IS GREEN IN CI (quince#1250).
+# quince#1241 added the wrapper preference and BROKE `title-refs` on every PR whose title carries a
+# bare `#N`: CI authenticates by setting `GH_TOKEN`, and `bin/gh-coder` REFUSES when it finds one —
+# *"that variable is how this wrapper hands a token to gh, so a value already in it is somebody
+# else's working credential"*. Correct behaviour by the wrapper, routed into the one environment
+# where it cannot apply.
+#
+# THE CLAIM THAT HID IT WAS MINE AND IT WAS HALF TRUE. quince#1241 said `TITLE_ENV=` *"makes no forge
+# call at all, so it worked on every box throughout"*. It makes no call to READ THE TITLE — and it
+# still calls the forge to RESOLVE each bare `#N` in it, which is the gate's whole job. So the route
+# CI uses does need a credential, and I had reasoned it did not.
+#
+# Measured on the failing run: quince#1249 and quince#1251 both `fail`, and quince#1247 `pass` —
+# because its title is repo-qualified (`quince-devlog#286`), so nothing needed resolving and no call
+# was made. That contrast is what identifies the mechanism rather than the symptom.
+PR_TITLE_GH := $(if $(GH_CLI),$(GH_CLI),$(if $(GH_TOKEN),gh,$(if $(wildcard bin/gh-coder),$(CURDIR)/bin/gh-coder,gh)))
 .PHONY: pr-title-check
 pr-title-check: ## Bare #N in a PR title must resolve there (REPO=owner/name + TITLE_ENV=<NAME> or PR=<n>); 0 clean · 1 match · 2 DID NOT RUN
 	@bin/pr-title-refs --repo "$(REPO)" --gh "$(PR_TITLE_GH)" $(if $(PR),--pr "$(PR)",$(if $(TITLE_ENV),--title-env "$(TITLE_ENV)",))
