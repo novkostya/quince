@@ -1,128 +1,120 @@
 From 7a1bbdd9ee778ef2c4140ebc83b19102ca77ba08 Mon Sep 17 00:00:00 2001
 From: quince <quince@localhost>
 Date: Wed, 19 Aug 2026 22:30:00 +0400
-Subject: [PATCH] Route network device connections through usbmuxd
+Subject: [PATCH] Fall back to usbmuxd for network connections
 
-NetworkAddress is an opaque value in the usbmux protocol, but
-libimobiledevice treats it as a native struct sockaddr and connects to it
-directly. That breaks when the muxer and client run on different kernels:
-Apple's daemon serializes a Darwin sockaddr that a Linux client cannot
-interpret.
+Keep the existing direct connection path for network devices when their
+NetworkAddress uses the client's native sockaddr ABI and is reachable.
 
-Keep network as the logical device transport for lookup and CLI filtering,
-but ask the muxer to open every service connection by DeviceID and port.
-This also keeps link-local routing and interface scope inside the muxer that
-discovered the device.
+NetworkAddress comes from the muxer as opaque bytes, however, so it may use
+a different host ABI or describe an address that is unreachable from the
+client's network namespace. Do not reject such devices. If the address is
+not natively usable, or if the direct TCP connection fails, ask usbmuxd to
+open the same DeviceID and port instead.
 ---
- src/idevice.c | 97 ++++++++-------------------------------------------------
- 1 file changed, 13 insertions(+), 84 deletions(-)
+ src/idevice.c | 92 +++++++++++++++++++++++++++++++--------------------
+ 1 file changed, 57 insertions(+), 35 deletions(-)
 
 diff --git a/src/idevice.c b/src/idevice.c
-index 0af27fd..79772fa 100644
+index 0af27fd..3a444e4 100644
 --- a/src/idevice.c
 +++ b/src/idevice.c
-@@ -326,23 +326,14 @@ idevice_error_t idevice_get_device_list_extended(idevice_info_t **devices, int *
- 			newlist[newcount]->conn_data = NULL;
- 		} else if (dev_list[i].conn_type == CONNECTION_TYPE_NETWORK) {
- 			newlist[newcount]->conn_type = CONNECTION_NETWORK;
--			struct sockaddr* saddr = (struct sockaddr*)(dev_list[i].conn_data);
--			size_t addrlen = 0;
--			switch (saddr->sa_family) {
--				case AF_INET:
--					addrlen = sizeof(struct sockaddr_in);
--					break;
--#ifdef AF_INET6
--				case AF_INET6:
--					addrlen = sizeof(struct sockaddr_in6);
--					break;
--#endif
--				default:
+@@ -338,11 +338,15 @@ idevice_error_t idevice_get_device_list_extended(idevice_info_t **devices, int *
+ 					break;
+ #endif
+ 				default:
 -					debug_info("Unsupported address family 0x%02x\n", saddr->sa_family);
 -					continue;
--			}
++					debug_info("Unsupported native address family 0x%02x; network connections will use usbmuxd\n", saddr->sa_family);
++					break;
++			}
++			if (addrlen > 0) {
++				newlist[newcount]->conn_data = malloc(addrlen);
++				memcpy(newlist[newcount]->conn_data, dev_list[i].conn_data, addrlen);
++			} else {
++				newlist[newcount]->conn_data = NULL;
+ 			}
 -			newlist[newcount]->conn_data = malloc(addrlen);
 -			memcpy(newlist[newcount]->conn_data, dev_list[i].conn_data, addrlen);
-+			/*
-+			 * NetworkAddress is an opaque usbmux protocol value.  In
-+			 * particular, Apple's usbmuxd serializes a Darwin sockaddr,
-+			 * which cannot be interpreted as the native sockaddr of a
-+			 * client running on another OS.  Service connections are
-+			 * opened through usbmuxd below, so callers do not need a copy.
-+			 */
-+			newlist[newcount]->conn_data = NULL;
  		}
  		newcount++;
  		*devices = newlist;
-@@ -442,25 +433,9 @@ static idevice_t idevice_from_mux_device(usbmuxd_device_info_t *muxdev)
- 		break;
- 	case CONNECTION_TYPE_NETWORK:
- 		device->conn_type = CONNECTION_NETWORK;
--		struct sockaddr* saddr = (struct sockaddr*)(muxdev->conn_data);
--		size_t addrlen = 0;
--		switch (saddr->sa_family) {
--			case AF_INET:
--				addrlen = sizeof(struct sockaddr_in);
--				break;
--#ifdef AF_INET6
--			case AF_INET6:
--				addrlen = sizeof(struct sockaddr_in6);
--				break;
--#endif
--			default:
+@@ -454,13 +458,15 @@ static idevice_t idevice_from_mux_device(usbmuxd_device_info_t *muxdev)
+ 				break;
+ #endif
+ 			default:
 -				debug_info("Unsupported address family 0x%02x\n", saddr->sa_family);
 -				free(device->udid);
 -				free(device);
 -				return NULL;
--		}
++				debug_info("Unsupported native address family 0x%02x; network connections will use usbmuxd\n", saddr->sa_family);
++				break;
++		}
++		if (addrlen > 0) {
++			device->conn_data = malloc(addrlen);
++			memcpy(device->conn_data, muxdev->conn_data, addrlen);
++		} else {
++			device->conn_data = NULL;
+ 		}
 -		device->conn_data = malloc(addrlen);
 -		memcpy(device->conn_data, muxdev->conn_data, addrlen);
-+		/* Keep the logical transport for lookup/filtering, but do not
-+		 * materialize the muxer's OS-native NetworkAddress. */
-+		device->conn_data = NULL;
  		break;
  	default:
  		device->conn_type = 0;
-@@ -522,10 +497,10 @@ idevice_error_t idevice_connect(idevice_t device, uint16_t port, idevice_connect
- 		return IDEVICE_E_INVALID_ARG;
- 	}
- 
--	if (device->conn_type == CONNECTION_USBMUXD) {
-+	if (device->conn_type == CONNECTION_USBMUXD || device->conn_type == CONNECTION_NETWORK) {
- 		int sfd = usbmuxd_connect(device->mux_id, port);
- 		if (sfd < 0) {
--			debug_info("ERROR: Connecting to usbmux device failed: %d (%s)", sfd, strerror(-sfd));
-+			debug_info("ERROR: Connecting to device through usbmuxd failed: %d (%s)", sfd, strerror(-sfd));
- 			switch (-sfd) {
- 			case ECONNREFUSED:
- 				return IDEVICE_E_CONNREFUSED;
-@@ -546,52 +521,6 @@ idevice_error_t idevice_connect(idevice_t device, uint16_t port, idevice_connect
- 		*connection = new_connection;
+@@ -547,42 +553,58 @@ idevice_error_t idevice_connect(idevice_t device, uint16_t port, idevice_connect
  		return IDEVICE_E_SUCCESS;
  	}
--	if (device->conn_type == CONNECTION_NETWORK) {
+ 	if (device->conn_type == CONNECTION_NETWORK) {
 -		struct sockaddr* saddr = (struct sockaddr*)(device->conn_data);
 -		switch (saddr->sa_family) {
 -			case AF_INET:
--#ifdef AF_INET6
++		int sfd = -1;
++		if (device->conn_data) {
++			struct sockaddr* saddr = (struct sockaddr*)(device->conn_data);
++			switch (saddr->sa_family) {
++				case AF_INET:
+ #ifdef AF_INET6
 -			case AF_INET6:
--#endif
++				case AF_INET6:
+ #endif
 -				break;
 -			default:
 -				debug_info("Unsupported address family 0x%02x", saddr->sa_family);
 -				return IDEVICE_E_UNKNOWN_ERROR;
 -		}
--
++					break;
++				default:
++					debug_info("Unsupported native address family 0x%02x", saddr->sa_family);
++					saddr = NULL;
++					break;
++			}
+ 
 -		char addrtxt[48];
 -		addrtxt[0] = '\0';
--
++			if (saddr) {
++				char addrtxt[48];
++				addrtxt[0] = '\0';
+ 
 -		if (!socket_addr_to_string(saddr, addrtxt, sizeof(addrtxt))) {
 -			debug_info("Failed to convert network address: %d (%s)", errno, strerror(errno));
 -		}
--
++				if (!socket_addr_to_string(saddr, addrtxt, sizeof(addrtxt))) {
++					debug_info("Failed to convert network address: %d (%s)", errno, strerror(errno));
++				}
+ 
 -		debug_info("Connecting to %s port %d...", addrtxt, port);
--
++				debug_info("Connecting directly to %s port %d...", addrtxt, port);
++
++				sfd = socket_connect_addr(saddr, port);
++				if (sfd < 0) {
++					debug_info("Direct connection to network device failed: %d (%s); falling back to usbmuxd", errno, strerror(errno));
++				}
++			}
++		}
+ 
 -		int sfd = socket_connect_addr(saddr, port);
--		if (sfd < 0) {
++		enum idevice_connection_type connection_type = CONNECTION_NETWORK;
+ 		if (sfd < 0) {
 -			int result = errno;
 -			debug_info("ERROR: Connecting to network device failed: %d (%s)", result, strerror(result));
 -			switch (result) {
@@ -130,23 +122,28 @@ index 0af27fd..79772fa 100644
 -				return IDEVICE_E_CONNREFUSED;
 -			default:
 -				break;
--			}
++			sfd = usbmuxd_connect(device->mux_id, port);
++			if (sfd < 0) {
++				debug_info("ERROR: Connecting to network device through usbmuxd failed: %d (%s)", sfd, strerror(-sfd));
++				switch (-sfd) {
++				case ECONNREFUSED:
++					return IDEVICE_E_CONNREFUSED;
++				case ENODEV:
++					return IDEVICE_E_NO_DEVICE;
++				default:
++					break;
++				}
++				return IDEVICE_E_UNKNOWN_ERROR;
+ 			}
 -			return IDEVICE_E_NO_DEVICE;
--		}
--
--		idevice_connection_t new_connection = (idevice_connection_t)malloc(sizeof(struct idevice_connection_private));
--		new_connection->type = CONNECTION_NETWORK;
--		new_connection->data = (void*)(uintptr_t)sfd;
--		new_connection->ssl_data = NULL;
--		new_connection->device = device;
--		new_connection->ssl_recv_timeout = (unsigned int)-1;
--
--		*connection = new_connection;
--
--		return IDEVICE_E_SUCCESS;
--	}
++			connection_type = CONNECTION_USBMUXD;
+ 		}
  
- 	debug_info("Unknown connection type %d", device->conn_type);
- 	return IDEVICE_E_UNKNOWN_ERROR;
+ 		idevice_connection_t new_connection = (idevice_connection_t)malloc(sizeof(struct idevice_connection_private));
+-		new_connection->type = CONNECTION_NETWORK;
++		new_connection->type = connection_type;
+ 		new_connection->data = (void*)(uintptr_t)sfd;
+ 		new_connection->ssl_data = NULL;
+ 		new_connection->device = device;
 -- 
 2.51.0
