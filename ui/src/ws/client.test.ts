@@ -183,6 +183,7 @@ describe("ws refresh does not clobber events that raced it (quince#948)", () => 
     paired: "yes",
     backup_encryption: "on",
     wifi_sync: "on",
+    notifications_enabled: true,
     last_seen: "2026-08-14T00:00:00Z",
     last_backup: null,
   });

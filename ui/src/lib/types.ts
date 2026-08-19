@@ -32,6 +32,9 @@ export interface Device {
   paired: "yes" | "no" | "unknown";
   backup_encryption: "on" | "off" | "unknown";
   wifi_sync: "on" | "off" | "unknown";
+  // The per-device notifications switch (quince#1270). AND-ed with the global `notifications:`
+  // categories: quince notifies about this device only if both say yes.
+  notifications_enabled: boolean;
   last_seen: string;
   last_backup: LastBackup | null;
 }

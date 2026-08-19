@@ -92,7 +92,9 @@ func KindForTerminal(state, errorCode string) (Kind, bool) {
 // ForTerminal builds the whole decision for a finished job, or reports that nothing is sent.
 func ForTerminal(dev wire.Device, state, errorCode string, cfg config.NotificationsConfig) (Decision, bool) {
 	kind, ok := KindForTerminal(state, errorCode)
-	if !ok || !Enabled(kind, cfg) {
+	// THE SUBJECT GATE SITS BESIDE THE CATEGORY GATE, at the decision point, so that ONE place
+	// answers *should this go out* rather than a filter bolted in front of the sender.
+	if !ok || !Enabled(kind, cfg) || !DeviceEnabled(dev) {
 		return Decision{}, false
 	}
 	name := deviceName(dev)
@@ -191,6 +193,22 @@ func Enabled(kind Kind, cfg config.NotificationsConfig) bool {
 	return false
 }
 
+// DeviceEnabled reports whether quince notifies about this device at all (quince#1270).
+//
+// PRECEDENCE IS AND, and there is no override in either direction: a notification goes out only
+// if the category is on AND the subject device is on. A per-device switch that could override a
+// category the user turned off would resurrect the double-notification problem D5 was built to
+// prevent, and would make the global switches mean something different depending on which screen
+// you read them from.
+//
+// THIS IS A SWITCH, NOT A SILENT CAP — the same reading `Enabled` carries, one axis over. It is
+// the user's own instruction, which is what makes suppression here honest, and the status surface
+// reports it as `device_off`. THAT CAUSE IS DISTINCT FROM `category_off` AND MUST STAY DISTINCT:
+// both mean "nothing will arrive", and their remedies are on different screens — the global
+// settings page for one, this one device's page for the other. A message that cannot tell them
+// apart sends the user to the wrong one, which is the quince#940 defect exactly.
+func DeviceEnabled(dev wire.Device) bool { return dev.NotificationsEnabled }
+
 // Reminder is a device's place on the reminder track — the only state this package keeps.
 type Reminder struct {
 	// LastSentAt is when this device was last reminded, at EITHER rank. Zero means never.
@@ -207,6 +225,12 @@ type Reminder struct {
 func Evaluate(dev wire.Device, r Reminder, cfg config.NotificationsConfig, jobRunning bool, now time.Time) (Decision, bool) {
 	// VISIBLE, because a reminder for a phone that is not on the network asks for something that
 	// cannot be done. Presence is muxd-event-driven (design §3); either transport counts.
+	// MUTED IS THE FIRST QUESTION, before presence, the cooldown or the track. A muted device is
+	// not a device whose reminder is not due yet — it is one the user asked not to hear about, and
+	// the cheapest way to keep that true for every rank is to answer it once, here.
+	if !DeviceEnabled(dev) {
+		return Decision{}, false
+	}
 	if dev.Transports.USB == nil && dev.Transports.WiFi == nil {
 		return Decision{}, false
 	}

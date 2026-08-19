@@ -12,6 +12,7 @@
       "paired": "yes",
       "backup_encryption": "on",
       "wifi_sync": "on",
+      "notifications_enabled": true,
       "last_seen": "2026-07-18T09:15:00Z",
       "last_backup": {
         "at": "2026-07-18T02:30:11Z",
@@ -30,6 +31,7 @@
       "paired": "yes",
       "backup_encryption": "off",
       "wifi_sync": "off",
+      "notifications_enabled": true,
       "last_seen": "2026-07-17T20:00:00Z",
       "last_backup": null
     }

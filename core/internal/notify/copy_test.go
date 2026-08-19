@@ -171,7 +171,7 @@ func namedDevice(now time.Time, staleDays int) wire.Device {
 	seen := now.Format(time.RFC3339)
 	at := now.Add(-time.Duration(staleDays) * 24 * time.Hour).Format(time.RFC3339)
 	return wire.Device{
-		UDID: "UDID-FIXTURE", Name: longDeviceName,
+		UDID: "UDID-FIXTURE", Name: longDeviceName, NotificationsEnabled: true,
 		Transports: wire.Transports{WiFi: &seen},
 		LastBackup: &wire.LastBackup{At: at, Status: "succeeded"},
 	}

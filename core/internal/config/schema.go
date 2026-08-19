@@ -487,6 +487,19 @@ type SessionsConfig struct {
 // A hand-written `automation:` block therefore becomes an unknown SECTION. That is handled loudly
 // rather than silently: see `renamedSections` in renames.go, which is the half of quince#401 this
 // rename had to build.
+//
+// THESE KEYS ARE THE CATEGORY AXIS AND THEY ARE NO LONGER THE WHOLE OF THE POLICY (quince#1270).
+// A notification goes out only if the category here is on AND the subject device's own switch is
+// on — `wire.Device.notifications_enabled`, which lives in the app DB rather than in this file.
+// The precedence is AND with no override in either direction, so turning a category off still
+// silences it everywhere; what the device switch adds is the ability to silence ONE device
+// without losing the category for the rest.
+//
+// IT IS NOT A KEY HERE, AND THAT IS A DEPARTURE FROM D12 TAKEN DELIBERATELY (Operator,
+// 2026-08-20). The device set is DISCOVERED rather than authored, so a per-device block would
+// fill config.yml with UDIDs the user never typed — against quince#728's ruling that this file
+// contains only what the user set. The cost, stated rather than left to be discovered: a
+// hand-edit of config.yml cannot reach that switch.
 type NotificationsConfig struct {
 	// StalenessDays is how old the last good backup must be before a device is worth a reminder.
 	StalenessDays int `yaml:"staleness_days" json:"staleness_days"`

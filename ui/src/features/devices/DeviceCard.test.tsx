@@ -22,6 +22,7 @@ function device(over: Partial<Device> = {}): Device {
     paired: "yes",
     backup_encryption: "on",
     wifi_sync: "unknown",
+    notifications_enabled: true,
     last_seen: "2026-07-20T00:00:00Z",
     last_backup: null,
     ...over,

@@ -53,6 +53,12 @@ func demoDevice(d wire.Device) wire.Device {
 	if d.WifiSync == "" {
 		d.WifiSync = "unknown"
 	}
+	// notifications_enabled IS NOT AN ENUM AND CANNOT BE NORMALISED THE SAME WAY: it is a bool, so
+	// its zero value is a legitimate answer rather than an unset one. The default is applied
+	// unconditionally, matching deviceShellLocked, and a demo device that wants to be MUTED sets it
+	// AFTER this call — `d := demoDevice(...); d.NotificationsEnabled = false` — where the intent is
+	// visible, instead of inside the literal, where this line would silently undo it.
+	d.NotificationsEnabled = true
 	return d
 }
 

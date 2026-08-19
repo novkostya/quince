@@ -75,7 +75,7 @@ func staleDevice(udid string, days int, now time.Time) wire.Device {
 	seen := now.Format(time.RFC3339)
 	at := now.Add(-time.Duration(days) * 24 * time.Hour).Format(time.RFC3339)
 	return wire.Device{
-		UDID: udid, Name: "iPhone",
+		UDID: udid, Name: "iPhone", NotificationsEnabled: true,
 		Transports: wire.Transports{WiFi: &seen},
 		LastBackup: &wire.LastBackup{At: at, Status: "succeeded"},
 	}
