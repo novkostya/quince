@@ -78,14 +78,27 @@ func declaredKeys(raw map[string]any, t reflect.Type, prefix string, into Declar
 	}
 }
 
-// entryKey is a storage entry's identity as written: `name` if the user gave one, else `path`.
-// Mirrors `Resolved()`'s `if e.Name == "" { e.Name = e.Path }` one step earlier, so a declared path
-// and the resolved entry it describes agree on what the entry is called.
+// entryKey is a list entry's identity as written — the field that survives the list being
+// reordered, which an index does not.
+//
+// `name` if the user gave one, else `path`: that mirrors `Resolved()`'s
+// `if e.Name == "" { e.Name = e.Path }` one step earlier, so a declared path and the resolved entry
+// it describes agree on what the entry is called.
+//
+// `address` IS THE THIRD FALLBACK, FOR `muxers[]` (quince#1219). That list has no name and no path
+// — a muxer's identity IS its address, which is the same ruling item E applied to health. Without
+// it every muxer entry keys as `muxers[].`, they all collide, and `MarshalDeclared` cannot tell
+// which entry declared what: the measured symptom was quince writing the LONG form of config.yml
+// and warning that it had, because the pruner found declared paths under an identity the marshaller
+// did not use.
 func entryKey(raw map[string]any) string {
 	if s, ok := raw["name"].(string); ok && s != "" {
 		return s
 	}
 	if s, ok := raw["path"].(string); ok {
+		return s
+	}
+	if s, ok := raw["address"].(string); ok {
 		return s
 	}
 	return ""
@@ -215,15 +228,19 @@ func nodeScalar(item *yaml.Node, key string) string {
 }
 
 // nodeEntryKey is entryKey against a yaml node: the RESOLVED name, because by the time anything
-// marshals, `Resolved()` has already filled it from the path.
+// marshals, `Resolved()` has already filled it from the path. `address` is the third fallback, for
+// `muxers[]`, which has neither — see entryKey.
 func nodeEntryKey(item *yaml.Node) string {
-	for i := 0; i+1 < len(item.Content); i += 2 {
-		if item.Content[i].Value == "name" && item.Content[i+1].Value != "" {
-			return item.Content[i+1].Value
-		}
-	}
-	for i := 0; i+1 < len(item.Content); i += 2 {
-		if item.Content[i].Value == "path" {
+	for _, key := range []string{"name", "path", "address"} {
+		for i := 0; i+1 < len(item.Content); i += 2 {
+			if item.Content[i].Value != key {
+				continue
+			}
+			// `name` only counts when non-empty: an entry that wrote `name: ""` is identified by
+			// its path, which is what Resolved() would have filled in.
+			if key == "name" && item.Content[i+1].Value == "" {
+				break
+			}
 			return item.Content[i+1].Value
 		}
 	}

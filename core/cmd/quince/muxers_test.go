@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/novkostya/quince/core/internal/config"
-	"github.com/novkostya/quince/core/internal/muxaddr"
 	"github.com/novkostya/quince/core/internal/muxd"
 	"github.com/novkostya/quince/core/internal/muxsup"
 )
@@ -35,74 +34,66 @@ func externalAddresses(ext []externalMuxer) string {
 
 func TestPlannedMuxers(t *testing.T) {
 	cases := []struct {
-		name             string
-		cfg              config.DevicesConfig
-		supervise        string
-		external         string
-		wantProblem      bool
-		problemSubstring string
+		name     string
+		muxers   []config.MuxerConfig
+		external string
 	}{
 		{
-			name:      "managed with both addresses supervises both daemons",
-			cfg:       config.DevicesConfig{ManageMuxer: true, UsbmuxdSocket: "/var/run/usbmuxd", NetmuxdAddr: "127.0.0.1:27015"},
-			supervise: "usbmuxd,netmuxd",
+			name:     "the default is one external muxer",
+			muxers:   config.Default().ResolvedMuxers(),
+			external: "UNIX:/var/run/usbmuxd",
 		},
 		{
-			name:      "managed without netmuxd_addr supervises usbmuxd only",
-			cfg:       config.DevicesConfig{ManageMuxer: true, UsbmuxdSocket: "/var/run/usbmuxd"},
-			supervise: "usbmuxd",
+			name:     "two muxers are two entries, in list order",
+			muxers:   []config.MuxerConfig{{Address: "/var/run/usbmuxd"}, {Address: "127.0.0.1:27015"}},
+			external: "UNIX:/var/run/usbmuxd,127.0.0.1:27015",
 		},
 		{
-			name:      "managed without usbmuxd_socket supervises netmuxd only",
-			cfg:       config.DevicesConfig{ManageMuxer: true, NetmuxdAddr: "127.0.0.1:27015"},
-			supervise: "netmuxd",
+			// The shape the old two-key section made you write twice. ONE entry now, and the
+			// dedupe that existed only to undo the schema is gone with it.
+			name:     "one muxer serving both transports is one entry",
+			muxers:   []config.MuxerConfig{{Address: "/run/mux/usbmuxd"}},
+			external: "UNIX:/run/mux/usbmuxd",
 		},
 		{
-			name:     "unmanaged supervises nothing but still reports both as external",
-			cfg:      config.DevicesConfig{UsbmuxdSocket: "/var/run/usbmuxd", NetmuxdAddr: "127.0.0.1:27015"},
-			external: "/var/run/usbmuxd,127.0.0.1:27015",
+			// `UNIX:/x` and `/x` are one daemon written two ways. The plan carries the CANONICAL
+			// spelling — muxaddr.Endpoint.String(), which is libusbmuxd's own `UNIX:` form and
+			// round-trips through Parse. That is also what an operator sees in /api/health.
+			// spelling, because health reports it as the muxer's identity and item E looks
+			// transports up by it against the registry, which keys sources the same way.
+			name:     "an address is canonicalised, so both spellings name one muxer",
+			muxers:   []config.MuxerConfig{{Address: "UNIX:/run/mux/usbmuxd"}},
+			external: "UNIX:/run/mux/usbmuxd",
 		},
 		{
-			name: "nothing configured plans nothing",
-			cfg:  config.DevicesConfig{ManageMuxer: true},
+			name:     "a duplicate address is dialled once",
+			muxers:   []config.MuxerConfig{{Address: "/run/mux/usbmuxd"}, {Address: "UNIX:/run/mux/usbmuxd"}},
+			external: "UNIX:/run/mux/usbmuxd",
 		},
 		{
-			// The spike finding: netmuxd deletes and rebinds whatever --socket-path names, so a
-			// path equal to the usbmuxd socket is a silent USB blackout. Refuse loudly instead.
-			name:             "netmuxd socket colliding with the usbmuxd socket is refused loudly",
-			cfg:              config.DevicesConfig{ManageMuxer: true, UsbmuxdSocket: "/var/run/netmuxd", NetmuxdAddr: "127.0.0.1:27015"},
-			supervise:        "usbmuxd",
-			external:         "127.0.0.1:27015",
-			wantProblem:      true,
-			problemSubstring: "delete and rebind",
+			// `muxers: []` is a legal thing to write. It plans nothing, and buildLiveStack says so
+			// out loud rather than letting an empty Devices screen be the only symptom.
+			name:   "an empty list plans nothing",
+			muxers: []config.MuxerConfig{},
 		},
 		{
-			name:             "a netmuxd_addr that is not host:port is refused loudly",
-			cfg:              config.DevicesConfig{ManageMuxer: true, UsbmuxdSocket: "/var/run/usbmuxd", NetmuxdAddr: "not-an-address"},
-			supervise:        "usbmuxd",
-			external:         "not-an-address",
-			wantProblem:      true,
-			problemSubstring: "host:port",
+			name:   "an entry with no address plans nothing",
+			muxers: []config.MuxerConfig{{Type: config.MuxerExternal}},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := plannedMuxers(tc.cfg)
-			if names(got.supervise) != tc.supervise {
-				t.Errorf("supervise = %q; want %q", names(got.supervise), tc.supervise)
-			}
+			got := plannedMuxers(tc.muxers)
 			if externalAddresses(got.external) != tc.external {
 				t.Errorf("external = %q; want %q", externalAddresses(got.external), tc.external)
 			}
-			if tc.wantProblem {
-				if len(got.problems) == 0 {
-					t.Fatal("want a loud problem, got none")
-				}
-				if !strings.Contains(strings.Join(got.problems, " "), tc.problemSubstring) {
-					t.Errorf("problems = %q; want one mentioning %q", got.problems, tc.problemSubstring)
-				}
-			} else if len(got.problems) != 0 {
+			// NOTHING IS EVER SUPERVISED IN v0.1. `type: managed` is refused on the serve path, and
+			// the config→spec mapping is gone because the ruled schema has no way to NAME a daemon.
+			if len(got.supervise) != 0 {
+				t.Errorf("supervise = %q; want nothing — quince ships no muxer daemon", names(got.supervise))
+			}
+			if len(got.problems) != 0 {
 				t.Errorf("unexpected problems: %q", got.problems)
 			}
 		})
@@ -117,7 +108,7 @@ func TestPlannedMuxers(t *testing.T) {
 // silently dead after a restart", and it was right for the profile it shipped in. The profile
 // changed and the assertion follows it, rather than the test being deleted.
 func TestPlannedMuxersDefaultConfig(t *testing.T) {
-	plan := plannedMuxers(config.Default().Devices)
+	plan := plannedMuxers(config.Default().ResolvedMuxers())
 	if got := names(plan.supervise); got != "" {
 		t.Fatalf("default config supervises %q; want nothing — quince ships no muxer daemon", got)
 	}
@@ -126,96 +117,8 @@ func TestPlannedMuxersDefaultConfig(t *testing.T) {
 	}
 	// The USB muxer is still REACHED, just not owned. An absent external entry would leave health
 	// with nothing to report, and design §10 says an absent entry reads as "no muxer".
-	if len(plan.external) != 1 || plan.external[0].address != "/var/run/usbmuxd" {
+	if len(plan.external) != 1 || plan.external[0].address != "UNIX:/var/run/usbmuxd" {
 		t.Fatalf("default externals = %+v; want exactly the default muxer address dialed", plan.external)
-	}
-}
-
-// TestPlannedMuxersManagedProfileIsParked keeps the all-in-one plan proven while nothing ships it.
-//
-// `devices.manage_muxer: true` is refused by config validation (qn.6p D2), so this configuration
-// cannot reach production — but the profile is DESCOPED, NOT ABANDONED, and reintroducing it is
-// deleting one validation branch. If that branch returns and this behaviour has rotted meanwhile,
-// the rung that brings it back has to re-earn proof that already exists. So the managed plan keeps
-// its test, driven from an explicit config rather than from Default().
-func TestPlannedMuxersManagedProfileIsParked(t *testing.T) {
-	dcfg := config.Default().Devices
-	dcfg.ManageMuxer = true
-	dcfg.NetmuxdAddr = "127.0.0.1:27015" // no longer a default; named here because this plan needs one
-
-	plan := plannedMuxers(dcfg)
-	if names(plan.supervise) != "usbmuxd,netmuxd" {
-		t.Fatalf("managed profile supervises %q; want usbmuxd,netmuxd", names(plan.supervise))
-	}
-	if len(plan.problems) != 0 {
-		t.Fatalf("managed profile has problems: %q", plan.problems)
-	}
-	// The netmuxd child must never be pointed at usbmuxd's socket: netmuxd DELETES and rebinds
-	// whatever --socket-path names, which is a silent USB blackout (stack D2, measured twice).
-	for _, spec := range plan.supervise {
-		if spec.Name != "netmuxd" {
-			continue
-		}
-		for _, a := range spec.Args {
-			if a == dcfg.UsbmuxdSocket {
-				t.Fatal("netmuxd argv points at the usbmuxd socket — it would delete and rebind it")
-			}
-		}
-	}
-}
-
-// TestDistinctEndpointsCollapsesOneMuxerServingBoth is qn.6p D4. Pointing both `devices:` keys at
-// one daemon is how an operator says "this muxer serves both transports" — the hardened shape,
-// since netmuxd serves USB and mDNS Wi-Fi over a single socket. It used to open TWO muxd clients
-// on that socket, so the registry saw two sources and every replay arrived twice.
-func TestDistinctEndpointsCollapsesOneMuxerServingBoth(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		usb, wifi  string
-		wantClient int
-		wantShared bool
-	}{
-		{name: "two separate muxers", usb: "/var/run/usbmuxd", wifi: "127.0.0.1:27015", wantClient: 2},
-		{name: "one muxer, both keys", usb: "/run/mux/usbmuxd", wifi: "/run/mux/usbmuxd", wantClient: 1, wantShared: true},
-		// The SAME socket written two ways. This is the row that needs Endpoint comparability
-		// rather than string equality, and the one an operator produces by copying the value
-		// out of a health detail into the other key.
-		{name: "one muxer, two spellings", usb: "/run/mux/usbmuxd", wifi: "UNIX:/run/mux/usbmuxd", wantClient: 1, wantShared: true},
-		{name: "usb only", usb: "/var/run/usbmuxd", wifi: "", wantClient: 1},
-		{name: "wifi only", usb: "", wifi: "127.0.0.1:27015", wantClient: 1},
-		{name: "no muxer at all", usb: "", wifi: "", wantClient: 0},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			usbEP, err := muxaddr.Parse(tc.usb)
-			if err != nil {
-				t.Fatalf("parse usb %q: %v", tc.usb, err)
-			}
-			wifiEP, err := muxaddr.Parse(tc.wifi)
-			if err != nil {
-				t.Fatalf("parse wifi %q: %v", tc.wifi, err)
-			}
-
-			unique, byConfigured := distinctEndpoints([]muxerBinding{{tc.usb, usbEP}, {tc.wifi, wifiEP}})
-			if len(unique) != tc.wantClient {
-				t.Fatalf("distinct endpoints = %d (%v); want %d", len(unique), unique, tc.wantClient)
-			}
-
-			// Every configured key must still resolve, or health loses its entry for that
-			// transport — an absent entry reads as "no muxer" (design §10).
-			for _, configured := range []string{tc.usb, tc.wifi} {
-				if configured == "" {
-					continue
-				}
-				if _, ok := byConfigured[configured]; !ok {
-					t.Errorf("configured address %q resolves to nothing; health would lose its entry", configured)
-				}
-			}
-
-			if tc.wantShared && byConfigured[tc.usb] != byConfigured[tc.wifi] {
-				t.Errorf("both keys name one muxer but resolved differently: %v vs %v",
-					byConfigured[tc.usb], byConfigured[tc.wifi])
-			}
-		})
 	}
 }
 
@@ -228,14 +131,9 @@ func TestDistinctEndpointsCollapsesOneMuxerServingBoth(t *testing.T) {
 //
 // Comments in two files said so and nothing enforced it. This does.
 func TestDialerLookupReturnsAnUntypedNil(t *testing.T) {
-	ep, err := muxaddr.Parse("/run/mux/usbmuxd")
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	lookup := dialerLookup(
-		map[string]muxaddr.Endpoint{"/run/mux/usbmuxd": ep},
-		map[muxaddr.Endpoint]*muxd.Client{}, // the endpoint resolves; NO client was built for it
-	)
+	lookup := dialerLookup(map[string]*muxd.Client{
+		"/run/mux/usbmuxd": nil, // configured, canonical, and NO client was built for it
+	})
 
 	if got := lookup("/run/mux/usbmuxd"); got != nil {
 		t.Errorf("a configured address with no client returned %#v; want an untyped nil, or "+

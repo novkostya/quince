@@ -80,7 +80,7 @@ func TestConfigRoundTripPreservesTLS(t *testing.T) {
 	c := authedClient(t, srv)
 
 	body := `{"backup":{"preferred_transport":"usb","require_encryption":true},` + storageJSON +
-		`"devices":{"manage_muxer":false,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":""},` +
+		`"muxers":[{"address":"/var/run/usbmuxd","type":"external"}],` +
 		`"tls":{"cert_file":"/certs/quince.pem","key_file":"/certs/quince.key"},` +
 		`"sessions":{"allow_insecure_transport":false},"notifications":{"staleness_days":3,"reminder_cooldown_hours":24,"overdue_days":14,"backup_available":true,"backup_overdue":true,"action_required":true,"backup_failed":true,"backup_completed":false},` +
 		`"ui":{"theme":"system"}}`
@@ -119,7 +119,7 @@ func TestConfigPutOmittingTLSTurnsItOff(t *testing.T) {
 	c := authedClient(t, srv)
 
 	withTLS := `{"backup":{"preferred_transport":"usb","require_encryption":true},` + storageJSON +
-		`"devices":{"manage_muxer":false,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":""},` +
+		`"muxers":[{"address":"/var/run/usbmuxd","type":"external"}],` +
 		`"tls":{"cert_file":"/certs/quince.pem","key_file":"/certs/quince.key"},` +
 		`"sessions":{"allow_insecure_transport":false},"notifications":{"staleness_days":3,"reminder_cooldown_hours":24,"overdue_days":14,"backup_available":true,"backup_overdue":true,"action_required":true,"backup_failed":true,"backup_completed":false},` +
 		`"ui":{"theme":"system"}}`
@@ -130,7 +130,7 @@ func TestConfigPutOmittingTLSTurnsItOff(t *testing.T) {
 	}
 
 	withoutTLS := `{"backup":{"preferred_transport":"usb","require_encryption":true},` + storageJSON +
-		`"devices":{"manage_muxer":false,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":""},` +
+		`"muxers":[{"address":"/var/run/usbmuxd","type":"external"}],` +
 		`"sessions":{"allow_insecure_transport":false},"notifications":{"staleness_days":3,"reminder_cooldown_hours":24,"overdue_days":14,"backup_available":true,"backup_overdue":true,"action_required":true,"backup_failed":true,"backup_completed":false},` +
 		`"ui":{"theme":"system"}}`
 	resp2 := putConfig(t, c, srv, withoutTLS)
@@ -163,7 +163,7 @@ func TestConfigPutRejectsAHalfSetTLSPair(t *testing.T) {
 			c := authedClient(t, srv)
 
 			body := `{"backup":{"preferred_transport":"usb","require_encryption":true},` + storageJSON +
-				`"devices":{"manage_muxer":false,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":""},` +
+				`"muxers":[{"address":"/var/run/usbmuxd","type":"external"}],` +
 				tc.tlsJSON +
 				`"sessions":{"allow_insecure_transport":false},"notifications":{"staleness_days":3,"reminder_cooldown_hours":24,"overdue_days":14,"backup_available":true,"backup_overdue":true,"action_required":true,"backup_failed":true,"backup_completed":false},` +
 				`"ui":{"theme":"system"}}`

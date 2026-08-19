@@ -26,8 +26,27 @@ type Config struct {
 	// `storage:` key stays distinguishable from `storage: []` — no key and declared none want the
 	// same refusal for different reasons, and Parse unmarshals over Default(), which would
 	// otherwise make absent and zero-value identical.
-	Storage       *[]StorageEntry     `yaml:"storage" json:"storage"`
-	Devices       DevicesConfig       `yaml:"devices" json:"devices"`
+	Storage *[]StorageEntry `yaml:"storage" json:"storage"`
+	// Muxers IS the list of muxers quince dials (qn.6p, quince#1219 A/B/C). It replaces the
+	// `devices:` section, whose only remaining keys were two addresses and a flag that moved into
+	// `type:` — a section named for something quince never configures, since devices come FROM the
+	// muxer.
+	//
+	// A POINTER, for the reason `storage:` is one, and quince#1219 discovered the second half of it:
+	// an absent key and `muxers: []` mean different things — the built-in default, and DELIBERATELY
+	// NONE — and Parse unmarshals over Default(), which would otherwise make them identical.
+	//
+	// AND Default() MUST NOT CARRY THE ENTRY, which is the half `storage:` never had to face: its
+	// default list is EMPTY, so the pruner never had to drop one. `MarshalDeclared` keeps a
+	// non-empty sequence even when nothing declared it — deliberately, so a fresh install still
+	// writes the storage it was given — so a default entry here would be written into every
+	// config.yml as a key nobody set, which is exactly what D12 forbids. Absent means absent;
+	// ResolvedMuxers() supplies the default at the point of use.
+	Muxers *[]MuxerConfig `yaml:"muxers" json:"muxers"`
+	// Devices is the RETIRED `devices:` section, present only so that finding one is a loud
+	// refusal instead of a silent drop. See LegacyDevices. Never served (`json:"-"`), never
+	// written back (`omitempty`, so a config that has none does not gain a null key).
+	Devices       *LegacyDevices      `yaml:"devices,omitempty" json:"-"`
 	TLS           TLSConfig           `yaml:"tls" json:"tls"`
 	Sessions      SessionsConfig      `yaml:"sessions" json:"sessions"`
 	Notifications NotificationsConfig `yaml:"notifications" json:"notifications"`
@@ -266,52 +285,104 @@ type RetentionConfig struct {
 	KeepWeekly int `yaml:"keep_weekly" json:"keep_weekly"`
 }
 
-// DevicesConfig is the `devices:` section (muxer supervision + sockets, stack D2). Field
-// order is the canonical YAML key order (contracts §6): manage_muxer first.
-type DevicesConfig struct {
-	// ManageMuxer is FALSE IN v0.1 AND `true` IS REFUSED. quince ships no muxer daemon: the
-	// operator runs one — a host usbmuxd, a sidecar, or another tool's — and quince dials it
-	// (qn.6p D1/D2, Operator 2026-08-16, quince#897).
+// MuxerConfig is one entry of the top-level `muxers:` list — where quince finds a muxer, and
+// (later) who runs it. It REPLACES the `devices:` section entirely (quince#1219 A/B/C, ruled
+// 2026-08-18).
+//
+// `address:` RATHER THAN `socket:`, because either endpoint may be a path or `host:port` —
+// `usbmuxd -S` takes `ADDR:PORT | PATH`, measured. `socket:` would re-create the naming lie
+// `usbmuxd_socket`/`netmuxd_addr` each carried a paragraph to explain. The grammar is
+// `internal/muxaddr`'s and accepts all three forms:
+//
+//	/run/mux/usbmuxd         a unix socket path
+//	UNIX:/run/mux/usbmuxd    the same, in libusbmuxd's own spelling
+//	127.0.0.1:27015          TCP
+//
+// A LIST, BECAUSE THE OLD SHAPE MADE YOU WRITE A THING TWICE TO MEAN ONCE. netmuxd serves USB and
+// Wi-Fi over ONE socket, and saying so meant pointing both keys at one address and having
+// `distinctEndpoints` collapse them back — machinery that exists only to undo the schema. One
+// entry says it once.
+type MuxerConfig struct {
+	// Address is where this muxer answers. Required: an entry without one configures nothing.
+	Address string `yaml:"address" json:"address"`
+	// Type is who runs this muxer. `external` (the default, and the ONLY value v0.1 accepts) means
+	// somebody else runs it and quince only dials it; `managed` is reserved for the return of the
+	// in-container profile and is refused BY NAME on the serve path, because descoped must not
+	// reach the operator as malformed.
 	//
-	// THE KEY SURVIVES ITS OWN PROFILE ON PURPOSE, and deleting it would be the worse bug.
-	// Config load uses plain yaml.Unmarshal, which drops unknown keys SILENTLY — this repo has
-	// that incident on record at storages_validate_test.go:162, where a mistyped `pathh:` "was
-	// dropped by yaml.Unmarshal and reported by nothing". So removing the key would upgrade an
-	// existing `manage_muxer: true` install into a muxerless quince with no muxer configured,
-	// without a word, and the operator would watch every device vanish with nothing to read.
-	// Refusing it loudly is the no-silent-fallbacks rule applied to a config key.
-	//
-	// ALL-IN-ONE IS DESCOPED, NOT ABANDONED (Operator: "I want it to be back in future versions,
-	// I'm not giving up on all-in-one"). Reintroducing it is deleting one validation branch and
-	// unparking muxsup — which is why the supervision path is parked rather than deleted, and why
-	// UsbmuxdSocket/NetmuxdAddr keep their daemon-shaped names.
-	ManageMuxer bool `yaml:"manage_muxer" json:"manage_muxer"`
-	// UsbmuxdSocket is where the USB muxer answers — authoritative: a managed usbmuxd is started
-	// with `-S <this>`, and POST /api/devices/rescan restarts THIS daemon (USB hotplug is what
-	// rescan exists for).
-	//
-	// THREE FORMS, not one (qn.6p D3, quince#897 item 1) — the grammar is internal/muxaddr's:
-	//
-	//	/run/mux/usbmuxd         a unix socket path
-	//	UNIX:/run/mux/usbmuxd    the same, in libusbmuxd's own spelling
-	//	127.0.0.1:27015          TCP
-	//
-	// Empty = no USB muxer at all.
-	UsbmuxdSocket string `yaml:"usbmuxd_socket" json:"usbmuxd_socket"`
-	// NetmuxdAddr is where the Wi-Fi muxer answers — authoritative: a managed netmuxd is started
-	// with `--host/--port` from it (plus a private --socket-path, since netmuxd would otherwise
-	// delete and rebind the usbmuxd socket, and --disable-usb, since usbmuxd is the USB anchor
-	// until qn.7's audition). Empty = no Wi-Fi muxer at all.
-	//
-	// THE SAME THREE FORMS. This was host:port ONLY, which is why an external netmuxd on a unix
-	// socket could not be configured at all — and that is the shape which serves BOTH transports
-	// over one socket, the one an operator reaches for precisely so as not to open an
-	// unauthenticated TCP port (quince#897 item 1).
-	//
-	// BOTH KEY NAMES NOW UNDER-DESCRIBE WHAT THEY ACCEPT, and they are deliberately not renamed:
-	// they carry daemon identity, which a reintroduced ManageMuxer needs, and all-in-one is
-	// DESCOPED rather than abandoned (qn.6p, Operator 2026-08-16).
-	NetmuxdAddr string `yaml:"netmuxd_addr" json:"netmuxd_addr"`
+	// OPTIONAL, DEFAULTING TO `external`, AND THE REASON IS DOCUMENTATION RATHER THAN
+	// COMPATIBILITY (ruled, quince#1219 B). The compatibility argument offered for it — *"the
+	// alternative is a breaking reshape later"* — was REJECTED as unsound: `type` omitted =
+	// `external` is what makes adding `managed` non-breaking, and that rule is equally available
+	// whenever the discriminator is introduced. What carries it is that a reader meeting `muxers:`
+	// learns the shape HAS a discriminator and that `managed` is planned. Recorded this way
+	// deliberately: a ruling taken on a wrong reason is hard to revisit, because the reason is
+	// what a future session reads.
+	Type string `yaml:"type" json:"type"`
+}
+
+// MuxerTypes. `external` is the only one v0.1 honours; `managed` is known BY NAME so that asking
+// for it is refused with an explanation rather than reported as a malformed value.
+const (
+	MuxerExternal = "external"
+	MuxerManaged  = "managed"
+)
+
+// DefaultMuxerAddress is where quince looks for a muxer when the operator has not said. It is
+// libusbmuxd's OWN default — measured from the shipped binary, `-S … Default: /var/run/usbmuxd` —
+// so one value serves both *"I ran your sidecar"* and *"I already had a muxer"*, and a compose file
+// is enough: nobody hand-edits config.yml before first launch.
+const DefaultMuxerAddress = "/var/run/usbmuxd"
+
+// ResolvedMuxers is the muxer list as quince ACTUALLY USES IT: what the operator wrote, or the
+// single built-in default when they wrote nothing.
+//
+// ABSENT AND EMPTY ARE DIFFERENT, and that is the whole reason `muxers:` is a pointer. No key means
+// *"I have not thought about this"* → the default. `muxers: []` means *"none"* → none, and quince
+// then sees no devices and says so at startup rather than quietly substituting a muxer the operator
+// removed on purpose.
+//
+// THE DEFAULT LIVES HERE RATHER THAN IN Default() so that it is never WRITTEN. `MarshalDeclared`
+// keeps a non-empty sequence even when nothing declared it, so a default entry in Default() would
+// land in every config.yml as a key nobody set — the opposite of D12's promise that the file
+// carries only what the user set.
+//
+// NOT A REVERSAL OF qn.6c, AND THE TEST IS THE FAILURE MODE rather than the taxonomy (ruled,
+// quince#1219). `QUINCE_BACKUPS`' default gave every deployment a WORKING STORAGE while declaring
+// nothing — data written somewhere nobody chose, in a deployment that looked healthy: silent,
+// durable, expensive to discover late. A defaulted muxer address that is wrong writes NOTHING
+// ANYWHERE: no devices appear, which is loud, immediate and self-diagnosing on the first screen a
+// user opens. qn.6c objected to a default whose failure is invisible and whose consequence is
+// durable; neither property is present here.
+func (c Config) ResolvedMuxers() []MuxerConfig {
+	if c.Muxers == nil {
+		return []MuxerConfig{{Address: DefaultMuxerAddress}}
+	}
+	return *c.Muxers
+}
+
+// LegacyDevices EXISTS ONLY TO CATCH A RETIRED SECTION, and it is a field rather than a lookup
+// because absence cannot be detected any other way: config load is a plain `yaml.Unmarshal`, which
+// drops unknown keys SILENTLY. This repo has that incident on record at
+// `storages_validate_test.go:162`, where a mistyped `pathh:` *"was dropped by yaml.Unmarshal and
+// reported by nothing"*.
+//
+// WITHOUT THIS, RETIRING `devices:` WOULD TAKE AN OPERATOR'S MUXER ADDRESS WITH IT IN SILENCE:
+// their `usbmuxd_socket: /run/mux/usbmuxd` would be dropped, quince would start on the default
+// `/var/run/usbmuxd`, and every device would vanish with nothing to read. That is the
+// no-silent-fallbacks rule applied to a config key, and it is the same argument `manage_muxer`'s
+// own comment made for keeping a key that had outlived its profile.
+//
+// The values are POINTERS so the refusal can quote what was actually written — a message that
+// names the address you had and the entry to replace it with is actionable; one that says
+// "unknown section" is not (quince#940).
+//
+// `json:"-"` ON EVERY FIELD: a retired section must never reach the wire. It is read from the file,
+// refused, and never served.
+type LegacyDevices struct {
+	ManageMuxer   *bool   `yaml:"manage_muxer" json:"-"`
+	UsbmuxdSocket *string `yaml:"usbmuxd_socket" json:"-"`
+	NetmuxdAddr   *string `yaml:"netmuxd_addr" json:"-"`
 }
 
 // TLSConfig is the `tls:` section (qn.6f): the certificate quince serves itself, for the
@@ -442,26 +513,9 @@ func Default() Config {
 			PreferredTransport: "usb",
 			RequireEncryption:  true,
 		},
-		// The muxer defaults are the HARDENED profile's (qn.6p D1/D4), and each is a decision:
-		//
-		//   ManageMuxer false — quince ships no muxer daemon. Default() must not carry a value
-		//     Validate refuses, or the fallback an invalid config lands on would itself be invalid.
-		//
-		//   UsbmuxdSocket "/var/run/usbmuxd" — unchanged, and it is usbmuxd's OWN default (measured
-		//     from the shipped binary: `-S … Default: /var/run/usbmuxd`). So a host that already
-		//     runs usbmuxd works with no config.yml at all, which is the case quince#897 was filed
-		//     about. Rung-local decision; the alternative was a shared-volume path matching
-		//     compose.hardened.yml, and only one can be the default.
-		//
-		//   NetmuxdAddr "" — the dead `127.0.0.1:27015` is GONE (quince#897 item 3). Defaulting it
-		//     made quince dial a port nothing listened on, forever, ~1 warning/second backing off,
-		//     and made "no Wi-Fi muxer" inexpressible except by knowing that an explicit `""`
-		//     differs from an absent key. Empty means empty now.
-		Devices: DevicesConfig{
-			ManageMuxer:   false,
-			UsbmuxdSocket: "/var/run/usbmuxd",
-			NetmuxdAddr:   "",
-		},
+		// NO `Muxers` ENTRY HERE ON PURPOSE — see ResolvedMuxers(). A default in Default() would be
+		// WRITTEN into every config.yml, because MarshalDeclared keeps a non-empty sequence even when
+		// nothing declared it. Absent means absent; the default is supplied at the point of use.
 		Reconcile: ReconcileConfig{
 			IntervalMinutes: 360,
 		},
