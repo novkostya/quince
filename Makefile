@@ -354,7 +354,7 @@ SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test prefl
                    forge-watch-actor-test forge-watch-postmerge-test pre-push-shim-test loop-drift-test \
                    forge-watch-owed-scope-test forge-watch-gh-auth-test gap-heading-check-test \
                    demo-block-check-test build-args-test release-image-test go-test-args-test \
-                   stale-refs-report-test
+                   stale-refs-report-test gh-review-commit-id-test
 # THE ONE EXCLUSION, NAMED — because "no exclusion list at all" was false (quince#246 review).
 #
 # `bin/forge-fetch-equivalence-test` needs a LIVE FORGE and a CREDENTIAL: it compares the `gh pr list`
@@ -408,7 +408,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot \
                    deploy/privacy/privacy-check deploy/privacy/privacy-check-test \
                    bin/forge-watch-exits-test bin/forge-watch-stop-test bin/forge-watch-fixtures-doc-test \
                    deploy/runner/quince-runner-status-test \
-                   bin/gh-review bin/home-resolution-test bin/forge-watch-roundtrip-test \
+                   bin/gh-review bin/gh-review-commit-id-test bin/home-resolution-test bin/forge-watch-roundtrip-test \
                    bin/forge-watch-ownership-test bin/forge-watch-composition-test \
                    bin/forge-watch-seats-test \
                    bin/scratch-reap bin/scratch-reap-test \
@@ -648,6 +648,10 @@ wrapper-boundary-test: ## A boundary refusal must outrank an environment one in 
 .PHONY: wrapper-body-test
 wrapper-body-test: ## every gh wrapper must REFUSE inline --body — backticks in it EXECUTE (quince#518)
 	@bin/wrapper-body-test
+
+.PHONY: gh-review-commit-id-test
+gh-review-commit-id-test: ## a verdict's --commit-id must be a FULL 40-char oid, refused locally (quince-devlog#204)
+	@bin/gh-review-commit-id-test
 
 # quince#256 item 3's other half, and the same argument as sh-lint-coverage-test below: a totality
 # check with no tests would report `clean` about a comparison it had failed to make. The cases that

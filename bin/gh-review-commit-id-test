@@ -1,0 +1,124 @@
+#!/bin/sh
+# gh-review-commit-id-test — a verdict's `--commit-id` must be a FULL 40-char oid (quince-devlog#204).
+#
+# WHY THE PRESENCE CHECK WAS NOT ENOUGH. quince#110 made this wrapper refuse a MISSING oid, because
+# without one GitHub binds the review to whatever head exists at submission rather than to what was
+# read. It accepted a MALFORMED one, so an abbreviation went to the API and came back as a remote
+# `Unprocessable Entity` — three of them in one architect session, each costing a round trip to learn
+# that the local string was wrong. That retirement record named the fix and had no tracker; this is it.
+#
+# THE LIKELY MISTAKE IS AN ABBREVIATION, NOT A TYPO, and that is what makes it worth a gate.
+# `git log --oneline` and the forge's own web UI both hand you a short oid, and GitHub serves an
+# arbitrary FULL one while refusing a short one (quince#243). So the wrong value is the one the tools
+# produce by default and it looks correct.
+#
+# HOW IT REACHES THE CHECK AT ALL. The credential-boundary refusals fire BEFORE argument validation,
+# deliberately (a boundary refusal must outrank an environment one), so on any real box this wrapper
+# dies at the boundary first. Every case here points the three credential paths at nonexistent files
+# and clears the token env vars, which is exactly the state the boundary is asserting — so it passes
+# and control reaches the verdict block. Nothing is minted, no network is touched, no key is read.
+set -eu
+
+cd "$(dirname "$0")/.."
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+[ -x bin/gh-review ] || {
+	printf 'gh-review-commit-id-test: bin/gh-review is not executable — DID NOT RUN\n' >&2
+	exit 2
+}
+
+# The credential-free environment described above. `QUINCE_REVIEW_KEY_FILE` is deliberately NOT set:
+# a well-formed oid must still reach the key check, and that is case (3)'s whole assertion.
+review() {
+	QUINCE_CODER_KEY_FILE=/nonexistent/coder.pem \
+		QUINCE_ANALYST_KEY_FILE=/nonexistent/analyst.pem \
+		QUINCE_BOT_TOKEN_FILE=/nonexistent/bot.token \
+		GH_TOKEN='' GITHUB_TOKEN='' GH_ENTERPRISE_TOKEN='' GITHUB_ENTERPRISE_TOKEN='' \
+		./bin/gh-review pr review 42 --repo novkostya/quince --approve --commit-id "$1" 2>&1 || true
+}
+
+# (0) THE CONTROL FIRST. If the boundary or a dependency refusal fires ahead of the verdict block,
+# every case below would "pass" by refusing for the wrong reason — the shape of green gate this
+# project keeps filing (quince-devlog#260). Asserted by its absence: no case may mention a boundary.
+_ctl=$(review deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+if printf '%s' "$_ctl" | grep -qiE 'KEY IS PRESENT|BOT TOKEN is present|CREDENTIAL is present'; then
+	bad "a boundary refusal fired — these cases are not reaching the verdict block at all"
+	printf '%s\n' "$_ctl" | head -2 | sed 's/^/    | /'
+else
+	ok "the credential-free environment reaches the verdict block (the control)"
+fi
+
+# (1) AN ABBREVIATION IS REFUSED, and the message says the length rather than only that it is wrong.
+# A refusal that does not name the measured value sends the reader back to guess.
+_ab=$(review bbf4b4c2)
+if printf '%s' "$_ab" | grep -q 'REFUSING --commit-id' && printf '%s' "$_ab" | grep -q 'it is 8 characters and an oid is 40'; then
+	ok "an abbreviated oid is refused locally, and the refusal names its length"
+else
+	bad "an 8-character oid was not refused, or the refusal does not say why"
+	printf '%s\n' "$_ab" | head -2 | sed 's/^/    | /'
+fi
+
+# (1b) AND IT NAMES THE REMEDY. quince#243 is the reason an abbreviation cannot simply be expanded
+# here: the forge refuses a short oid, so the reader has to fetch the full one.
+if printf '%s' "$_ab" | grep -q 'headRefOid'; then
+	ok "the refusal names the command that produces a full oid"
+else
+	bad "the refusal does not say how to obtain the right value"
+fi
+
+# (2) A NON-HEX VALUE IS REFUSED SEPARATELY. Forty wrong characters would satisfy a length-only
+# check, so the two conditions are not one condition — asserted at exactly 40 to prove it.
+_nh=$(review zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz)
+if printf '%s' "$_nh" | grep -q 'not a hexadecimal object id'; then
+	ok "a 40-character non-hex value is refused — length alone is not the test"
+else
+	bad "a non-hex oid of the right length passed the check"
+	printf '%s\n' "$_nh" | head -2 | sed 's/^/    | /'
+fi
+
+# (3) A WELL-FORMED OID IS NOT REFUSED BY THIS CHECK — the direction that matters, because a guard
+# that refuses everything passes every negative case. It must fall through to the key check, which is
+# the next refusal on the path and proves the argument was accepted.
+if printf '%s' "$_ctl" | grep -q 'REFUSING --commit-id'; then
+	bad "a valid 40-character lowercase oid was refused — the guard is too tight"
+	printf '%s\n' "$_ctl" | head -2 | sed 's/^/    | /'
+else
+	ok "a valid 40-character oid passes the shape check (the negative control)"
+fi
+
+# (3b) INCLUDING AN UPPERCASE ONE. Git writes lowercase and the API accepts either, so refusing
+# uppercase would be this wrapper inventing a rule the forge does not have — on the one path where a
+# spurious refusal blocks an otherwise correct verdict.
+_uc=$(review DEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF)
+if printf '%s' "$_uc" | grep -q 'REFUSING --commit-id'; then
+	bad "an uppercase oid was refused — a rule the forge itself does not have"
+else
+	ok "an uppercase oid is accepted, as the API accepts it"
+fi
+
+# (4) THE MISSING-OID REFUSAL STILL FIRES AND IS STILL ITS OWN MESSAGE (quince#110). The new checks
+# sit directly beneath it, and collapsing the two would lose the reason a verdict needs an oid at all
+# — which is a different fact from the oid being the wrong shape.
+_miss=$(QUINCE_CODER_KEY_FILE=/nonexistent/coder.pem \
+	QUINCE_ANALYST_KEY_FILE=/nonexistent/analyst.pem \
+	QUINCE_BOT_TOKEN_FILE=/nonexistent/bot.token \
+	GH_TOKEN='' GITHUB_TOKEN='' GH_ENTERPRISE_TOKEN='' GITHUB_ENTERPRISE_TOKEN='' \
+	./bin/gh-review pr review 42 --repo novkostya/quince --approve 2>&1 || true)
+if printf '%s' "$_miss" | grep -q 'without --commit-id (quince#110)'; then
+	ok "the missing-oid refusal is untouched and keeps its own reason (quince#110)"
+else
+	bad "the quince#110 refusal no longer fires or has been merged into the shape check"
+	printf '%s\n' "$_miss" | head -2 | sed 's/^/    | /'
+fi
+
+printf '\ngh-review-commit-id-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

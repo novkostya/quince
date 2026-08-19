@@ -264,6 +264,40 @@ if [ "$_gr_verdict" = yes ]; then
 		"  gh-review pr review $_gr_pr --repo $_gr_repo --approve --commit-id <oid> --body-file <f>" \
 		"Read it BEFORE you review: gh pr view $_gr_pr --json headRefOid -q .headRefOid" \
 		"There is no default on purpose — resolving head here would re-create the race it closes."
+	# AND THE SHAPE, NOT ONLY THE PRESENCE (quince-devlog#204). The check above refuses a MISSING oid
+	# and accepts a malformed one, so an abbreviation reached the API and came back as a remote
+	# `Unprocessable Entity` — three of them in one session, each costing a round trip to learn that
+	# the local string was wrong. The refusal is free and local; the acceptance is not.
+	#
+	# WHY AN ABBREVIATION IS THE CASE THAT MATTERS rather than a typo: GitHub serves an arbitrary FULL
+	# oid and refuses a short one (quince#243), and `git log --oneline` hands you a short one. So the
+	# wrong value is the one the tools produce by default, and it is wrong in a way that looks right —
+	# quince#1093 is the same edge from the fetching side, where an abbreviated oid cannot be fetched
+	# once the head has moved.
+	#
+	# `${#var}` and a `case` glob rather than a `grep` pipeline: both are shell builtins, so this adds
+	# no subprocess to the verdict path, and a pipeline here would report the exit code of its last
+	# stage rather than of the test.
+	#
+	# Case-insensitive on purpose. Git writes lowercase and the API accepts either; refusing an
+	# uppercase oid would be this wrapper inventing a rule the forge does not have, on the one path
+	# where a spurious refusal blocks a verdict that is otherwise correct.
+	case "$_gr_commit" in
+	*[!0-9a-fA-F]*) die \
+		"REFUSING --commit-id '$_gr_commit': it is not a hexadecimal object id." \
+		"A verdict binds to the commit named here, so a value the API cannot resolve is refused" \
+		"locally rather than sent — the remote answer is an Unprocessable Entity that says nothing" \
+		"about which argument was wrong (quince-devlog#204)." \
+		"Read it: gh pr view $_gr_pr --json headRefOid -q .headRefOid" ;;
+	esac
+	if [ "${#_gr_commit}" -ne 40 ]; then
+		die "REFUSING --commit-id '$_gr_commit': it is ${#_gr_commit} characters and an oid is 40." \
+			"GitHub serves an arbitrary FULL oid and refuses an abbreviation (quince#243), so a short" \
+			"one fails at the API — and an abbreviation is what \`git log --oneline\` and the forge's" \
+			"own web UI hand you, which is why this is the likely mistake rather than an exotic one." \
+			"Take the full one: gh pr view $_gr_pr --json headRefOid -q .headRefOid" \
+			"or, locally: git rev-parse <ref>"
+	fi
 	# An empty `body` field is not the same as an absent one, so it is only sent when non-empty.
 	set -- api -X POST "repos/$_gr_repo/pulls/$_gr_pr/reviews" \
 		-f "event=$_gr_event" -f "commit_id=$_gr_commit"
