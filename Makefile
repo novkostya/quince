@@ -733,11 +733,23 @@ pr-title-refs-test: ## The title check's failure paths, incl. the ruled DID-NOT-
 #
 # Reproduced on this box before the fix, against a live PR opened from this clone.
 #
-# `GH_CLI` FIRST, THEN THE WRAPPER, THEN BARE `gh`. The caller's override wins so CI and the suites
-# can point this anywhere; otherwise the seat's own wrapper is preferred if it is present; otherwise
-# the old behaviour, unchanged, for any box where neither exists. `bin/pr-title-refs` already
-# accepts `--gh` and already defaults to `$GH_CLI` — nothing in the tool changes, which is why this
-# is a Makefile line rather than a tool change.
+# `GH_CLI` FIRST, THEN `bin/gh-coder`. The caller's override always wins; otherwise this resolves to
+# the IMPLEMENTER wrapper, because that is the box quince-devlog#270 is about — the one that opens
+# pull requests and therefore wants to read a title the forge already holds.
+#
+# IT IS NOT A PER-SEAT RESOLUTION AND MUST NOT BE READ AS ONE (quince#1241 review). This comment
+# claimed the chain preferred *the seat's own* wrapper and fell back to bare `gh` where neither
+# exists. Both halves are false: `bin/gh-coder` and `bin/gh-review` are both COMMITTED, so
+# `$(wildcard bin/gh-coder)` is non-empty in every clone on every box, and the bare-`gh` arm is
+# UNREACHABLE in this repository. Presence in the tree is not seat ownership.
+#
+# A make-time test cannot discriminate seats at all: the discriminator is which CREDENTIAL is
+# present at run time, not which file is checked in. So this deliberately does not try.
+#
+# ON THE ARCHITECT BOX the `PR=` route therefore still exits 2 — now with `gh-coder`'s boundary
+# refusal naming the reviewer key rather than `gh auth login`. That is not a regression (it failed
+# before too) and the escape is measured: `make pr-title-check … GH_CLI=$(CURDIR)/bin/gh-review`
+# returns `clean` there.
 #
 # `TITLE_ENV=` NEEDS NONE OF THIS and is why the gate was never lost: it makes no forge call at all,
 # so it worked on every box throughout. CI uses that route. This fixes the route that reads the
