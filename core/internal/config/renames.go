@@ -34,12 +34,11 @@ import (
 var renamedKeys = map[string]renamedKey{
 	// qn.5b renamed this when the reflink moved commit→seed; `contracts.md` records the rename and
 	// nothing in the RUNNING system did.
-	"storage.zfs.mirror": {successor: "storage.zfs.seed", since: "qn.5b"},
+	"storage.zfs.mirror": {successor: "storage.zfs.seed"},
 }
 
 type renamedKey struct {
 	successor string
-	since     string // the rung that renamed it, so a reader can date their config against it
 }
 
 // WHAT IS DELIBERATELY ABSENT, because an entry here is a claim that the key reaches this code path:
@@ -84,8 +83,8 @@ func renameWarning(path string, value any) (string, bool) {
 	// indexed successor would be more precise and is not worth the string surgery: an operator
 	// reading `storage[0].zfs.mirror` and told to move it to `storage.zfs.seed` is not confused
 	// about which entry they are editing, because they are looking at it.
-	return fmt.Sprintf("`%s` was renamed to `%s` in %s and is IGNORED — your value %v is NOT in "+
-		"force; move it to `%s`.", path, r.successor, r.since, quoteValue(value), r.successor), true
+	return fmt.Sprintf("`%s` was renamed to `%s` and is IGNORED — your value %v is NOT in "+
+		"force; move it to `%s`.", path, r.successor, quoteValue(value), r.successor), true
 }
 
 // RENAMED SECTIONS — the shape the table above named as unsolved, built by qn.12 (quince#1124).
@@ -107,12 +106,11 @@ func renameWarning(path string, value any) (string, bool) {
 var renamedSections = map[string]renamedSection{
 	// qn.12. Both keys existed only to answer *notify or not*, so the name stopped being accurate
 	// when the Shortcut opportunity signal left the rung's scope (quince#1124).
-	"automation": {successor: "notifications", since: "qn.12"},
+	"automation": {successor: "notifications"},
 }
 
 type renamedSection struct {
 	successor string
-	since     string
 }
 
 // renameSectionWarning is renameWarning's counterpart for a whole section.
@@ -134,8 +132,8 @@ func renameSectionWarning(path string, value any) (string, bool) {
 	if len(children) == 0 {
 		// An empty or non-mapping section: there is nothing to echo, so the sentence is the move
 		// alone rather than a dangling "your keys ".
-		return fmt.Sprintf("`%s:` was renamed to `%s:` in %s and the whole section is IGNORED; "+
-			"move it to `%s:`.", path, r.successor, r.since, r.successor), true
+		return fmt.Sprintf("`%s:` was renamed to `%s:` and the whole section is IGNORED; "+
+			"move it to `%s:`.", path, r.successor, r.successor), true
 	}
 	names := make([]string, 0, len(children))
 	for k := range children {
@@ -149,9 +147,9 @@ func renameSectionWarning(path string, value any) (string, bool) {
 	for _, k := range names {
 		parts = append(parts, fmt.Sprintf("%s: %v", k, childValue(children[k])))
 	}
-	return fmt.Sprintf("`%s:` was renamed to `%s:` in %s and the whole section is IGNORED — your "+
+	return fmt.Sprintf("`%s:` was renamed to `%s:` and the whole section is IGNORED — your "+
 		"settings %s are NOT in force; move them under `%s:`.",
-		path, r.successor, r.since, strings.Join(parts, ", "), r.successor), true
+		path, r.successor, strings.Join(parts, ", "), r.successor), true
 }
 
 // childValue renders one child of a renamed section.
