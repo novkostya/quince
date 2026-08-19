@@ -148,3 +148,32 @@ func TestEveryServedDeviceIsNotifiedAboutUnlessDeliberatelyMuted(t *testing.T) {
 		}
 	}
 }
+
+// The demo provider's half of PUT /api/devices/{udid}/notifications (quince#1270): the flip is
+// visible on the very next read, and an unknown UDID is refused rather than silently accepted.
+func TestDemoSetNotificationsEnabled(t *testing.T) {
+	p := newRunningProvider(t)
+	devs := p.Devices()
+	if len(devs) == 0 {
+		t.Fatal("demo world served no devices")
+	}
+	udid := devs[0].UDID
+
+	if status, reason := p.SetNotificationsEnabled(udid, false); status != 200 {
+		t.Fatalf("muting a known device = %d %q, want 200", status, reason)
+	}
+	if d, ok := p.Device(udid); !ok || d.NotificationsEnabled {
+		t.Fatalf("device reads notifications_enabled=%v after being muted", d.NotificationsEnabled)
+	}
+	if status, _ := p.SetNotificationsEnabled(udid, true); status != 200 {
+		t.Fatalf("unmuting = %d, want 200", status)
+	}
+	if d, ok := p.Device(udid); !ok || !d.NotificationsEnabled {
+		t.Fatalf("device reads notifications_enabled=%v after being unmuted", d.NotificationsEnabled)
+	}
+
+	// AN UNKNOWN DEVICE IS NOT A MUTED ONE. 200 here would be a write against nothing.
+	if status, _ := p.SetNotificationsEnabled("NO-SUCH-UDID", false); status != 404 {
+		t.Fatalf("unknown udid = %d, want 404", status)
+	}
+}
