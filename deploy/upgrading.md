@@ -87,11 +87,11 @@ array instead, and the question stops existing.
 
 ---
 
-## `qn.6c` — `storage:` is now the list itself
+## `storage:` is now the list itself
 
 **If you have already written `storage.storages:` per the entry below, that shape no longer parses.
-`storage:` IS the list.** This is the second config break in one rung and it is deliberately in the
-same rung rather than after it: both land before anyone but the author is running this.
+`storage:` IS the list.** This is the second config break in a row, and both landed before the
+first release — so no published version of quince ever read the old shape.
 
 ### Do this first
 
@@ -147,7 +147,7 @@ that refusal, and nothing is lost.
 
 ---
 
-## `qn.6c` — declare your storage before you upgrade
+## Declare your storage before you upgrade
 
 **`QUINCE_BACKUPS` is retired. quince will refuse to start until `storage.storages` is declared in
 `config.yml`.**
@@ -180,7 +180,7 @@ happens before anything is opened, probed or written.
 ### Why it refuses instead of guessing
 
 `QUINCE_BACKUPS` carried a built-in `/backups` default, so every deployment had a working storage
-while declaring nothing. `qn.6c` makes storage plural, and *"where do the backups go"* stops having
+while declaring nothing. Storage is plural now, and *"where do the backups go"* stops having
 a sane default the moment there can be more than one place. The honest form of "no default" is a
 refusal that names the key and prints the remedy.
 
@@ -203,4 +203,4 @@ protects nothing, which is worse than one that did not start.
   startup, and the subsystem holds it for the process's life.
 - `--demo` is unaffected — it serves fixture data and touches no storage.
 - Declaring more than one storage is accepted by config, but **choosing between them at backup time
-  is not built yet** (`qn.6c` stories 5–9). Until it lands, backups go to the `default` storage.
+  is not built yet.** Until it lands, backups go to the `default` storage.

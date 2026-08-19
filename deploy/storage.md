@@ -1,6 +1,6 @@
 # quince storage — backends, the zfs hook, and offsite sync
 
-Storage semantics are canon in [`../docs/quince.stack.md`](../docs/quince.stack.md) (D5/D5a) and
+Storage semantics are specified in [`../docs/quince.stack.md`](../docs/quince.stack.md) and
 [`../docs/quince.design.md`](../docs/quince.design.md) (§5). This file is the operator-facing
 deploy reference: the backend probe, the constrained ZFS hook, and the exact rclone filter block.
 
@@ -10,7 +10,7 @@ deploy reference: the backend probe, the constrained ZFS hook, and the exact rcl
 
 - **zfs** — chosen when `storage.zfs.parent_dataset` (or an `ssh_user`/`ssh_host` pair) is set, or `backend: zfs`
   is explicit. Snapshot-native: one child dataset per device, versions are `@quince-*` snapshots.
-  qn.6h: **the backup tree IS the child dataset root.** `idevicebackup2`'s target is the parent
+  **The backup tree IS the child dataset root.** `idevicebackup2`'s target is the parent
   dataset and it appends the device's UDID itself, so a backup lands at `<parent>/<udid>/Info.plist`
   and friends — no `latest/`, no working copy, and no clone before the transfer can start. Commit is
   verify → `zfs snapshot`, and the snapshot IS the version. Between backups the dataset holds only
@@ -21,7 +21,7 @@ deploy reference: the backend probe, the constrained ZFS hook, and the exact rcl
 - **copy** — last resort (full copies, transient 2× space). A **degraded** mode: quince logs it
   loudly and surfaces it — never a silent fallback.
 
-The chosen backend and *why* are logged at startup and shown in onboarding (qn.6).
+The chosen backend and *why* are logged at startup and shown in onboarding.
 
 ## ZFS: REQUIRED SETUP — two settings on the parent dataset
 
@@ -47,7 +47,7 @@ minutes makes *reset* refuse too. Reset says so and names this setting when it h
 **2. Set the quota on the parent dataset, NOT per device.**
 
 **A per-device quota is UNSUPPORTED and will cost you a backup.** `idevicebackup2` asks the
-filesystem how much space is free before it starts, and since qn.6h its target is the **parent**
+filesystem how much space is free before it starts, and its target is the **parent**
 dataset — so a quota on the child is invisible to that question. Measured on a real pool,
 2026-08-08: with `quota=10G` on a child, the tool is told **1620 GiB** is available. It then starts a
 backup that cannot fit, and the failure arrives as **ENOSPC part-way through** rather than as a clean
@@ -58,8 +58,7 @@ up-front refusal — which on Wi-Fi costs hours.
 `storage.zfs.mode: hook` is the only value and the default — quince reaches an SSH forced-command to
 a constrained helper on the ZFS host. This keeps the HTTP-facing container free of ZFS privileges.
 
-**QUINCE COMPOSES THE SSH COMMAND ITSELF** since quince#818 — Operator ruling, relayed at
-<https://github.com/novkostya/quince/issues/818#issuecomment-5245496176> — from four
+**QUINCE COMPOSES THE SSH COMMAND ITSELF** — from four
 per-storage keys: `ssh_user`, `ssh_host`, and optionally `ssh_port` (default 22) and `ssh_key`
 (default `/data/keys/zfs`). It builds an argv array, never a shell string.
 
@@ -73,10 +72,10 @@ the same shape `mode: exec` uses and for the same reason: an unknown-key warning
 *"ignored"* about the one key every existing zfs install has set.
 
 The transport binary (`ssh`) must exist **where quince runs**: the
-runtime image ships `openssh-client` for exactly this (qn.4a gate-15 finding #2) — without it every
+runtime image ships `openssh-client` for exactly this — without it every
 hook call dies with `exec: "ssh": executable file not found` and no backup can seed.
 
-**`mode: exec` is REMOVED** — Operator ruling 2026-08-10 (quince#697). It ran `zfs …` in the
+**`mode: exec` is REMOVED** (quince#697). It ran `zfs …` in the
 container against delegated privileges, and **the shipped image has no `zfs` binary**, so the mode
 you got by default could not work in what we ship. Shipping the userland was rejected rather than
 merely declined: the `zfs` CLI talks to the host kernel module over a versioned ioctl interface, so
@@ -163,7 +162,7 @@ document for a fenced block, so a prose edit can no longer break a gate. And `sh
 script **for the first time** — it had never been linted while it lived in a fence — which is what
 produced the `SC2086` question the next section answers.
 
-**THE FILE IS DELIBERATELY SPARE, AND THIS SECTION IS WHY IT CAN BE** — Operator ruling on
+**THE FILE IS DELIBERATELY SPARE, AND THIS SECTION IS WHY IT CAN BE** — decided on
 quince#887. The script is displayed verbatim in the UI and then installed on somebody's storage host,
 so it is read there as an *artifact*, not as our notebook: a reader deciding whether to trust a file
 they are about to run as root should not have to page through this project's reasoning to find the
@@ -174,8 +173,8 @@ that moment* — what the script allows, and why three lines that look wrong are
 **THE RULING BINDS EVERY LATER EDIT, AND quince#985 BROKE IT BEFORE THIS SENTENCE EXISTED.** That PR
 added ten lines of block-capital rationale to the header — *"ONE FILE PER HOST, IDENTICAL BYTES FOR
 EVERY INSTALL"*, *"$1 IS THE OPERATOR'S AND $SSH_ORIGINAL_COMMAND IS THE CLIENT'S"* — which is this
-project's house style for canon and exactly what a file rendered on a screen must not carry
-(Operator, 2026-08-14: *"EVERY BYTE IN THIS FILE HAS TO HAVE BULLET PROOF REASONING WHY IT'S HERE"*).
+this project writes for itself, and exactly what a file rendered on a screen must not carry
+(2026-08-14: *"EVERY BYTE IN THIS FILE HAS TO HAVE BULLET PROOF REASONING WHY IT'S HERE"*).
 The reasoning lives here and in `zfshelper.go`; **the test for a line in the script is whether a
 stranger about to run it as root needs it to decide.** Stated as a rule rather than left as a
 one-time cleanup, because the ruling was already in this section and got added to anyway.
@@ -188,7 +187,7 @@ one-time cleanup, because the ruling was already in this section and got added t
   matches, and every verb falls through to the refusal. **`set -f` would be a genuine narrowing** and
   is deliberately not applied: no legal dataset or snapshot name contains a glob character, so
   nothing valid would break, but it is a behaviour change to a security boundary that **no agent seat
-  can test** (quince#730 — the zfs branch has no live host outside the Operator's). What holds
+  can test** (quince#730 — the zfs branch has no live host outside the maintainer's). What holds
   without it is that every arm guards `$target` against `"$PARENT"`/`"$PARENT"/*` before reaching
   `zfs`.
 - **The `create` arm checks the parent exists BEFORE creating** — measured on a real pool, 2026-08-12
@@ -213,18 +212,18 @@ one-time cleanup, because the ruling was already in this section and got added t
   whatever the caller sent, so a client asking about someone else's dataset got the right answer for
   the wrong reason, and a later edit teaching it to honour an argument would have inherited no guard.
 - **Verbs that changed, for an operator upgrading an existing helper:** `seed)` was **deleted**
-  (qn.5b's clone of `latest/` → `working/<udid>`; quince no longer seeds on this backend) and
+  (the old clone of `latest/` → `working/<udid>`; quince no longer seeds on this backend) and
   `rollback)` was **added** (what Reset uses). Backups keep working across that gap — only reset
   needs the new verb.
 
 **⚠️ MIGRATION — operators upgrading MUST add the `capacity)` case from that file**, the same way this
-section records `qn.6h`'s changed verbs (`seed)` out, `rollback)` in). Without it every zfs storage card reads *"free
+section records the changed verbs (`seed)` out, `rollback)` in). Without it every zfs storage card reads *"free
 space unavailable"* and the daemon logs `capacity unavailable on a reachable storage — omitted`.
 Nothing else breaks: backups, commits, snapshots and retention are untouched, and quince omits the
 number rather than showing a wrong one — which is why this is a migration note rather than a
 release blocker.
 
-**`Test helper` in the UI now TELLS YOU whether you did this** (`qn.6e`). Adding a storage on the
+**`Test helper` in the UI now TELLS YOU whether you did this.** Adding a storage on the
 zfs backend fires two of the arms above — `capacity` (no argument) then `list <your parent dataset>`
 — and distinguishes four states rather than working/not-working:
 
@@ -243,7 +242,7 @@ Both verbs are read-only and path-guarded, which is why quince is willing to fir
 Nothing quince sends can create, destroy or write, and that is a property of the `case` arms above
 rather than of quince's restraint — which is the point of a forced command.
 
-**Why a new verb rather than letting `list` take flags** — Operator ruling 2026-08-03 (quince#600).
+**Why a new verb rather than letting `list` take flags** (quince#600).
 quince first shipped this read as `list -H -p -o used,available "$PARENT"`, which assumes the
 helper forwards argv to `zfs`. **It does not, and that is the entire point of a forced command.**
 The `list` arm runs a fixed `zfs list -t snapshot`, so the call returned the *snapshot list* at
@@ -252,7 +251,7 @@ Teaching `list` to forward flags was the tempting fix and was refused: the same 
 arbitrary `zfs list` arguments, and *"dataset destroy is intentionally NOT reachable"* would stop
 being checkable by reading these five case arms.
 
-**The `rollback` verb (qn.6h) is what Reset uses**, and it is the only verb that changes a device's
+**The `rollback` verb is what Reset uses**, and it is the only verb that changes a device's
 live data. It returns the device dataset to its newest `@quince-*` snapshot, discarding whatever a
 failed job left in the head. **It structurally cannot lose a committed version, and that is a
 property of the parse rather than of quince's restraint:** the helper discards every flag, so
@@ -357,14 +356,14 @@ and local-only areas are excluded by **anchored** filter rules. Ship this block 
 --filter "- /iphone-backup/*/versions/**"
 ```
 
-(qn.5b dropped the old per-job `work/<job>/` dir — the mutable in-progress tree is now
+(the old per-job `work/<job>/` dir is gone — the mutable in-progress tree is now
 `working/<udid>/`, still covered by the anchored `working/**` rule.)
 
 ⚠ **The leading `/` (anchor) is load-bearing.** An unanchored `--exclude "**/working/**"` would
 also drop any directory named `working` *inside* backup content under `latest/`, silently
 corrupting the offsite copy. quince's `storage.AnchoredFilterRules` emits exactly these rules and
 `storage.PathExcluded` proves their semantics in CI; the real `rclone` binary is exercised in the
-qn.5 lab gate.
+lab gate against real hardware.
 
 `versions/` is excluded because rclone has no reflink/hardlink awareness and would upload every
 version at full size — local history stays local; remote history comes from B2 bucket versioning
@@ -375,14 +374,14 @@ zfs snapshot -r pool/path/to/iphone-backup@offsite-$(date +%s)   # local restore
 rclone sync /pool/path b2:bucket/quince <the three --filter lines above>
 ```
 
-**There is no non-atomic instant (qn.5b) — ON THE reflink / hardlink / copy BACKENDS.** There
+**There is no non-atomic instant — ON THE reflink / hardlink / copy BACKENDS.** There
 `latest/` changes only by a single `renameat2(RENAME_EXCHANGE)`, so it is never unoccupied and a walk
 crossing a commit always sees a complete `latest/`, never a missing one. This replaced the old
 two-rename swap, whose window an `rclone sync` could cross and mirror as a **deletion** of the remote
-copy (the stack-D5 `PROPOSED (gap)`, decisions (cg)). Between backups the device dir holds only
+copy. Between backups the device dir holds only
 `latest/` (the per-job `working/` exists only during/after a backup, and is rclone-excluded).
 
-⚠ **ON ZFS SINCE qn.6h THAT GUARANTEE IS GONE, AND THE FILTER RULES ABOVE MATCH NOTHING.** The backup
+⚠ **ON ZFS THAT GUARANTEE IS GONE, AND THE FILTER RULES ABOVE MATCH NOTHING.** The backup
 tree is the dataset root, so there is no `working/`, no `versions/` and no `latest/` — the whole
 device dataset is in scope for a whole-tree walk, and **during a backup it is a half-transferred
 tree**. An rclone job crossing it uploads that as though it were a verified version, and it fails
