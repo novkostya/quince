@@ -104,6 +104,28 @@ git -C "$WORK/seed" push -q origin main
 clone_at detached r1/detached
 git -C "$ROOT/detached" checkout -q --detach HEAD
 
+
+# (7) PARKED ON THE DEFAULT BRANCH — the quince#1248 class, and the one this suite could not see.
+#
+# Rule 3 asks whether the branch is GONE from origin, and the default branch never is. So a clean
+# clone sitting on `main` with nothing of its own was kept forever, with the reason "main still
+# exists on origin; somebody may be reviewing it" — true, and about nothing. Two ordinary routes
+# make one: a session that checks out `main` to start the next unit and never branches, and a clone
+# made for a read that never left `main`.
+clone_at onmain main
+git -C "$ROOT/onmain" reset -q --hard origin/main
+
+# (8) THE CONTROL THAT MATTERS MOST: on the default branch AND ahead of it.
+#
+# The carve-out must not become "clones on main are always reapable". Rule 2 still owns this — the
+# commit's patch is not in origin/main, so the clone holds work that exists nowhere else, which is
+# the one thing the reaper must never delete. If this is ever reaped, the fix has eaten the safety
+# rule rather than the dead rule.
+clone_at onmain_ahead main
+printf 'unpushed\n' >>"$ROOT/onmain_ahead/f"
+git -C "$ROOT/onmain_ahead" -c user.email=t@t -c user.name=t commit -qam 'work that is nowhere else'
+
+
 out=$WORK/out
 "$REAP" --root "$ROOT" >"$out" 2>&1 || true
 
@@ -121,13 +143,19 @@ assert_line 'skip   notaclone' "a non-clone is skipped and counted separately" "
 
 assert_line '?      detached' "a detached HEAD is UNJUDGED, not kept" "a clone the reaper cannot judge was reported as a decision"
 
+# quince#1248 — the default-branch class. The reap line must also say WHY in this case's own terms:
+# "gone from origin" is false here and would be a true-sounding reason for the wrong rule.
+assert_line 'would reap onmain' "a clone parked on the DEFAULT BRANCH is reaped — rule 3 could never fire on it" "kept a clean clone on main forever; rule 3 asks whether the branch is gone and main never is (quince#1248)"
+assert_line 'reap onmain — main is the default branch and this clone is not ahead' "…and says which rule reaped it, not the branch-is-gone one" "reaped the default-branch clone under a reason that is false for it"
+assert_line 'KEEP   onmain_ahead' "a clone on the default branch that IS ahead is KEPT" "the default-branch carve-out ate rule 2 — this clone holds work that exists nowhere else"
+
 # ASSERT THE NUMBERS, NOT THE WORD (quince#1247 review). A test matching /unjudged/ passes against a
 # summary that always prints `0 unjudged`, which is the same vacuous-green this suite exists to
 # refuse. Both figures are pinned: one unjudgeable clone, and `kept` UNCHANGED at three — the dirty
 # one, the ahead one and the still-open branch. If the counter were folded back into `kept` this
 # would read `4 kept, 0 unjudged` and fail on both halves.
 assert_line '1 unjudged' "the summary counts the unjudgeable clone separately" "the unjudged count is missing or zero — folding it into kept is the defect this guards"
-assert_line '3 kept' "…and kept is unchanged, so the unjudgeable clone did not land in it" "the unjudgeable clone was counted as kept"
+assert_line '4 kept' "…and kept is unchanged, so the unjudgeable clone did not land in it" "the unjudgeable clone was counted as kept"
 
 # Report-only must not touch anything.
 if [ -d "$ROOT/finished" ]; then
@@ -141,9 +169,9 @@ fi
 # quince#823 case at the ACTING end rather than only in the report — a reaper that prints "would
 # reap" and then declines to delete would pass every line above it.
 "$REAP" --root "$ROOT" --prune >"$out.p" 2>&1 || true
-if [ ! -d "$ROOT/finished" ] && [ ! -d "$ROOT/rebased" ] &&
-	[ -d "$ROOT/dirty" ] && [ -d "$ROOT/ahead" ] && [ -d "$ROOT/open" ]; then
-	ok "--prune removes exactly the two finished clones and nothing else"
+if [ ! -d "$ROOT/finished" ] && [ ! -d "$ROOT/rebased" ] && [ ! -d "$ROOT/onmain" ] &&
+	[ -d "$ROOT/dirty" ] && [ -d "$ROOT/ahead" ] && [ -d "$ROOT/open" ] && [ -d "$ROOT/onmain_ahead" ]; then
+	ok "--prune removes exactly the three finished clones and nothing else"
 else
 	bad "--prune removed the wrong set"
 	cat "$out.p"

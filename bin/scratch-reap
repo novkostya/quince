@@ -171,19 +171,47 @@ for d in "$ROOT"/*; do
 		continue
 	fi
 
-	if git -C "$d" ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+	# RULE 3 IS UNSATISFIABLE ON THE DEFAULT BRANCH, WHICH KEPT SUCH CLONES FOREVER (quince#1248).
+	#
+	# The rule asks "is this branch GONE from origin", so that a clone whose branch somebody may still
+	# be reviewing is never removed. `main` is never deleted, so a clone parked on it was kept with the
+	# reason *"main still exists on origin; somebody may be reviewing it"* — literally true and
+	# meaningless here. Two ordinary routes produce one: a session finishes a unit, checks out `main`
+	# to start the next, and never branches again; or a clone made for a read that never left `main`.
+	#
+	# THE REPLACEMENT QUESTION IS ALREADY ANSWERED ABOVE. For the default branch the test is not "is
+	# the branch gone" but "is this clone ahead of origin/main AT ALL" — and reaching this line means
+	# `ahead` is 0 and the tree is clean, so there is nothing to review because there is nothing here.
+	# That is the safety rule's own test: a clean clone on the default branch with nothing of its own
+	# is the freshest possible copy of the repository and holds no work that exists nowhere else.
+	#
+	# THE NAME IS READ, NEVER ASSUMED. This tool takes `--root`, not `--repo`, so it cannot know the
+	# repository — hardcoding `main` would be wrong for `ios-backup-crypt` or anything else with a
+	# different default. `origin/HEAD` is what `git clone` records, and a clone that somehow lacks it
+	# falls through to the old rule and is KEPT, which is the safe direction — and SAID, rather than
+	# silently taken, because a keep whose reason a reader cannot check is how this defect survived.
+	default_branch=$(git -C "$d" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+	if [ -n "$default_branch" ] && [ "$branch" = "$default_branch" ]; then
+		why="$branch is the default branch and this clone is not ahead of origin/main"
+	elif git -C "$d" ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
 		kept=$((kept + 1))
-		say "  KEEP   $name — $branch still exists on origin; somebody may be reviewing it"
+		if [ -n "$default_branch" ]; then
+			say "  KEEP   $name — $branch still exists on origin; somebody may be reviewing it"
+		else
+			say "  KEEP   $name — $branch still exists on origin; somebody may be reviewing it (origin/HEAD is unset here, so whether $branch is the default branch is UNKNOWN)"
+		fi
 		continue
+	else
+		why="$branch is gone from origin and every commit has its patch in main"
 	fi
 
 	if [ "$PRUNE" = yes ]; then
 		rm -rf "$d"
 		reaped=$((reaped + 1))
-		printf '  REAPED %s — %s is gone from origin and every commit has its patch in main\n' "$name" "$branch"
+		printf '  REAPED %s — %s\n' "$name" "$why"
 	else
 		reaped=$((reaped + 1))
-		printf '  would reap %s — %s is gone from origin and every commit has its patch in main\n' "$name" "$branch"
+		printf '  would reap %s — %s\n' "$name" "$why"
 	fi
 done
 
