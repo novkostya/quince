@@ -192,8 +192,10 @@ defect in a docs PR exactly as a failing test is in a code PR.
 ```sh
 OID=$(bin/gh-review pr view <n> --repo novkostya/quince --json headRefOid -q .headRefOid)   # BEFORE reading
 
-# The verdict body goes to a FILE, is swept, and is passed with --body-file.
-BODY="$HOME/scratch/<seat>/bodies/<n>-verdict.md"
+# The verdict body goes to a FILE, is swept, and is passed with --body-file. PER-RUNNER and FLAT,
+# the same convention §4 uses — one host runs several seats, and a shared path means the sweep can
+# cover another session's text while its own goes unswept (quince-devlog#123). No new directory.
+BODY="$HOME/scratch/$(bin/forge-watch runner get)/<n>-verdict.md"
 cat > "$BODY" <<'MD'
 …what you ran, what you checked, and the verdict…
 MD
