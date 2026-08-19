@@ -348,6 +348,7 @@ SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test prefl
                    quince-runner-status-test pr-title-refs-test forge-watch-roundtrip-test \
                    forge-watch-ownership-test forge-watch-composition-test scratch-reap-test \
                    home-resolution-test wrapper-boundary-test gate-scope-test wrapper-body-test \
+                   wrapper-api-failure-test \
                    sh-lint-coverage-test allowlist-coverage-test forge-watch-seats-test \
                    gates-sh-exit-test forge-watch-stderr-test forge-watch-counters-test \
                    closing-refs-check-test forge-watch-role-test forge-watch-selfcaused-test \
@@ -413,6 +414,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot \
                    bin/forge-watch-seats-test \
                    bin/scratch-reap bin/scratch-reap-test \
                    bin/pr-title-refs bin/pr-title-refs-test bin/wrapper-boundary-test bin/wrapper-body-test \
+                   bin/wrapper-api-failure-test \
                    bin/gate-scope bin/gate-scope-test bin/forge-fetch-equivalence-test bin/gh-coder bin/git-coder \
                    bin/gh-analyst \
                    bin/sh-lint-coverage bin/sh-lint-coverage-test deploy/e2e-run.sh \
@@ -648,6 +650,10 @@ wrapper-boundary-test: ## A boundary refusal must outrank an environment one in 
 .PHONY: wrapper-body-test
 wrapper-body-test: ## every gh wrapper must REFUSE inline --body — backticks in it EXECUTE (quince#518)
 	@bin/wrapper-body-test
+
+.PHONY: wrapper-api-failure-test
+wrapper-api-failure-test: ## A failed App-API call names what happened, not a guessed cause (quince#1133)
+	@bin/wrapper-api-failure-test
 
 .PHONY: gh-review-commit-id-test
 gh-review-commit-id-test: ## a verdict's --commit-id must be a FULL 40-char oid, refused locally (quince-devlog#204)
