@@ -399,7 +399,7 @@ func TestGroupStatuses(t *testing.T) {
 	g := NewGroup()
 	managedAddr := filepath.Join(t.TempDir(), "m.sock")
 	g.Supervise(fakeSupervisor(fakeSpec("usbmuxd", RoleUSB, "unix", managedAddr, "serve"), ""))
-	g.AddUnmanaged("127.0.0.1:27015", connectedClient())
+	g.AddUnmanaged("127.0.0.1:27015", true, connectedClient())
 
 	got := g.Statuses()
 	if len(got) != 2 {
@@ -425,6 +425,13 @@ func (f *fakeDialer) Reread()                { f.rereads++ }
 
 func connectedClient() Dialer { return &fakeDialer{connected: true} }
 
+// refusingClient is a muxer that is not there — the SAME failure whether the address was declared
+// or defaulted, which is what makes the two states a statement about who asked rather than about
+// what went wrong.
+func refusingClient() Dialer {
+	return &fakeDialer{connected: false, detail: "dial unix /run/mux/usbmuxd: connect: no such file or directory"}
+}
+
 // TestExternalStateFollowsTheDialingClient is quince#897 item 2's regression, and the whole of
 // qn.6p D5. `external` was a constant string built at construction, so health reported a muxer as
 // served while the daemon logged `connection refused` against that same address.
@@ -434,7 +441,7 @@ func connectedClient() Dialer { return &fakeDialer{connected: true} }
 func TestExternalStateFollowsTheDialingClient(t *testing.T) {
 	g := NewGroup()
 	dialer := &fakeDialer{}
-	g.AddUnmanaged("/run/mux/usbmuxd", dialer)
+	g.AddUnmanaged("/run/mux/usbmuxd", true, dialer)
 
 	// Before the first dial lands: not connected, nothing to report. `unreachable` here would be
 	// a failure claim about an attempt nobody has made.
@@ -472,7 +479,7 @@ func TestExternalStateFollowsTheDialingClient(t *testing.T) {
 // the healthy-looking word that would hide it.
 func TestExternalWithNoDialerSaysSo(t *testing.T) {
 	g := NewGroup()
-	g.AddUnmanaged("127.0.0.1:27015", nil)
+	g.AddUnmanaged("127.0.0.1:27015", true, nil)
 	got := g.Statuses()[0]
 	if got.State == StateExternal {
 		t.Fatalf("an undialed muxer reported %q — the one word that hides the bug", got.State)
@@ -571,8 +578,8 @@ func TestHelperProcess(t *testing.T) {
 func TestRescanRereadsTheExternalMuxer(t *testing.T) {
 	usb, wifi := &fakeDialer{connected: true}, &fakeDialer{connected: true}
 	g := NewGroup()
-	g.AddUnmanaged("/run/mux/usbmuxd", usb)
-	g.AddUnmanaged("127.0.0.1:27015", wifi)
+	g.AddUnmanaged("/run/mux/usbmuxd", true, usb)
+	g.AddUnmanaged("127.0.0.1:27015", true, wifi)
 
 	accepted, reason := g.Rescan(rescanCtx(t))
 	if !accepted {
@@ -594,7 +601,7 @@ func TestRescanRereadsTheExternalMuxer(t *testing.T) {
 // collapses distinguishable causes is a defect even when every word of it is true).
 func TestRescanDistinguishesUndialedFromUnconfigured(t *testing.T) {
 	undialed := NewGroup()
-	undialed.AddUnmanaged("/run/mux/usbmuxd", nil)
+	undialed.AddUnmanaged("/run/mux/usbmuxd", true, nil)
 	accepted, reason := undialed.Rescan(rescanCtx(t))
 	if accepted || !strings.Contains(reason, "no dialer") {
 		t.Errorf("undialed rescan = (%v, %q); want a refusal naming the missing dialer", accepted, reason)
@@ -612,8 +619,8 @@ func TestRescanDistinguishesUndialedFromUnconfigured(t *testing.T) {
 // chosen from which config key its address came out of.
 func TestStatusesReportTheTransportsEachMuxerServes(t *testing.T) {
 	g := NewGroup()
-	g.AddUnmanaged("/run/mux/usbmuxd", connectedClient()) // one muxer, both transports
-	g.AddUnmanaged("127.0.0.1:27015", connectedClient())  // and one carrying nothing yet
+	g.AddUnmanaged("/run/mux/usbmuxd", true, connectedClient()) // one muxer, both transports
+	g.AddUnmanaged("127.0.0.1:27015", true, connectedClient())  // and one carrying nothing yet
 	g.SetTransports(func(address string) []string {
 		if address == "/run/mux/usbmuxd" {
 			return []string{"usb", "wifi"}
@@ -639,10 +646,78 @@ func TestStatusesReportTheTransportsEachMuxerServes(t *testing.T) {
 // never guess. muxsup reports on muxers and does not own the device table.
 func TestStatusesWithNoTransportSourceReportNone(t *testing.T) {
 	g := NewGroup()
-	g.AddUnmanaged("/run/mux/usbmuxd", connectedClient())
+	g.AddUnmanaged("/run/mux/usbmuxd", true, connectedClient())
 
 	got := g.Statuses()
 	if len(got) != 1 || len(got[0].Transports) != 0 {
 		t.Fatalf("statuses = %+v; want one entry reporting no transports", got)
+	}
+}
+
+// The declared/defaulted split (quince#1256). The SAME failure — nothing listening — is a fault
+// when the operator named the address and merely discovery coming up empty when quince did.
+
+// TestADeclaredMuxerThatIsSilentIsUnreachable: you said it was there, it is not, that is a fault.
+func TestADeclaredMuxerThatIsSilentIsUnreachable(t *testing.T) {
+	g := NewGroup()
+	g.AddUnmanaged("/run/mux/usbmuxd", true, refusingClient())
+
+	got := g.Statuses()
+	if len(got) != 1 || got[0].State != StateUnreachable {
+		t.Fatalf("declared+silent = %+v; want %q", got, StateUnreachable)
+	}
+	if !strings.Contains(got[0].Detail, "is not answering") {
+		t.Errorf("detail = %q; want it to say the address is not answering", got[0].Detail)
+	}
+}
+
+// TestADefaultedMuxerThatIsSilentIsAbsent is the case the ruling exists for: quince ships a
+// default list so a compose file is enough, so every install has an entry that will never answer.
+// Reporting that as a failure paints a healthy install red forever, and a surface that fails on
+// every run stops being read.
+func TestADefaultedMuxerThatIsSilentIsAbsent(t *testing.T) {
+	g := NewGroup()
+	g.AddUnmanaged("/run/mux/usbmuxd", false, refusingClient())
+
+	got := g.Statuses()
+	if len(got) != 1 || got[0].State != StateAbsent {
+		t.Fatalf("defaulted+silent = %+v; want %q — nobody asked for this address", got, StateAbsent)
+	}
+	// NOT OMITTED, and the detail carries the fact a debugging session wants: quince looked here.
+	// "we looked and found nothing" and "this was never in play" are different answers.
+	if !strings.Contains(got[0].Detail, "/run/mux/usbmuxd") {
+		t.Errorf("detail = %q; want it to name the address quince tried", got[0].Detail)
+	}
+	if !strings.Contains(got[0].Detail, "normal") {
+		t.Errorf("detail = %q; want it to say this is normal — the state word cannot carry that", got[0].Detail)
+	}
+}
+
+// TestADefaultedMuxerThatANSWERSIsExternal: `declared` decides only what SILENCE means. A muxer
+// that is actually there is `external` however it got into the list — otherwise the default would
+// be a second-class citizen at the one moment it is doing its job.
+func TestADefaultedMuxerThatAnswersIsExternal(t *testing.T) {
+	g := NewGroup()
+	g.AddUnmanaged("/run/mux/usbmuxd", false, connectedClient())
+
+	if got := g.Statuses(); len(got) != 1 || got[0].State != StateExternal {
+		t.Fatalf("defaulted+answering = %+v; want %q", got, StateExternal)
+	}
+}
+
+// TestAbsentAndUnreachableAreTheSAMEFailure pins that nothing but `declared` separates them —
+// same dialer, same error, two states. If this ever fails, the split has started depending on the
+// kind of failure instead of on who asked for the address.
+func TestAbsentAndUnreachableAreTheSameFailure(t *testing.T) {
+	declared, defaulted := NewGroup(), NewGroup()
+	declared.AddUnmanaged("/run/mux/usbmuxd", true, refusingClient())
+	defaulted.AddUnmanaged("/run/mux/usbmuxd", false, refusingClient())
+
+	d, f := declared.Statuses()[0], defaulted.Statuses()[0]
+	if d.State == f.State {
+		t.Fatalf("both reported %q; declared and defaulted must differ on silence", d.State)
+	}
+	if d.Address != f.Address {
+		t.Fatalf("addresses differ (%q vs %q) — the fixtures are not comparable", d.Address, f.Address)
 	}
 }

@@ -90,7 +90,7 @@ func plannedMuxers(muxers []config.MuxerConfig) muxerPlan {
 // yield a NON-nil interface holding a nil pointer, so muxsup's `dialer == nil` check would
 // pass and it would call Health() on nothing — turning the wiring bug status() is careful to
 // REPORT into a panic. live.go's lookup returns a literal nil for exactly this reason.
-func buildMuxerGroup(muxers []config.MuxerConfig, dialerFor func(address string) muxsup.Dialer,
+func buildMuxerGroup(muxers []config.MuxerConfig, declared bool, dialerFor func(address string) muxsup.Dialer,
 	log *slog.Logger) *muxsup.Group {
 	plan := plannedMuxers(muxers)
 	g := muxsup.NewGroup()
@@ -102,7 +102,7 @@ func buildMuxerGroup(muxers []config.MuxerConfig, dialerFor func(address string)
 		if dialerFor != nil {
 			dialer = dialerFor(e.address)
 		}
-		g.AddUnmanaged(e.address, dialer)
+		g.AddUnmanaged(e.address, declared, dialer)
 		log.Info("muxer is external — dialing only", "address", e.address)
 	}
 	for _, problem := range plan.problems {
