@@ -190,6 +190,18 @@ export interface StorageEntry {
   retention: { keep_recent: number; keep_daily: number; keep_weekly: number } | null;
 }
 
+
+// One muxer quince dials (qn.6p, quince#1219). The list replaces the retired `devices:` section,
+// whose remaining keys were two addresses and a flag — a section named for something quince never
+// configures, since devices come FROM the muxer.
+export interface MuxerEntry {
+  // Where this muxer answers. Required: an entry without one configures nothing.
+  address: string;
+  // Who runs it. `external` is the default and the only value v0.1 accepts; `managed` is reserved
+  // and refused by name on the serve path. OPTIONAL on the wire, so an omitted value is `external`
+  // — which is what makes adding `managed` later non-breaking.
+  type: string;
+}
 export interface Config {
   // `preferred_transport` — usb | wifi. Which transport wins when a device is present on BOTH;
   // IGNORED when only one is available, so it is never a restriction (quince#654).
@@ -216,6 +228,15 @@ export interface Config {
   // throughout: the type was internally consistent and NOTHING CROSS-CHECKS IT AGAINST THE GO
   // SCHEMA — which is quince#493, filed before this happened and describing it exactly.
   storage: StorageEntry[] | null;
+  // `muxers` REPLACED THE `devices:` SECTION (qn.6p, quince#1219 A/B/C). Here for the same
+  // full-document-replace reason as everything else in this interface — and it arrived WITHOUT its
+  // TS counterpart, which is the third instance of quince#493's class and the one that gate caught
+  // on the day it was built.
+  //
+  // NULLABLE, and the null means something the empty array does not: an absent `muxers:` key takes
+  // the built-in default, where `muxers: []` is DELIBERATELY NONE. The Go side is a pointer for
+  // exactly that reason.
+  muxers: MuxerEntry[] | null;
   devices: { manage_muxer: boolean; usbmuxd_socket: string; netmuxd_addr: string };
   // `tls` MUST be here, and its absence would not have been the harmless kind. PUT /api/config
   // decodes into a zero-valued `config.Config`, so a key the client omits arrives as the Go zero
