@@ -3765,12 +3765,13 @@ watch_loop() {
 	# ships, passes review and changes nothing. Second time in a day a mechanism was described from
 	# memory one token off, and both times the wrong token was the load-bearing one.
 	_wrole=$(owed_role | cut -d' ' -f1)
-	_wsuppress=yes
+	# ONE DECISION, ONE PLACE (quince#1261). This `case` used to live here in full and a second one
+	# in `status` did not consult the role at all, so the two disagreed on the architect seat. The
+	# announcement stays here — it is an arm-time fact — but the answer comes from the shared helper.
+	_wsuppress=$(suppress_for_role "$_wrole")
 	case "$_wrole" in
-	implementer) ;;
-	architect) _wsuppress=no ;;
+	implementer | architect) ;;
 	*)
-		_wsuppress=no
 		printf 'note: branch-ownership suppression is DISABLED — this box could not determine its role (owed_role=%s), so every PR event wakes. Reported rather than silent (quince#292).\n' \
 			"${_wrole:-empty}"
 		;;
@@ -4184,6 +4185,36 @@ owed_repos() {
 	rm -f "$_or_tmp" "$_or_tmp.err"
 }
 
+# suppress_for_role answers ONE question — does branch-ownership suppression apply on this box — and
+# both callers ask it here rather than each deciding for itself (quince#1261).
+#
+# THE DEFECT IT CLOSES. `watch` consulted the role and `status` did not, so on the architect seat the
+# watcher woke on another runner's PRs while `status` said, in as many words, that it would not. The
+# error was in the REASSURING direction, which is the one that costs something: a successor architect
+# reading that note goes looking for a way to adopt a retired seat's branch into its own watch, and
+# that work is unnecessary — the events already wake it.
+#
+# IT IS THE SHAPE THIS PROJECT FILES MOST — a claim verified at the MECHANISM and not at the
+# DESTINATION. `suppressed_count` correctly counts what `wake_filter` WOULD suppress; nobody asked
+# whether `wake_filter` runs.
+#
+# ONE FUNCTION IS THE WHOLE POINT. Two call sites deciding the same thing separately is what let them
+# disagree, and a second copy of the `case` is free to drift again — so the fix is the shared answer,
+# not the corrected sentence.
+suppress_for_role() { # <role> -> yes|no
+	case "$1" in
+	implementer) printf 'yes\n' ;;
+	# ON THE ARCHITECT SEAT IT MEANS THE OPPOSITE: reviewing other runners' branches is the entire
+	# job (quince#292). THE STRING IS `architect`, NOT `arch` — implemented literally from the
+	# proposal the arm never matches, and the seat stays deaf with a fix that ships and changes
+	# nothing.
+	architect) printf 'no\n' ;;
+	# UNIDENTIFIABLE FAILS OPEN — every PR event wakes. Noise rather than deafness, which is the
+	# right direction, and both callers announce it rather than degrading silently.
+	*) printf 'no\n' ;;
+	esac
+}
+
 owed_role() {
 	# Which half of the loop is this box? Decided by the credential it holds, which is how the two
 	# boxes already tell themselves apart (deploy/runner/preflight asserts the other's is absent), and
@@ -4564,8 +4595,32 @@ status)
 			other_runner_names_from "$_rn" local >"$_rot" 2>/dev/null || : >"$_rot"
 			if [ -s "$_rot" ]; then
 				_rcnt=$(suppressed_count "$_rs" "$_rot")
-				[ "$_rcnt" = 0 ] || printf 'note: %s PR(s) on this record belong to another runner declared on this box (%s). Their events are printed but do NOT wake this watch.\n' \
-					"$_rcnt" "$(tr '\n' ' ' <"$_rot" | sed 's/ $//')"
+				# THE COUNT IS TRUE EITHER WAY; THE WAKE CLAIM IS NOT (quince#1261). This printed
+				# "their events do NOT wake this watch" unconditionally, and on the architect seat
+				# `wake_filter` runs with suppression OFF — so the report described a mechanism that
+				# was disabled. `suppress_for_role` is the one place that decides, so this cannot
+				# disagree with `watch` again.
+				_rrole=$(owed_role | cut -d' ' -f1)
+				_rnames=$(tr '\n' ' ' <"$_rot" | sed 's/ $//')
+				if [ "$_rcnt" = 0 ]; then
+					:
+				elif [ "$(suppress_for_role "$_rrole")" = yes ]; then
+					printf 'note: %s PR(s) on this record belong to another runner declared on this box (%s). Their events are printed but do NOT wake this watch (role %s).\n' \
+						"$_rcnt" "$_rnames" "$_rrole"
+				elif [ "$_rrole" = architect ]; then
+					# NAMED, NOT MERELY OMITTED. Dropping the note here would leave a reader with no
+					# answer at the one moment they are reasoning about wakes, and the answer is the
+					# interesting one: reviewing other runners' branches is the entire job (quince#292).
+					printf 'note: %s PR(s) on this record belong to another runner declared on this box (%s). Branch-ownership suppression is OFF for role architect, so their events DO wake this watch (quince#292).\n' \
+						"$_rcnt" "$_rnames"
+				else
+					# THE DEGRADED ARM IS SURFACED HERE TOO. `watch` announces it at arm time and
+					# `status` is where a session actually looks, so a box that cannot name its role
+					# said nothing about it in the report that matters (`CLAUDE.md`: a degraded mode
+					# is surfaced, never silent).
+					printf 'note: %s PR(s) on this record belong to another runner declared on this box (%s). Branch-ownership suppression is DISABLED — this box could not determine its role (owed_role=%s) — so their events DO wake this watch.\n' \
+						"$_rcnt" "$_rnames" "${_rrole:-empty}"
+				fi
 			fi
 			rm -f "$_rot"
 			# The unattributable report below asks a different question — which branches match NOBODY —
