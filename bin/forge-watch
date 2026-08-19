@@ -1224,7 +1224,29 @@ EOF
 	# a small integer that looks like "crashed arms" and is mostly "arms from last week". quince#296
 	# is the record of what a plausible wrong number costs here: a seat spent a cycle hunting a
 	# regression that did not exist. The caveat below says what the gap contains instead of computing
-	# it, and a residual becomes worth printing once every live state file was created after this.
+	# it.
+	#
+	# THE SKEW ACCUMULATES; IT DOES NOT DECAY, AND THIS COMMENT SAID THE OPPOSITE FOR AN HOUR. It read
+	# "a residual becomes worth printing once every live state file was created after this" — which
+	# invites the reader to wait, and the condition never arrives on its own. A STATE FILE IS NEVER
+	# RESEEDED: canon forbids it, `status` says so on every `dead` read, and a re-arm diffing against
+	# the stored observation is the whole design. So pre-quince#1265 `arms` sit in that file for as
+	# long as the runner name exists, in NEITHER new bucket, while `arms` keeps climbing with every
+	# wake.
+	#
+	# Measured on the architect seat within the hour, twice, on a state file reclaimed from a dead
+	# session — which canon explicitly preserves:
+	#
+	#   loop: 16 arm(s),  5 wake(s), 0 idle bound(s), 0 failing exit(s)   <- gap 11
+	#   loop: 36 arm(s), 14 wake(s), 0 idle bound(s), 0 failing exit(s)   <- gap 22, one hour later
+	#
+	# Every one of those was an idle bound, known from stdout. A printed residual would have claimed
+	# 22 arms reached no exit path — 22 crashes — about a loop working perfectly.
+	#
+	# SO THE CONDITION IS "EVERY LIVE STATE FILE WAS CREATED AFTER THIS", AND THAT IS AN EVENT, NOT A
+	# DATE: it happens when a seat declares a NEW RUNNER NAME, not when the clock advances. A
+	# long-lived seat looks like this indefinitely. Whoever eventually reaches for the deletion should
+	# check what created the state files rather than what day it is.
 	printf 'loop: %s arm(s), %s wake(s), %s idle bound(s), %s failing exit(s), %s prevented %s since counting began — prevented = ticks where self-caused suppression was the difference between exiting and continuing (quince#242); idle/failing count exits 6 and 7 and were added by quince#1265, so arms from before that are in neither, and an arm refused at preflight is in none of these figures.\n' \
 		"$_lt_a" "$_lt_w" "$_lt_i" "$_lt_f7" "$_lt_p" "$_lt_scope"
 }
