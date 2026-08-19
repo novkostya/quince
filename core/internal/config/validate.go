@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/novkostya/quince/core/internal/muxaddr"
 	"github.com/novkostya/quince/core/internal/wire"
@@ -23,7 +24,7 @@ func Validate(c Config) []wire.ConfigError {
 	}
 	validateStorages(c.Storage, add)
 	validateTLS(c.TLS, add)
-	validateDevices(c.Devices, add)
+	validateMuxers(c.ResolvedMuxers(), add)
 	// `>= 0`, NOT `> 0`, and the difference IS the feature: 0 is how the schedule is turned off
 	// (qn.6i). A negative is meaningless rather than meaningful-and-off, so it is refused.
 	if c.Reconcile.IntervalMinutes < 0 {
@@ -56,34 +57,48 @@ func Validate(c Config) []wire.ConfigError {
 	return errs
 }
 
-// validateDevices checks that each muxer address is WELL-FORMED and nothing else (qn.6p D3) —
-// the same division validateTLS draws, for the same reason.
+// validateMuxers checks the `muxers:` list for WELL-FORMEDNESS AND NOTHING ELSE (quince#1219 A/B).
 //
-// WELL-FORMEDNESS ONLY, and the boundary is load-bearing. Whether anything ANSWERS at the address
-// is not checked here: an external muxer may legitimately be down at the moment a config is
-// written, and refusing the write would make quince unconfigurable exactly when an operator is
-// trying to fix it. Reachability is reported by /api/health, which probes.
+// Whether anything ANSWERS at an address is not checked here: an external muxer may legitimately be
+// down at the moment a config is written, and refusing the write would make quince unconfigurable
+// exactly when an operator is trying to fix it. Reachability is reported by /api/health, which probes.
 //
-// THIS IS WHAT REJECTS A BAD `PUT`, and it is deliberately not the only guard. Load() DISCARDS a
-// config that fails Validate and falls back to Default(), so on the FILE path an unparseable
-// address would silently become the default muxer addresses. buildLiveStack therefore parses
-// again and refuses to start. Two checks, because they catch two different failures: this one
-// answers the user typing into the UI, that one stops a typo in config.yml being ignored.
-func validateDevices(d DevicesConfig, add func(path, msg string)) {
-	// `manage_muxer: true` IS NOT CHECKED HERE, and that is the same ruling `tls:` records two
-	// screens up (architect, quince#1059). A validation error DISCARDS the config in favour of
-	// Default(), and Default() has no storage — so refusing this key here would land an operator
-	// with a working all-in-one install on *"Add your first storage"*, with the real reason in
-	// `GET /api/config` warnings, which quince#849 measured as rendered by no surface a user can
-	// reach. The cause is one line in their config.yml and quince knows it.
-	//
-	// It is a FATAL SERVE-PATH check instead: CheckMuxerProfile, called from buildLiveStack.
-	for _, f := range []struct{ path, value string }{
-		{"devices.usbmuxd_socket", d.UsbmuxdSocket},
-		{"devices.netmuxd_addr", d.NetmuxdAddr},
-	} {
-		if _, err := muxaddr.Parse(f.value); err != nil {
-			add(f.path, err.Error())
+// WHAT IS DELIBERATELY *NOT* HERE, and the line is the same one `manage_muxer` drew:
+//
+//   - `type: managed` — well-formed and UNSUPPORTED. A validation error DISCARDS the config in
+//     favour of Default(), so refusing it here would drop the operator's whole file. It is a fatal
+//     serve-path check instead (CheckMuxers), because descoped must not reach the operator as
+//     malformed.
+//   - a surviving `devices:` section — same reason, same place.
+//   - an EMPTY list. `muxers: []` is how an operator says "none", and Default() has one, so
+//     refusing it here would replace their deliberate empty list with a muxer they did not ask for.
+//
+// An UNKNOWN type IS refused here, and that is the distinction: `managed` is a value quince knows
+// and does not ship, `banana` is a typo. Collapsing the two gets one of them wrong.
+func validateMuxers(muxers []MuxerConfig, add func(path, msg string)) {
+	seen := map[string]int{}
+	for i, m := range muxers {
+		at := fmt.Sprintf("muxers[%d]", i)
+		if strings.TrimSpace(m.Address) == "" {
+			add(at+".address", "required — an entry with no address configures no muxer")
+			continue
+		}
+		if _, err := muxaddr.Parse(m.Address); err != nil {
+			add(at+".address", err.Error())
+		}
+		switch m.Type {
+		case "", MuxerExternal, MuxerManaged:
+		default:
+			add(at+".type", fmt.Sprintf("unknown type %q — expected %q (the default, somebody else runs it) or %q",
+				m.Type, MuxerExternal, MuxerManaged))
+		}
+		// A duplicate address is a mistake rather than a topology: quince opens ONE connection per
+		// muxer, so the second entry would be silently collapsed — the very thing the list exists
+		// to stop `distinctEndpoints` having to do.
+		if prev, dup := seen[m.Address]; dup {
+			add(at+".address", fmt.Sprintf("duplicate address %q (also muxers[%d]) — quince dials each muxer once", m.Address, prev))
+		} else {
+			seen[m.Address] = i
 		}
 	}
 }

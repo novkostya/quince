@@ -2,7 +2,7 @@
 # THIS FILE DOES NOT WORK IN v0.1. USE deploy/compose.hardened.yml.
 #
 # It describes the SIMPLE / managed-muxer profile, which qn.6p descoped: quince ships no muxer
-# daemon, and `devices.manage_muxer: true` — which everything below assumes — is REFUSED at
+# daemon, and `type: managed` in `muxers:` — which everything below assumes — is REFUSED at
 # startup. Bringing this up gets you a daemon that will not start, not a degraded one.
 #
 # Kept rather than deleted for now, because the NAS shape is a documented deployment target
@@ -19,7 +19,7 @@
 # quince — generic NAS deployment (Synology / QNAP / plain Docker host).
 #
 # This is the SIMPLE / managed-muxer profile (qn.2b + qn.4c): quince supervises BOTH muxer
-# daemons INSIDE the container itself (devices.manage_muxer: true, the default) — usbmuxd for
+# daemons INSIDE the container itself (`type: managed`, once it returns) — usbmuxd for
 # USB, netmuxd for Wi-Fi. No host muxer, no socket bind. `compose up`, open the UI, plug in a
 # device. On a typical NAS the storage backend auto-selects `reflink` (Btrfs/XFS) or
 # `hardlink`/`copy` (ext4) — no zfs host hook needed (D5).

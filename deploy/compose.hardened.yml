@@ -122,16 +122,23 @@ volumes:
   mux:
 
 # ── The config this expects ────────────────────────────────────────────────────────────────────
-# In ./quince/data/config.yml. BOTH keys point at the SAME socket, which is how you say "one muxer
-# serves both transports" — quince opens ONE connection to it, not two:
+# NOTHING. One muxer serving both transports is ONE entry, and it is the default — so with the
+# socket bound where quince already looks, ./quince/data/config.yml needs no muxer key at all.
 #
-#   devices:
-#     usbmuxd_socket: /run/mux/usbmuxd
-#     netmuxd_addr: /run/mux/usbmuxd
+# This stack puts the socket at /run/mux/usbmuxd rather than the default /var/run/usbmuxd, so name
+# it once:
 #
-# Either key also accepts `UNIX:/run/mux/usbmuxd` and `host:port`. `manage_muxer` is absent on
-# purpose: it defaults to false, and `true` is refused at startup because v0.1 ships no daemon to
-# manage.
+#   muxers:
+#     - address: /run/mux/usbmuxd
+#
+# `address:` also accepts `UNIX:/run/mux/usbmuxd` and `host:port`. `type:` is optional and defaults
+# to `external` — somebody else runs the daemon and quince only dials it; `managed` is refused at
+# startup, because v0.1 ships no daemon to manage.
+#
+# THIS USED TO BE TWO KEYS POINTING AT ONE SOCKET (`devices.usbmuxd_socket` and
+# `devices.netmuxd_addr`), with a paragraph here explaining that quince opened one connection
+# because they named the same address. One entry says it once. A `devices:` section is now REFUSED
+# at startup, by name, with the replacement printed — it is not ignored.
 #
 # ── If you already run a muxer ─────────────────────────────────────────────────────────────────
 # Check before starting anything — two muxers fight over the USB bus:
@@ -139,13 +146,12 @@ volumes:
 #   ss -lx | grep usbmux
 #
 # Found something? DELETE the `muxer:` service above, drop the `mux` volume, and point quince at
-# what you have — bind the host socket in and name it:
+# what you have — bind the host socket in:
 #
 #   volumes: [/var/run/usbmuxd:/var/run/usbmuxd]
-#   devices: { usbmuxd_socket: /var/run/usbmuxd }
 #
-# That is `usbmuxd`'s own default path, so it is also quince's default and you may not need to
-# write the key at all. USB only — a host usbmuxd does not serve Wi-Fi.
+# That is `usbmuxd`'s own default path and it is also quince's, so you need NO config.yml at all.
+# USB only — a host usbmuxd does not serve Wi-Fi.
 #
 # ── Not yet proven, stated rather than discovered ──────────────────────────────────────────────
 # This file has NOT been run end to end against a device (qn.6p G8, owed to the Operator). What HAS

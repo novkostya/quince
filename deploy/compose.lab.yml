@@ -1,19 +1,29 @@
 # quince — lab deployment (Proxmox LXC on the same LAN as the test iPhone).
 #
 # This is the HARDENED / external-muxer shape: usbmuxd runs on the HOST and quince consumes its
-# socket (bound in below). Because an external process serves the socket, set
-# `devices.manage_muxer: false` in config.yml — otherwise quince refuses to start a second,
-# competing daemon (it logs loudly and reports the muxer degraded in /api/health). With
-# manage_muxer: false the UI Rescan button is a no-op (409) — quince doesn't own the host muxer.
+# socket (bound in below). That is the ONLY shape v0.1 has — quince ships no muxer daemon — so
+# there is nothing to turn off: every `muxers:` entry is external by default, and `type: managed`
+# is refused at startup.
 #
-# manage_muxer: false applies to BOTH daemons (qn.4c): netmuxd is then expected to run on the
-# host too (quince only dials devices.netmuxd_addr, and reports it as `external` in
-# /api/health). A host-run netmuxd sidesteps the container-mDNS constraint described in
-# compose.nas.yml — it is already on the LAN. Point devices.netmuxd_addr at it, and remember
-# netmuxd must not be started with the DEFAULT --socket-path: it deletes and rebinds whatever
-# socket that names, which on this host is the live usbmuxd's (verified, qn.4c). Give it
-# `--socket-path /var/run/netmuxd --disable-usb`, the same argv quince uses when it supervises.
-# For the SIMPLE in-container managed-muxer profile instead, see compose.nas.yml.
+# The socket is bound at /var/run/usbmuxd, which is libusbmuxd's own default AND quince's, so
+# THIS DEPLOYMENT NEEDS NO MUXER CONFIG AT ALL. The UI Rescan button is a no-op (409) — quince
+# does not own the host muxer.
+#
+# A Wi-Fi muxer is a SECOND ENTRY rather than a second key:
+#
+#   muxers:
+#     - address: /var/run/usbmuxd     # the host usbmuxd, bound in below
+#     - address: 127.0.0.1:27015      # a host-run netmuxd
+#
+# One muxer serving BOTH transports is ONE entry — netmuxd does exactly that, and the old shape
+# made you write its address twice. A host-run netmuxd also sidesteps the container-mDNS
+# constraint described in compose.nas.yml, since it is already on the LAN. Remember it must not be
+# started with the DEFAULT --socket-path: it deletes and rebinds whatever socket that names, which
+# on this host is the live usbmuxd's (verified, qn.4c). Give it
+# `--socket-path /var/run/netmuxd --disable-usb`.
+#
+# A `devices:` section is REFUSED at startup, by name, with the replacement printed — it is not
+# ignored. For the SIMPLE in-container managed-muxer profile, see compose.nas.yml (descoped).
 # The backup path is bind-mounted; storage-backend probing happens at runtime (D5).
 
 services:

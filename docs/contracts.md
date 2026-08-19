@@ -3044,7 +3044,7 @@ Verdicts measured against the code rather than read off the schema (`qn.6g`, qui
 | `storage[].retention.*` | **live** | Rides the storage applier: `policyFor` reads retention off the slot list, so `ApplyStorages` is the only path by which an edit can reach `Prune`. |
 | `storage[].default` | **live** | **The FLAG decides it, and build hoists the entry carrying it to `slots[0]`** — position in the file decides nothing (Operator ruling 2026-08-11, [quince#722](https://github.com/novkostya/quince/issues/722)). Safe only because forgetting the default is refused; a *re-designation* takes effect for the next unbound job. **This cell read *"Position decides it — re-ordering moves `slots[0]`"* until 2026-08-15, and it was the opposite of the code from the rung that introduced the plural list.** It is a GUARD rather than archaeology because the workaround it licensed is one a reader would still reach for and it does not work: moving `default: true` and leaving the order alone is now the whole edit, where reordering alone is a no-op — and under the old sentence a user would do the reorder, see nothing change, and have no way to tell why. |
 | `reconcile.interval_minutes` | **live** | `qn.6i`. The runner re-reads it when it schedules the **next** wait, and a change WAKES the scheduler so it applies to the wait already in progress — without that, turning six hours down to fifteen minutes would take up to six hours to bite, which is live in name only. **`0` disables the SCHEDULE and nothing else**: startup, storage-added and job-end are correctness triggers where the schedule is hygiene, and one key should not turn off both. Turning it back on needs no restart either. |
-| `devices.manage_muxer` · `.usbmuxd_socket` · `.netmuxd_addr` | **restart** | **D12 requires this sentence:** a netmuxd restart tears a live Wi-Fi backup, and Wi-Fi is the primary transport — so applying these live means first ruling on what happens to a running transfer. Out of scope for `qn.6g`, named rather than silent. |
+| `muxers[]` (`address`, `type`) | **restart** | **D12 requires this sentence:** the muxd client set is built once in `buildLiveStack`, so a changed address is not dialled until quince restarts. Applying it live is quince#1219 item F, deferred and NOT a v0.1 gate (Operator, 2026-08-19). It also needs a ruling on what happens to a RUNNING transfer whose muxer disappears — tearing a live Wi-Fi backup is the cost `rescan` already refuses to pay. Named rather than silent. |
 | `tls.cert_file` · `.key_file` | **live** | Rotation was always live — `tlsx.Keeper` re-reads the files. The *paths* became live in quince#900: the mux is bound on every start, so the TLS half exists whether or not a certificate does, and the `tls` applier hands the `Keeper` the new pair. **Turning TLS on and off are both live**, which is what an apply-and-revert flow needs. **An unusable pair is SAVED, WARNED and NOT APPLIED** — an `Applier` runs after the write and structurally cannot refuse it, so the daemon keeps serving the certificate it had and says so in the `PUT` response; it picks the new pair up with no restart once both files are readable. That is deliberately *unlike* startup, where `config.CheckTLS` **refuses to start** — coming up on plain http for somebody who asked for https is a silent downgrade, and there is no response to warn into. A bad edit cannot lock anyone out: the plain half redirects on a certificate being **loaded**, not configured. |
 | `sessions.allow_insecure_transport` | **live** | `qn.6g`'s fifth consumer (quince#900). **Both** consumers moved, and moving one would have been worse than moving neither: the plain half of the mux now reads it **per request** rather than choosing its handler at bind, and the `sessions` applier calls the auth service's setter with **whatever the file says** — including `false`. It was `restart` for two reasons and they were different: the handler choice was fixed at bind, and `applyInsecureTransportOptIn` returned before its setter when the opt-in was off, so a settable field was a **one-way latch** that nothing in a running process could lower. Turning it **on** returns the degraded-mode warning with the `PUT`, which `DegradedModeWarnings` used to emit on load only. |
 | `notifications.*` — `staleness_days` · `reminder_cooldown_hours` · `overdue_days` · the five per-category switches | **live** | `qn.12`. The notifier reads them when it evaluates, which is on a device-presence event, a job terminal, or the hourly tick — so an edit is in force by the next evaluation without a restart. **It was `automation.*` and it was the last occupant of the third bin**; the section was renamed in the same change that gave it consumers, which is the only moment renaming was free. |
@@ -3201,29 +3201,52 @@ storage:                    # REQUIRED, qn.6c. `storage:` IS THE LIST (quince#47
       keep_recent: 10
       keep_daily: 30
       keep_weekly: 12
-devices:
-  manage_muxer: false       # v0.1 SHIPS NO MUXER DAEMON: the operator runs one — a host
-                            # usbmuxd, a sidecar, or another tool's — and quince dials it.
-                            # `true` is REFUSED at validation, not ignored: yaml.Unmarshal
-                            # drops unknown keys silently, so deleting the key would turn an
-                            # existing all-in-one install into a muxerless one without a word.
-                            # The in-container profile is DESCOPED, not abandoned (qn.6p,
-                            # Operator 2026-08-16); qn.4c's ruling (bz) is parked with it.
-  usbmuxd_socket: /var/run/usbmuxd    # where the USB muxer answers. Default, and usbmuxd's
-                            # own default path, so a host already running one needs no
-                            # config.yml at all.
-  netmuxd_addr: ""          # where the Wi-Fi muxer answers. EMPTY BY DEFAULT: a default here
-                            # dialed a port nothing listened on, forever (quince#897 item 3).
-                            # Wi-Fi discovery is mDNS-only, so the muxer must be on the LAN —
-                            # which in the hardened shape is the MUXER's container, not
-                            # quince's, so quince stays bridged and unprivileged.
-                            #
-                            # BOTH KEYS TAKE THREE FORMS (qn.6p D3, internal/muxaddr):
+muxers:                     # WHERE QUINCE FINDS A MUXER. Absent entirely on most installs: the
+                            # default is ONE external muxer at /var/run/usbmuxd, which is
+                            # libusbmuxd's OWN default — so a host already running usbmuxd, or a
+                            # sidecar that binds its socket there, needs no config.yml at all.
+                            # That is the point of the list: a compose file should be enough.
+  - address: /run/mux/usbmuxd   # THREE FORMS (internal/muxaddr):
                             #   /run/mux/usbmuxd        a unix socket path
                             #   UNIX:/run/mux/usbmuxd   the same, libusbmuxd's own spelling
                             #   127.0.0.1:27015         TCP
-                            # Point BOTH at one address when a single muxer serves both
-                            # transports; quince opens one connection, not two.
+                            # `address:` rather than `socket:` because either endpoint may be a
+                            # path or host:port — `usbmuxd -S` takes `ADDR:PORT | PATH`, measured.
+    type: external          # WHO RUNS IT. Optional, defaults to `external` — somebody else runs
+                            # the daemon and quince only dials it. `managed` is reserved for the
+                            # return of the in-container profile and is REFUSED BY NAME on the
+                            # serve path, because descoped must not reach the operator as
+                            # malformed. An UNKNOWN type is a 422; `managed` is not, and that
+                            # split is deliberate.
+                            #
+                            # ONE MUXER SERVING BOTH TRANSPORTS IS ONE ENTRY. netmuxd does exactly
+                            # that over a single socket, and the retired two-key shape made you
+                            # write its address twice and then collapsed the duplicate internally.
+                            #
+                            # `muxers: []` MEANS NONE, and is different from omitting the key.
+                            # quince then sees no device at all and says so at startup — the
+                            # symptom otherwise looks identical to a phone being switched off.
+                            #
+                            # THE ADDRESSES LIVE HERE, NOT IN THE ENVIRONMENT (Operator, ruled
+                            # 2026-08-19, quince#1219). Env carries BOOTSTRAP — QUINCE_DATA,
+                            # QUINCE_CACHE, QUINCE_LISTEN — things that cannot live in the file
+                            # they locate. A muxer address is CONFIGURATION: quince reads it from
+                            # the config like a storage entry. `QUINCE_TRUSTED_PROXIES` is env for
+                            # two reasons specific to `--public-demo` (quince#549) and is not a
+                            # precedent. D12 decides it besides: an env var is editable by neither
+                            # the UI nor a hand-edit.
+                            #
+                            # CHANGING ONE REQUIRES A RESTART IN v0.1, which D12 obliges this file
+                            # to say: the muxd client set is built once at startup. Applying a
+                            # change live is deferred — quince#1219 item F, and NOT a v0.1 gate.
+                            #
+                            # `devices:` IS RETIRED AND IS REFUSED BY NAME (quince#1219). It held
+                            # only these addresses plus `manage_muxer`, under a name describing
+                            # something quince never configures — devices come FROM the muxer. A
+                            # surviving section is a FATAL startup refusal printing the `muxers:`
+                            # entry that replaces it, quoting your own address: yaml.Unmarshal
+                            # drops unknown keys silently, so ignoring it would take an operator's
+                            # muxer address with it and every device would vanish unexplained.
 tls:                        # qn.6f — the certificate quince serves ITSELF, for the tier with no
                             # reverse proxy in front of it. BOTH EMPTY (the default) MEANS TLS IS
                             # OFF, and that is a correct configuration, not a degraded one: it is

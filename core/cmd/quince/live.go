@@ -45,56 +45,64 @@ type liveStack struct {
 // so the caller serves / drives only a reconciled system. Shared by `serve` and `backup`.
 func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *config.Service,
 	st *store.Store, eventBus *bus.Bus, log *slog.Logger, scan scanMode) (*liveStack, error) {
-	dcfg := cfgSvc.Current().Devices
 	ls := &liveStack{muxer: httpapi.UnmanagedMuxer{}}
 
 	// A config asking for the in-container profile refuses the process HERE rather than in
 	// Validate, for the reason CheckMuxerProfile states: a validation error discards the whole
 	// config to Default(), which has no storage, so an upgrader with a working all-in-one install
 	// would be told to add their first storage (quince#849). Same ruling `tls:` already records.
-	if err := config.CheckMuxerProfile(dcfg); err != nil {
+	if err := config.CheckMuxers(cfgSvc.Current()); err != nil {
 		return nil, err
 	}
 
 	// THE MUXER GRAMMAR IS PARSED ONCE, HERE, AND A BAD ADDRESS REFUSES THE PROCESS (qn.6p D3).
 	// Deliberately NOT decided in config.Validate: Load() DISCARDS a config that fails Validate and
-	// falls back to Default(), so a typo here would start quince on the DEFAULT muxer addresses and
+	// falls back to Default(), so a typo here would start quince on the DEFAULT muxer address and
 	// dial a daemon the operator never named — the silent downgrade the `tls:` block refuses for
 	// exactly this reason. Validate still checks well-formedness, which is what rejects a bad PUT;
 	// this is what stops a bad FILE from being quietly ignored.
-	usbEP, err := muxaddr.Parse(dcfg.UsbmuxdSocket)
-	if err != nil {
-		return nil, fmt.Errorf("devices.usbmuxd_socket: %w", err)
-	}
-	wifiEP, err := muxaddr.Parse(dcfg.NetmuxdAddr)
-	if err != nil {
-		return nil, fmt.Errorf("devices.netmuxd_addr: %w", err)
-	}
-
-	// Live device tracking (qn.2): one muxd client per configured muxer endpoint feeds the registry.
+	//
+	// Live device tracking (qn.2): ONE muxd client per listed muxer feeds the registry.
+	//
+	// `distinctEndpoints` IS GONE, AND ITS ABSENCE IS THE POINT (quince#1219). It existed to
+	// collapse two config keys that named one daemon back into one connection — the shape where an
+	// operator wrote an address twice to say "this muxer serves both transports". A list says it
+	// once, so there is nothing to collapse; a genuine duplicate is now a validation error rather
+	// than something silently merged.
 	//
 	// THE CLIENTS ARE BUILT BEFORE THE MUXER GROUP, and the order is load-bearing rather than
 	// tidy: health reports an external muxer FROM ITS DIALING CLIENT (qn.6p D5), so the group
 	// needs those clients to exist before it can be asked anything true about them.
 	reg := device.NewRegistry(eventBus, log)
-	// ONE CLIENT PER DISTINCT MUXER, not per configured key (qn.6p D4). Pointing both keys at one
-	// daemon is how an operator says "this muxer serves both transports", which is the hardened
-	// shape rather than an edge case — and it used to open two connections to one socket, giving
-	// the registry two sources and duplicating every replay.
-	unique, byConfigured := distinctEndpoints([]muxerBinding{
-		{dcfg.UsbmuxdSocket, usbEP}, {dcfg.NetmuxdAddr, wifiEP},
-	})
-	byEndpoint := make(map[muxaddr.Endpoint]*muxd.Client, len(unique))
-	for _, ep := range unique {
+	muxers := cfgSvc.Current().ResolvedMuxers()
+	endpoints := make([]muxaddr.Endpoint, 0, len(muxers))
+	byEndpoint := make(map[muxaddr.Endpoint]*muxd.Client, len(muxers))
+	dialerByAddress := make(map[string]*muxd.Client, len(muxers))
+	for i, m := range muxers {
+		ep, err := muxaddr.Parse(m.Address)
+		if err != nil {
+			return nil, fmt.Errorf("muxers[%d].address: %w", i, err)
+		}
+		if ep.IsZero() {
+			return nil, fmt.Errorf("muxers[%d].address: %w", i, muxaddr.ErrEmpty)
+		}
+		if _, dup := byEndpoint[ep]; dup {
+			continue // refused by Validate; on the FILE path, dial it once rather than twice
+		}
 		client := muxd.NewClient(ep, log)
 		byEndpoint[ep] = client
+		dialerByAddress[ep.String()] = client
+		endpoints = append(endpoints, ep)
 		go client.Run(ctx, reg.Sink(ep.String()))
 	}
 	ls.devices = reg
-	if len(unique) == 1 && !usbEP.IsZero() && usbEP == wifiEP {
-		log.Info("one muxer serves both transports", "address", usbEP)
+	// NO MUXER IS A DEGRADED MODE AND IS SURFACED AS ONE. `muxers: []` is a legal thing to write
+	// and quince then sees no devices at all; saying so at startup is the no-silent-caps rule,
+	// since the symptom — an empty Devices screen — is indistinguishable from a phone being off.
+	if len(endpoints) == 0 {
+		log.Warn("no muxers configured — no device can be seen; add a `muxers:` entry to config.yml")
 	}
-	log.Info("device registry watching muxers", "usbmuxd", usbEP, "netmuxd", wifiEP, "connections", len(unique))
+	log.Info("device registry watching muxers", "muxers", len(endpoints))
 
 	// THE ROUTER (quince#1219 item D). The registry keys presence by (source, udid, transport)
 	// where sourceID is the muxer address; everything downstream used to throw the source away and
@@ -105,8 +113,8 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	// A DEVICE NOTHING REPORTS GETS AN ERROR, never a default. libusbmuxd only NULL-checks
 	// USBMUXD_SOCKET_ADDRESS, so the old empty-string answer was USED rather than falling back,
 	// and the CLI failed against nothing with the operator left to guess.
-	sourceEndpoint := make(map[string]muxaddr.Endpoint, len(unique))
-	for _, ep := range unique {
+	sourceEndpoint := make(map[string]muxaddr.Endpoint, len(endpoints))
+	for _, ep := range endpoints {
 		sourceEndpoint[ep.String()] = ep
 	}
 	muxerFor := func(udid, transport string) (muxaddr.Endpoint, error) {
@@ -123,13 +131,11 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 		return ep, nil
 	}
 
-	// Managed muxers (SIMPLE profile: usbmuxd for USB + netmuxd for Wi-Fi, qn.2b/qn.4c) or
-	// external (HARDENED / manage_muxer: false — dialed only, and reported in /api/health from
-	// the dialing client's real connection state rather than asserted).
-	// Both configured keys resolve through byConfigured, so when one muxer serves both transports
-	// the two health entries report the SAME connection — which is the truth, rather than two
-	// independent-looking answers about one socket.
-	group := buildMuxerGroup(dcfg, dialerLookup(byConfigured, byEndpoint), log)
+	// Every listed muxer is EXTERNAL in v0.1 — quince dials it and reports its real connection
+	// state in /api/health rather than asserting one (qn.6p D5). `type: managed` is refused above,
+	// so the supervised arm of muxsup is unreachable on a shipping build; it is parked against the
+	// return of the all-in-one profile, not dead.
+	group := buildMuxerGroup(muxers, dialerLookup(dialerByAddress), log)
 	// What each muxer is SERVING is measured from the registry it feeds, not asserted from the
 	// config key its address was written under (quince#1219 item E).
 	group.SetTransports(reg.TransportsForSource)

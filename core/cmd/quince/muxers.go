@@ -37,47 +37,46 @@ type muxerPlan struct {
 	problems  []string // loud misconfigurations: never silently swallowed, never built around
 }
 
-// plannedMuxers resolves the devices config into a plan. It refuses to supervise netmuxd when its
-// private unix socket would collide with the usbmuxd socket: netmuxd DELETES and rebinds whatever
-// --socket-path names, so that collision would silently kill USB (verified against the shipped
-// v0.4.3 binary — the qn.4c spike finding). A refused netmuxd is still dialed and still reported.
-func plannedMuxers(dcfg config.DevicesConfig) muxerPlan {
+// plannedMuxers resolves the `muxers:` list into a plan. In v0.1 every entry is EXTERNAL: quince
+// dials it and reports what it finds, and owns no daemon.
+//
+// THE MANAGED ARM IS GONE FROM THIS FUNCTION AND THE SUPERVISION IS NOT (quince#1219 A/B/C).
+// What was deleted is the CONFIG → SPEC MAPPING, and it was deleted because it can no longer be
+// written down: a supervised daemon needs a NAME to know whether it is `usbmuxd -f -S <socket>` or
+// `netmuxd --host/--port … --disable-usb`, and the ruled schema has `address:` and `type:` and no
+// `daemon:`. The old mapping got that name from WHICH KEY the address came out of — the same
+// assumption item E deleted from health — so under a list there is nothing to read it from.
+//
+// It was already unreachable before this change: `devices.manage_muxer: true` has been a fatal
+// serve-path refusal since qn.6p, and `type: managed` is refused the same way now. So no behaviour
+// changes, and the parked work is untouched — `muxsup.Usbmuxd`, `muxsup.Netmuxd`, `Supervisor` and
+// their hardware-proven tests all remain, including the netmuxd socket-collision refusal (netmuxd
+// DELETES and rebinds whatever `--socket-path` names, which would silently kill USB — the qn.4c
+// spike finding). Reintroducing the profile means giving the schema a way to name a daemon and
+// wiring these specs back up, not re-earning proof that already exists.
+func plannedMuxers(muxers []config.MuxerConfig) muxerPlan {
 	var p muxerPlan
-	if dcfg.UsbmuxdSocket != "" {
-		if dcfg.ManageMuxer {
-			p.supervise = append(p.supervise, muxsup.Usbmuxd(dcfg.UsbmuxdSocket))
-		} else {
-			p.external = append(p.external, externalMuxer{dcfg.UsbmuxdSocket})
+	seen := map[string]bool{}
+	for _, m := range muxers {
+		// THE CANONICAL SPELLING, NOT THE WRITTEN ONE, and this is the seam where it matters.
+		// `/run/mux/usbmuxd` and `UNIX:/run/mux/usbmuxd` are the same daemon written two ways
+		// (muxaddr's grammar). The registry keys presence by `Endpoint.String()`, health reports
+		// this address as the muxer's identity, and item E looks transports up BY that address —
+		// so if health reported what the operator typed while the registry recorded the canonical
+		// form, a muxer written the second way would report `transports: []` forever while
+		// devices attached over it.
+		ep, err := muxaddr.Parse(m.Address)
+		if err != nil || ep.IsZero() {
+			continue // refused by Validate and again on the serve path; nothing to dial
 		}
+		addr := ep.String()
+		if seen[addr] {
+			continue // one connection per muxer; an exact duplicate is a validation error
+		}
+		seen[addr] = true
+		p.external = append(p.external, externalMuxer{addr})
 	}
-	if dcfg.NetmuxdAddr == "" {
-		return p
-	}
-	if !dcfg.ManageMuxer {
-		p.external = append(p.external, externalMuxer{dcfg.NetmuxdAddr})
-		return p
-	}
-	socketPath := muxsup.SocketPathFor(dcfg.UsbmuxdSocket)
-	if socketPath == dcfg.UsbmuxdSocket {
-		p.refuseNetmuxd(dcfg.NetmuxdAddr, "its unix socket ("+socketPath+
-			") is devices.usbmuxd_socket — netmuxd would delete and rebind it, killing USB")
-		return p
-	}
-	spec, err := muxsup.Netmuxd(dcfg.NetmuxdAddr, socketPath)
-	if err != nil {
-		p.refuseNetmuxd(dcfg.NetmuxdAddr, "devices.netmuxd_addr ("+dcfg.NetmuxdAddr+
-			") is not a host:port address — "+err.Error())
-		return p
-	}
-	p.supervise = append(p.supervise, spec)
 	return p
-}
-
-// refuseNetmuxd records a loud refusal to SUPERVISE netmuxd while still dialing (and reporting)
-// it: quince never silently drops a configured muxer, and never starts one it cannot start safely.
-func (p *muxerPlan) refuseNetmuxd(addr, why string) {
-	p.problems = append(p.problems, "refusing to supervise netmuxd: "+why)
-	p.external = append(p.external, externalMuxer{addr})
 }
 
 // buildMuxerGroup turns the plan into a runnable group, logging what quince owns, what it merely
@@ -91,9 +90,9 @@ func (p *muxerPlan) refuseNetmuxd(addr, why string) {
 // yield a NON-nil interface holding a nil pointer, so muxsup's `dialer == nil` check would
 // pass and it would call Health() on nothing — turning the wiring bug status() is careful to
 // REPORT into a panic. live.go's lookup returns a literal nil for exactly this reason.
-func buildMuxerGroup(dcfg config.DevicesConfig, dialerFor func(address string) muxsup.Dialer,
+func buildMuxerGroup(muxers []config.MuxerConfig, dialerFor func(address string) muxsup.Dialer,
 	log *slog.Logger) *muxsup.Group {
-	plan := plannedMuxers(dcfg)
+	plan := plannedMuxers(muxers)
 	g := muxsup.NewGroup()
 	for _, spec := range plan.supervise {
 		g.Supervise(muxsup.New(spec, log))
@@ -143,58 +142,25 @@ func transportsOrEmpty(t []string) []string {
 	return t
 }
 
-// muxerBinding is one configured `devices:` key and the endpoint it resolved to.
-type muxerBinding struct {
-	configured string // the address exactly as written in config.yml — what the plan carries
-	ep         muxaddr.Endpoint
-}
-
-// distinctEndpoints answers "how many muxers is this, really" (qn.6p D4).
-//
-// ONE MUXER SERVING BOTH TRANSPORTS IS THE HARDENED SHAPE, not an edge case: netmuxd serves USB
-// and mDNS-discovered Wi-Fi over a single socket, which is what an operator reaches for so as not
-// to open an unauthenticated TCP port. The way to say that in config is to point both keys at it —
-// and doing so used to open TWO muxd clients on one socket, giving the registry two sources and
-// duplicating every replay (quince#897, the finding it did not name).
-//
-// It returns the unique endpoints in configuration order, and a map from each configured address
-// to its endpoint, so a caller can build one client per endpoint and still answer health per key.
-// Deduplication is a plain `==` because muxaddr.Endpoint is comparable — `/run/mux/usbmuxd` and
-// `UNIX:/run/mux/usbmuxd` are the same muxer written two ways, and this is where that matters.
-func distinctEndpoints(bindings []muxerBinding) (unique []muxaddr.Endpoint, byConfigured map[string]muxaddr.Endpoint) {
-	byConfigured = make(map[string]muxaddr.Endpoint, len(bindings))
-	seen := make(map[muxaddr.Endpoint]bool, len(bindings))
-	for _, b := range bindings {
-		if b.ep.IsZero() {
-			continue // no muxer for this transport; not an error (qn.6p D4)
-		}
-		byConfigured[b.configured] = b.ep
-		if seen[b.ep] {
-			continue
-		}
-		seen[b.ep] = true
-		unique = append(unique, b.ep)
-	}
-	return unique, byConfigured
-}
-
-// dialerLookup maps a configured address to the client holding that connection, for
-// buildMuxerGroup. Both keys resolve through byConfigured, so when one muxer serves both transports
-// the two health entries report the SAME connection — the truth about one socket, rather than two
-// independent-looking answers.
+// dialerLookup maps a muxer's CANONICAL address to the client holding that connection, for
+// buildMuxerGroup. Canonical because that is what plannedMuxers carries, what the registry uses as
+// its source id, and what health reports as the muxer's identity — see plannedMuxers for why all
+// three must be the same string.
 //
 // A NAMED FUNCTION RATHER THAN A CLOSURE, so the nil case can be tested (architect, quince#1060).
 // It must return a LITERAL nil when nothing dials the address: returning a nil *muxd.Client would
 // give muxsup a non-nil interface holding a nil pointer, its `dialer == nil` check would pass, and
 // it would call Health() on nothing — turning the wiring bug status() is careful to REPORT into a
 // panic. The comment was the only thing holding that before; now a test does.
-func dialerLookup(byConfigured map[string]muxaddr.Endpoint,
-	byEndpoint map[muxaddr.Endpoint]*muxd.Client) func(address string) muxsup.Dialer {
+//
+// IT TOOK TWO MAPS UNTIL quince#1219, because an address had to be resolved to an endpoint before
+// a client could be found: two config keys could name one daemon, so the lookup went
+// configured-address → endpoint → client. The list removes the first hop — entries are
+// canonicalised once, in plannedMuxers — so one map does what two did.
+func dialerLookup(byAddress map[string]*muxd.Client) func(address string) muxsup.Dialer {
 	return func(address string) muxsup.Dialer {
-		if ep, ok := byConfigured[address]; ok {
-			if c, ok := byEndpoint[ep]; ok {
-				return c
-			}
+		if c, ok := byAddress[address]; ok && c != nil {
+			return c
 		}
 		return nil
 	}

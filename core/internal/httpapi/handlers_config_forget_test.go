@@ -18,7 +18,7 @@ func seedStorages(t *testing.T, srv *httptest.Server, c *http.Client, storageJSO
 	t.Helper()
 	body := `{"backup":{"preferred_transport":"usb","require_encryption":true},` +
 		`"storage":` + storageJSON + `,` +
-		`"devices":{"manage_muxer":false,"usbmuxd_socket":"/var/run/usbmuxd","netmuxd_addr":""},` +
+		`"muxers":[{"address":"/var/run/usbmuxd","type":"external"}],` +
 		`"sessions":{"allow_insecure_transport":false},"notifications":{"staleness_days":3,"reminder_cooldown_hours":24,"overdue_days":14,"backup_available":true,"backup_overdue":true,"action_required":true,"backup_failed":true,"backup_completed":false},` +
 		`"ui":{"theme":"system"}}`
 	req := newReq(t, http.MethodPut, srv.URL+"/api/config", body)
