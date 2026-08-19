@@ -177,5 +177,77 @@ else
 	ok "...and does so as a KNOWN role, printing no degraded-mode note"
 fi
 
+
+# (5) `status` MUST SAY WHAT `watch` DOES — quince#1261.
+#
+# THE DEFECT. `watch` consulted the role; `status` did not, and printed *"their events are printed but
+# do NOT wake this watch"* unconditionally. On the architect seat that sentence is false: suppression
+# is off, and those events are exactly what the seat is there for.
+#
+# WHY IT COSTS SOMETHING DESPITE THE WATCH BEING CORRECT. The error is in the REASSURING direction. A
+# successor architect reads the note, believes a retired seat's PR cannot wake it, and goes looking
+# for a way to adopt that branch into its own watch — work that is unnecessary, because the events
+# already wake it. The watch fails open; the REPORT is what misleads, and a reader acts on the report.
+#
+# THE ASSERTIONS ARE CROSS-CHECKS, NOT STRING TESTS. Each case below compares the sentence `status`
+# prints against whether `watch` actually exited on the other runner's event, using the same
+# credential and the same state. That is the only form that catches the two drifting apart again —
+# asserting the wording alone would have passed happily throughout the bug.
+printf '\n(5) status agrees with watch about suppression\n'
+
+status_note() {
+	XDG_STATE_HOME="$WORK/state" QUINCE_CODER_KEY_FILE="$CODER" QUINCE_ARCH_TOKEN_FILE="$ARCH" \
+		QUINCE_BOT_TOKEN_FILE="$BOT" QUINCE_REVIEW_KEY_FILE="$REVIEW" \
+		./bin/forge-watch status --repo "$REPO" 2>&1 |
+		grep 'another runner declared on this box' || :
+}
+
+# agree asserts the note and the observed wake behaviour say the same thing.
+agree() { # <label> <watch-output> <note>
+	_lbl=$1 _w=$2 _n=$3
+	if printf '%s\n' "$_w" | grep -q 'EXITING on the event'; then _woke=yes; else _woke=no; fi
+	case "$_n" in
+	*'do NOT wake this watch'*) _claim=no ;;
+	*'DO wake this watch'*) _claim=yes ;;
+	*) _claim=absent ;;
+	esac
+	if [ -z "$_n" ]; then
+		bad "$_lbl — status printed no note at all, so it claims nothing about a suppression that is real"
+	elif [ "$_claim" = "$_woke" ]; then
+		ok "$_lbl — status says wake=$_claim and watch woke=$_woke"
+	else
+		bad "$_lbl — status says wake=$_claim but watch woke=$_woke" \
+			"This is the quince#1261 defect: the report describes a mechanism that is not the one running."
+		printf '    | %s\n' "$_n"
+	fi
+}
+
+_out=$(run_role "$CODER")
+_note=$(status_note)
+agree "implementer" "$_out" "$_note"
+case "$_note" in
+*'(role implementer)'*) ok "...and names the role it decided on, so the claim is checkable" ;;
+*) bad "...and names the role it decided on, so the claim is checkable" ;;
+esac
+
+_out=$(run_role "$REVIEW")
+_note=$(status_note)
+agree "architect" "$_out" "$_note"
+case "$_note" in
+*'suppression is OFF for role architect'*) ok "...and says WHY, rather than dropping the note and leaving a reader with no answer" ;;
+*) bad "...and says WHY, rather than dropping the note and leaving a reader with no answer" ;;
+esac
+
+# THE DEGRADED ARM, SURFACED IN THE REPORT AND NOT ONLY AT ARM TIME. `watch` announces `none` when it
+# arms; `status` is where a session looks afterwards, so a box that cannot name its role used to say
+# nothing about it here. A degraded mode is surfaced, never silent (`CLAUDE.md`).
+_out=$(run_role none)
+_note=$(status_note)
+agree "unidentifiable role" "$_out" "$_note"
+case "$_note" in
+*'could not determine its role'*) ok "...and status surfaces the degraded mode, not only the arm" ;;
+*) bad "...and status surfaces the degraded mode, not only the arm" ;;
+esac
+
 printf '\nforge-watch-role-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
