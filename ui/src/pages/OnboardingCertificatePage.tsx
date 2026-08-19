@@ -125,8 +125,8 @@ export function OnboardingCertificatePage() {
         </p>
 
         {/* THE PLACEHOLDERS ARE THE PATHS THE SHIPPED EXAMPLES PRODUCE, and that is the whole
-            requirement they have to meet. `deploy/compose.hardened.yml` and `deploy/compose.nas.yml`
-            both carry `./quince/certs:/certs:ro`, and `deploy/tls.md` names `/certs/quince.pem` and
+            requirement they have to meet. `deploy/compose.yml`
+            carries `./quince/certs:/certs:ro`, and `deploy/tls.md` names `/certs/quince.pem` and
             `/certs/quince.key` in the `tls:` block a user copies. A placeholder from a different
             convention teaches a path that does not exist on any install this project describes —
             worse than an empty box, because it reads as instruction. */}

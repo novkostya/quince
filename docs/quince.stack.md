@@ -129,7 +129,7 @@ quince supervises netmuxd as
   quince already persists and restores (qn.3 amendment 1). `RUST_LOG=info` is injected when
   unset, since netmuxd is silent below `error`.
 - **Wi-Fi discovery is mDNS-only**, so a supervised netmuxd is necessary but not sufficient: the
-  container must be able to receive multicast from the LAN (`deploy/compose.nas.yml`).
+  container must be able to receive multicast from the LAN (`deploy/compose.yml`).
 
 **Consequence — AND THE MUXER HALF OF IT IS RETIRED IN v0.1 (qn.6p).** This read *"the container
 ships `netmuxd` (pinned, source-built) + `usbmuxd` (apk, fallback)"* and it now ships **neither**:

@@ -8,8 +8,8 @@ import (
 
 // DefaultZFSKeyDir is where quince keeps the keys it generates or finds for the zfs helper.
 //
-// INSIDE `/data`, WHICH IS ALREADY MOUNTED BY BOTH SHIPPED COMPOSES — `deploy/compose.nas.yml` and
-// `deploy/compose.lab.yml` — so a keypair written here survives a container recreate with no compose
+// INSIDE `/data`, WHICH THE SHIPPED COMPOSE EXAMPLE ALREADY MOUNTS — `deploy/compose.yml` —
+// so a keypair written here survives a container recreate with no compose
 // change and no restart. The documented `hook_cmd` already pointed inside it (`-i /data/keys/zfs`),
 // so this is where operators' keys already are rather than a new location (quince#818).
 //

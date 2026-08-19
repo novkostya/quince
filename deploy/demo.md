@@ -4,7 +4,7 @@
 repository root are the whole deployment; quince#494 is the reasoning, and this is meant to stay
 readable after that issue is closed and forgotten.
 
-**This is not how anyone runs quince for real.** That is `compose.nas.yml` / `compose.lab.yml` and
+**This is not how anyone runs quince for real.** That is `compose.yml` and
 `dev.md`. The demo serves fixture data, keeps nothing, and is deliberately disposable.
 
 ## What it is

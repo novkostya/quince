@@ -1,8 +1,7 @@
 # The PUBLIC DEMO instance (quince#494). `quince serve --public-demo` on fly.io.
 #
-# This file is NOT how anybody runs quince for real — that is deploy/compose.nas.yml and
-# deploy/compose.lab.yml. It hosts the throwaway demo and nothing else. deploy/demo.md is the
-# prose; this is the artifact.
+# This file is NOT how anybody runs quince for real — that is deploy/compose.yml. It hosts the
+# throwaway demo and nothing else. deploy/demo.md is the prose; this is the artifact.
 #
 # It lives at the repository ROOT rather than under deploy/ because `[build] dockerfile` is
 # resolved against the build context, and fly sets the context to the project root. Root is also
