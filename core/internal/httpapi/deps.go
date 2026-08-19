@@ -49,7 +49,11 @@ type Deps struct {
 	ZFSKnownHostsPath string
 	Muxer             MuxerControl
 	Ops               DeviceOps
-	WorkingReset      WorkingReset
+	// DeviceNotifs backs PUT /api/devices/{udid}/notifications (quince#1270). Nil is not a
+	// permitted state — NewRouter substitutes UnavailableDeviceNotifications, so an unwired
+	// server refuses honestly with 503 rather than accepting a write nothing performs.
+	DeviceNotifs DeviceNotifications
+	WorkingReset WorkingReset
 	// Reconcile publishes `reconciling` on GET /api/health (qn.6i). Nil wherever no asynchronous
 	// reconciliation exists — `--demo`, the admin CLIs, every test router — and nil reports false,
 	// which is the truth there rather than a default: with no runner there is no provisional state.
@@ -210,6 +214,31 @@ func (UnavailableDeviceOps) WifiSync(context.Context, string, string) (string, i
 	return "", http.StatusServiceUnavailable, "device operations are unavailable"
 }
 func (UnavailableDeviceOps) Op(string) (wire.Op, bool) { return wire.Op{}, false }
+
+// DeviceNotifications records the per-device notifications switch (quince#1270).
+//
+// NOT PART OF DeviceOps, and the line is not tidiness: a DeviceOps action is an OP — it reaches
+// the phone, it can be refused by the phone, it returns 202 and an op_id, and it is
+// single-flighted per device because two prompts on one screen give the user no way to tell
+// which dialog belongs to which request. This reaches nothing but the app DB. It cannot be
+// refused by a device, it has no op to narrate, and single-flighting it would be a lock over
+// a row write.
+//
+// Status + reason rather than an error, matching DeviceOps, so the handler maps outcomes
+// without cross-package sentinel errors. 200 = written.
+type DeviceNotifications interface {
+	// SetNotificationsEnabled records the choice and makes it live. 404 when the UDID is one
+	// quince does not know — an unknown device is not a device that is muted, and answering 200
+	// to a write against nothing is the silent no-op this project forbids.
+	SetNotificationsEnabled(udid string, enabled bool) (status int, reason string)
+}
+
+// UnavailableDeviceNotifications stands in when nothing is wired: 503, never a silent no-op.
+type UnavailableDeviceNotifications struct{}
+
+func (UnavailableDeviceNotifications) SetNotificationsEnabled(string, bool) (int, string) {
+	return http.StatusServiceUnavailable, "notification settings are unavailable"
+}
 
 // MuxerControl drives POST /api/devices/rescan and reports muxer-supervision health for
 // /api/health (qn.2b; qn.4c made it plural — quince may supervise usbmuxd AND netmuxd). The real

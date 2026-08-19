@@ -1189,6 +1189,38 @@ POST /api/devices/{udid}/wifi-sync
      // unconfirmed does NOT appear on the one path where an unreadable read-back is EXPECTED:
      // disabling over Wi-Fi severs the connection the read-back would use, so there the op
      // SUCCEEDS and the value becomes wifi_sync: "unknown" (ruled quince#363).
+PUT  /api/devices/{udid}/notifications
+     {enabled: bool}                                        → 200 {enabled} | 404 | 422 | 500 | 503
+     // quince#1270 — the per-device notifications switch. Records whether quince notifies
+     // about THIS device at all: the SUBJECT axis, AND-ed with the `notifications:` category
+     // keys in config.yml. See Device.notifications_enabled in §2 for the precedence, the
+     // default, and why the value is in the app DB rather than config.yml.
+     //
+     // PUT, NOT POST, and NOT AN OP — which is the one thing to read before assuming it
+     // behaves like the three routes above. Those are POSTs because they reach the PHONE:
+     // they return 202 and an op_id, they narrate through op.updated, they can be refused by
+     // the device, and they are single-flighted per UDID. This reaches nothing but the app
+     // DB. It is idempotent, it returns 200 with the stored value, there is no op_id to
+     // poll, and the SINGLE-FLIGHT RULE STATED UNDER wifi-sync DOES NOT APPLY: it is not
+     // one of the three op routes, and a lock over a row write would buy nothing. Same
+     // reading as PUT /api/config and PUT /api/auth/password.
+     //
+     // 422: `enabled` absent. It is NOT defaulted, and that is the point — the value is a
+     // boolean, so an omitted key and `false` decode identically, and defaulting would let
+     // an empty PUT silently MUTE a device. There is nothing to guess at, so it refuses.
+     // 404: a UDID quince does not know. An unknown device is not a muted one, and 200 to a
+     // write against nothing is a silent no-op. OFFLINE devices are known (qn.6a) and are
+     // settable — which is the case the feature exists for, a phone that is in a drawer.
+     // 500: the write failed. The preference was NOT recorded.
+     //
+     // A SUCCESSFUL WRITE PUBLISHES device.updated (§3) carrying the whole device, so an
+     // open page moves without a refresh. A failure to ANNOUNCE is not a failure to SAVE and
+     // does not change the status: the row is written, and a page that missed the event is
+     // one refresh from the truth.
+     //
+     // GLOBAL ACROSS SUBSCRIBERS. The gate runs before subscriber fan-out, so this silences
+     // the device on every browser this person has subscribed, not only the one that sent
+     // the request.
 POST /api/devices/{udid}/reset-working {storage_id?} → 202 {note} | 404 | 409 | 500 | 503
      // qn.6h ADDS A FAILURE THE ZFS BACKEND CAN RETURN, and it is the one code here that means
      // "nothing happened": 500 {note} when the backend REFUSED to abandon. Reset is a `zfs

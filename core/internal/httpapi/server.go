@@ -186,6 +186,9 @@ func NewRouter(deps Deps) http.Handler {
 	if deps.Ops == nil { // no device-ops subsystem wired → refuse honestly (503)
 		deps.Ops = UnavailableDeviceOps{}
 	}
+	if deps.DeviceNotifs == nil { // no store/registry wired → refuse honestly (503)
+		deps.DeviceNotifs = UnavailableDeviceNotifications{}
+	}
 	if deps.Storages == nil { // no storage subsystem wired → an empty list, not a 503 (qn.6c)
 		deps.Storages = UnavailableStorages{}
 	}
@@ -284,6 +287,12 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("POST /api/devices/{udid}/pair/validate", deps.handlePairValidate())
 	apiMux.HandleFunc("POST /api/devices/{udid}/encryption", deps.handleEncryption())
 	apiMux.HandleFunc("POST /api/devices/{udid}/wifi-sync", deps.handleWifiSync())
+	// PUT, NOT POST, and that is a deliberate departure from the three op routes above
+	// (quince#1270). Those are POSTs because they are OPS: they reach the phone, return 202 and
+	// an op_id, and running one twice is not the same as running it once. This replaces one
+	// field of local state with the value in the body — idempotent, no op, no id — which is what
+	// PUT /api/config and PUT /api/auth/password already are here.
+	apiMux.HandleFunc("PUT /api/devices/{udid}/notifications", deps.handleDeviceNotifications())
 	apiMux.HandleFunc("POST /api/devices/{udid}/reset-working", deps.handleResetWorking())
 	apiMux.HandleFunc("GET /api/ops/{op_id}", deps.handleOp())
 	apiMux.HandleFunc("POST /api/jobs", deps.handleJobCreate())

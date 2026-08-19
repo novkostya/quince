@@ -250,3 +250,22 @@ func (p *Provider) flipDevice(udid string, mutate func(*wire.Device)) {
 	p.mu.Unlock()
 	p.bus.PublishEvent(wire.EventDeviceUpdated, dev)
 }
+
+// SetNotificationsEnabled records the per-device notifications switch (quince#1270).
+//
+// NOT AN OP, so it is not scripted, has no op_id and takes no time: the real implementation writes
+// one row in the app DB and reaches no device. Scripting a delay here would teach a flow that does
+// not exist, which is the same reason scriptWifiSync has no waiting_for_user step.
+//
+// The demo world holds no DB, so the value lives on the device itself — which is exactly what the
+// real registry serves it as, so the wire shape and the announcement match production.
+func (p *Provider) SetNotificationsEnabled(udid string, enabled bool) (int, string) {
+	p.mu.RLock()
+	_, ok := p.devices[udid]
+	p.mu.RUnlock()
+	if !ok {
+		return http.StatusNotFound, "no such device"
+	}
+	p.flipDevice(udid, func(d *wire.Device) { d.NotificationsEnabled = enabled })
+	return http.StatusOK, ""
+}

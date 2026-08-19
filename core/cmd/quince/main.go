@@ -185,8 +185,9 @@ func serve(args []string) error {
 	var versionAdmin httpapi.VersionAdmin
 	var storages httpapi.StorageReader // assigned in both branches (demo → provider, else → storage)
 	var muxer httpapi.MuxerControl = httpapi.UnmanagedMuxer{}
-	var ops httpapi.DeviceOps             // assigned in both branches below (demo → provider, else → manager)
-	var workingReset httpapi.WorkingReset // nil in demo → router serves 503 on the reset surface
+	var ops httpapi.DeviceOps                    // assigned in both branches below (demo → provider, else → manager)
+	var deviceNotifs httpapi.DeviceNotifications // both branches (demo → provider, else → the app DB)
+	var workingReset httpapi.WorkingReset        // nil in demo → router serves 503 on the reset surface
 	// reconcileReporter stays nil in --demo: fixtures are complete the moment they exist, so there is
 	// no provisional state to declare and `reconciling` is honestly false. Left as the INTERFACE and
 	// assigned only from a non-nil runner — assigning a typed nil pointer would make the interface
@@ -236,6 +237,7 @@ func serve(args []string) error {
 		})
 		prov.Run(ctx)
 		devices, jobs, versions, ops = prov, prov, prov, prov
+		deviceNotifs = prov
 		storages = prov
 		versionAdmin = prov
 		jobControl = prov // qn.4b: the demo command surface is live (scripts on-demand jobs, no hardware)
@@ -323,6 +325,10 @@ func serve(args []string) error {
 			return err
 		}
 		devices, jobs, jobControl = ls.devices, ls.jobs, ls.jobControl
+		// The per-device notifications switch (quince#1270). Built here rather than inside
+		// buildLiveStack because it is HTTP wiring: the live stack owns the registry, and this is
+		// the seam between that registry, the app DB and one route.
+		deviceNotifs = deviceNotifications{log: log, store: st, devices: ls.devices, bus: eventBus}
 		versions, versionAdmin, muxer, ops = ls.versions, ls.versionAdmin, ls.muxer, ls.ops
 		storages = ls.storages
 		if ls.reconcile != nil {
@@ -370,7 +376,8 @@ func serve(args []string) error {
 		Config:           cfgSvc, Auth: authSvc, Bus: eventBus, Proxies: proxies,
 		Devices: devices, Jobs: jobs, JobControl: jobControl, Versions: versions,
 		VersionAdmin: versionAdmin, Muxer: muxer, Ops: ops, WorkingReset: workingReset,
-		Storages: storages, Reconcile: reconcileReporter,
+		DeviceNotifs: deviceNotifs,
+		Storages:     storages, Reconcile: reconcileReporter,
 		// THE SAME Keeper `subscribeTLS` FEEDS, and the certificate trial points it at a pair
 		// WITHOUT writing `config.yml` (quince#908 slice 5). One Keeper, two ways in: the applier,
 		// for a config edit, and the trial, for a certificate nobody has proved yet. The second
