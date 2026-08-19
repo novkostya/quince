@@ -1226,11 +1226,20 @@ EOF
 	# regression that did not exist. The caveat below says what the gap contains instead of computing
 	# it.
 	#
-	# THE SKEW ACCUMULATES; IT DOES NOT DECAY. A STATE FILE IS NEVER RESEEDED — canon forbids it,
-	# `status` says so on every `dead` read, and a re-arm diffing against the stored observation is the
-	# whole design. So pre-quince#1265 `arms` sit in a file for as long as the runner name exists, in
-	# NEITHER new bucket, while `arms` keeps climbing with every wake. Measured on a long-lived seat:
-	# a gap of 11 that had become 22 an hour later, every one of them an idle bound.
+	# THE SKEW DOES NOT DECAY — IT IS A FIXED HISTORICAL CONSTANT. A STATE FILE IS NEVER RESEEDED:
+	# canon forbids it, `status` says so on every `dead` read, and a re-arm diffing against the stored
+	# observation is the whole design. So pre-quince#1265 `arms` sit in a file for as long as the
+	# runner name exists, in NEITHER new bucket. Measured on a long-lived seat whose state file
+	# predates this: a residual of 11 per repo, unchanged across three readings over two hours, every
+	# one of them an idle bound. It does not shrink, and once that seat's tool is current it cannot
+	# grow either — every exit from then on is classified, so nothing new enters the gap. The skew is
+	# bounded by the unclassified exits that happened before the binary was updated.
+	#
+	# COMPARE LIKE WITH LIKE WHEN YOU CHECK THIS. A per-repo state file and the watcher's `--all` line
+	# are different units — `--all` SUMS the declared set, so a two-repo watch doubles every figure in
+	# it. Reading one of each and differencing them reports growth that is not there; that is how this
+	# paragraph came to claim the skew accumulates, which it does not (quince#296 is the standing
+	# record of a per-repo figure and a sum being mistaken for one quantity).
 	#
 	# SO THE CONDITION FOR PRINTING A RESIDUAL IS "EVERY LIVE STATE FILE WAS CREATED AFTER THIS", AND
 	# THAT IS AN EVENT, NOT A DATE: it is met when a seat declares a NEW RUNNER NAME, not when the
@@ -1238,7 +1247,7 @@ EOF
 	# should check what created the state files rather than what day it is.
 	#
 	# Said here because the sentence this replaces invited the opposite — waiting for a condition that
-	# never arrives, then printing "22 arms reached no exit path" about a loop that was working.
+	# never arrives, then printing "11 arms reached no exit path" about a loop that was working.
 	printf 'loop: %s arm(s), %s wake(s), %s idle bound(s), %s failing exit(s), %s prevented %s since counting began — prevented = ticks where self-caused suppression was the difference between exiting and continuing (quince#242); idle/failing count exits 6 and 7 and were added by quince#1265, so arms from before that are in neither, and an arm refused at preflight is in none of these figures.\n' \
 		"$_lt_a" "$_lt_w" "$_lt_i" "$_lt_f7" "$_lt_p" "$_lt_scope"
 }
