@@ -218,6 +218,22 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	// dataset, which no job row would ever explain.
 	reg.SetLastBackupSource(storageMgr.LastBackup)
 
+	// The per-device notifications switch (quince#1270). Read through the registry so the ONE place
+	// that assembles a device answers it, which is what puts the value in front of both consumers:
+	// the notifier, which gates on it, and the device page, which renders it.
+	//
+	// A READ FAILURE FAILS OPEN — it notifies. The alternative silences a device because SQLite hiccuped,
+	// which is a suppression the user never asked for and would present as "notifications stopped" with
+	// nothing anywhere saying why. It is logged rather than swallowed.
+	reg.SetNotifyPrefSource(func(udid string) bool {
+		enabled, err := st.DeviceNotificationsEnabled(udid)
+		if err != nil {
+			log.Warn("device notification preference read failed; notifying", "error", err)
+			return true
+		}
+		return enabled
+	})
+
 	// Offline devices (qn.6a): a powered-off device that has backups stays listed. The registry
 	// unions live presence with the UDIDs that have committed versions, and persists the identity
 	// fetched at enrichment so an offline row shows a name + last-seen after a restart.

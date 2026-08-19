@@ -2152,6 +2152,30 @@ Device: {
      // off/on differential, which is what would prove this key is the one that CHANGES rather than
      // `SupportsWifiSyncing`, also true in the same dump. `unknown` continues to mean quince does
      // not know — a failed read, or an unconfirmed pairing, never a guess.
+  "notifications_enabled": true,                   // the per-device notifications switch (quince#1270)
+     // Added at quince#1270 as a non-breaking field addition, following the qn.7 precedent
+     // directly above. THE THIRD AXIS OF NOTIFICATION POLICY: `push_subscriptions` says which
+     // browser RECEIVES, `notifications:` in config.yml says which KINDS are sent at all, and
+     // this says which backed-up DEVICE generates them.
+     // A BOOL, NOT wifi_sync's TRI-STATE, and the difference is the reason rather than the shape:
+     // `wifi_sync` REFLECTS a value read off the device, so quince may genuinely not know it.
+     // This is quince's own policy, so there is no unknown to represent.
+     // PRECEDENCE IS AND — a notification goes out only if the category is on AND the subject
+     // device is on. No override in either direction. A per-device switch that could override a
+     // category the user turned off would resurrect the double-notification qn.12 D5 exists to
+     // prevent, and make the global switches mean something different depending on which screen
+     // they are read from.
+     // DEFAULT TRUE, and absence of a stored preference reads as true: a device that appears and
+     // is silently silent is a silent fallback, which the hard rules forbid.
+     // GLOBAL ACROSS SUBSCRIBERS, not across PEOPLE. The gate sits in `notify.Evaluate`, which
+     // runs BEFORE subscriber fan-out, so muting a device silences it on every browser this
+     // person has subscribed. Today there is exactly one principal, so global-across-subscribers
+     // and global-across-people coincide BY DEGENERACY rather than by design; the preference is
+     // stored in its own table so the second reading can gain an owner column when the
+     // delegated-access rung defines what a principal is.
+     // STORED IN THE APP DB, NOT config.yml (Operator, 2026-08-20) — the device set is
+     // DISCOVERED rather than authored, and quince#728 rules that config.yml holds only what the
+     // user set. The cost is real and accepted: a hand-edit of config.yml cannot reach it.
   "last_seen": "...",
   "last_backup": {"at": "...", "job_id": "..." | null, "status": "succeeded"} | null
      // job_id NULLABLE — ratified at the qn.4c spec review ((bz)). last_backup is derived

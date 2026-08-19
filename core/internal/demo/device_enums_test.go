@@ -122,3 +122,29 @@ func TestStaticSeedCarriesContractLegalEnums(t *testing.T) {
 		assertLegalEnums(t, d, "static seed")
 	}
 }
+
+// The same guard for the per-device notifications switch (quince#1270), which needs its own because
+// it is NOT an enum: it is a bool, so `deviceEnums` cannot cover it and the "" tell that catches an
+// unset enum does not exist. An unset bool is `false`, and `false` here means MUTED — a demo device
+// that silently stopped producing notifications, which is precisely the class quince#361 was.
+//
+// The exception map is how a DELIBERATELY muted demo device gets added: name it here, with why. A
+// device that is muted and not listed is the bug this catches; a device listed and not muted is
+// caught too, so the list cannot rot into a blanket exemption.
+func TestEveryServedDeviceIsNotifiedAboutUnlessDeliberatelyMuted(t *testing.T) {
+	deliberatelyMuted := map[string]string{}
+
+	p := newRunningProvider(t)
+	for _, d := range p.Devices() {
+		reason, listed := deliberatelyMuted[d.Name]
+		if listed && d.NotificationsEnabled {
+			t.Errorf("demo device %q is listed as deliberately muted (%s) and serves "+
+				"notifications_enabled=true — one of the two is wrong", d.Name, reason)
+		}
+		if !listed && !d.NotificationsEnabled {
+			t.Errorf("demo device %q serves notifications_enabled=false and is not listed as "+
+				"deliberately muted\n  → construct it through demoDevice(), which applies the "+
+				"default the registry applies (quince#1270)", d.Name)
+		}
+	}
+}

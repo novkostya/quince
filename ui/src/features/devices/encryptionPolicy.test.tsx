@@ -16,6 +16,7 @@ function device(encryption: Device["backup_encryption"]): Device {
     paired: "yes",
     backup_encryption: encryption,
     wifi_sync: "unknown",
+    notifications_enabled: true,
     last_seen: "2026-07-20T00:00:00Z",
     last_backup: null,
   };

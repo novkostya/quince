@@ -18,7 +18,10 @@ func seenNow(t time.Time) wire.Transports {
 }
 
 func device(name string, lastBackup *time.Time, now time.Time) wire.Device {
-	d := wire.Device{UDID: "UDID-FIXTURE", Name: name, Transports: seenNow(now)}
+	// NotificationsEnabled TRUE, because that is what the registry serves for a device nobody has
+	// muted — the wire zero value is `false`, so a fixture that omits it silences every test that
+	// asserts a notification IS sent, for a reason no assertion mentions (quince#1270).
+	d := wire.Device{UDID: "UDID-FIXTURE", Name: name, Transports: seenNow(now), NotificationsEnabled: true}
 	if lastBackup != nil {
 		d.LastBackup = &wire.LastBackup{At: lastBackup.Format(time.RFC3339), Status: "succeeded"}
 	}
@@ -238,5 +241,101 @@ func TestACategorySwitchSuppressesOnlyItsOwnKind(t *testing.T) {
 	// And backup_completed is OFF by default, which is the ruling's one non-obvious default.
 	if _, ok := ForTerminal(device("iPhone", nil, now), backup.StateSucceeded, "", defaults()); ok {
 		t.Errorf("a successful backup notified by default; the ruling says backup_completed is OFF")
+	}
+}
+
+// --- the per-device notifications switch, quince#1270 ---
+
+// PRECEDENCE IS AND, over all four cells, and this is the table that says so.
+//
+// The alternative — a per-device switch that OVERRIDES a category the user turned off — was
+// considered and rejected: it resurrects the double-notification problem D5 was built to prevent,
+// and it makes the global switches mean something different depending on which screen you read them
+// from. So the only cell that sends is (category on, device on).
+func TestPrecedenceIsAND(t *testing.T) {
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	last := now.Add(-40 * 24 * time.Hour) // well past overdue_days
+	for _, tc := range []struct {
+		name       string
+		categoryOn bool
+		deviceOn   bool
+		want       bool
+	}{
+		{"both on", true, true, true},
+		{"category off, device on", false, true, false},
+		{"category on, device off", true, false, false},
+		{"both off", false, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := defaults()
+			cfg.BackupOverdue = tc.categoryOn
+			dev := device("phone", &last, now)
+			dev.NotificationsEnabled = tc.deviceOn
+			_, got := Evaluate(dev, Reminder{}, cfg, false, now)
+			if got != tc.want {
+				t.Fatalf("Evaluate sent=%v, want %v (category=%v device=%v)",
+					got, tc.want, tc.categoryOn, tc.deviceOn)
+			}
+		})
+	}
+}
+
+// THE CASE THAT PROMPTED THE FEATURE, and it is the acceptance quince#1270 names.
+//
+// A paired device the user does not intend to back up produces `Never Backed Up` every
+// `reminder_cooldown_hours`, indefinitely, for as long as it is on the network. Turning
+// `backup_available` off globally would silence the invitation for the devices the user DOES want
+// backed up, which is the whole gap. So: a muted, visible, never-backed-up device produces nothing,
+// and an unmuted one beside it still invites.
+func TestAMutedNeverBackedUpDeviceIsNotInvitedAndItsNeighbourStillIs(t *testing.T) {
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	cfg := defaults()
+
+	drawer := device("drawer-iphone", nil, now)
+	drawer.NotificationsEnabled = false
+	if d, send := Evaluate(drawer, Reminder{}, cfg, false, now); send {
+		t.Fatalf("a muted never-backed-up device was still invited: %q / %q", d.Title, d.Body)
+	}
+
+	wanted := device("family-iphone", nil, now)
+	d, send := Evaluate(wanted, Reminder{}, cfg, false, now)
+	if !send {
+		t.Fatalf("muting one device silenced its unmuted neighbour")
+	}
+	if d.Kind != KindBackupAvailable {
+		t.Fatalf("neighbour got kind %q, want %q", d.Kind, KindBackupAvailable)
+	}
+}
+
+// THE SWITCH IS THE SUBJECT AXIS, SO IT COVERS EVERY KIND — including the failures.
+//
+// "Notifications about this device: on or off" is the whole of it. A per-kind reading is the
+// per-(device × category) matrix quince#1270 deliberately defers, and half-implementing it here
+// would ship a switch whose label cannot be written truthfully.
+func TestMutingCoversTheTerminalKindsToo(t *testing.T) {
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	cfg := defaults()
+	cfg.BackupCompleted = true
+
+	for _, tc := range []struct {
+		name      string
+		state     string
+		errorCode string
+	}{
+		{"succeeded", backup.StateSucceeded, ""},
+		{"needs the phone", backup.StateFailed, backup.ErrNotPaired},
+		{"quince's own failure", backup.StateFailed, backup.ErrDiskLow},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dev := device("phone", nil, now)
+			if _, send := ForTerminal(dev, tc.state, tc.errorCode, cfg); !send {
+				t.Fatalf("unmuted device sent nothing for %s/%s; the fixture proves nothing",
+					tc.state, tc.errorCode)
+			}
+			dev.NotificationsEnabled = false
+			if d, send := ForTerminal(dev, tc.state, tc.errorCode, cfg); send {
+				t.Fatalf("a muted device was still told %q / %q", d.Title, d.Body)
+			}
+		})
 	}
 }

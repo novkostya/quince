@@ -16,16 +16,20 @@ package wire
 // Device is one iPhone/iPad, keyed by UDID, possibly present on several transports at
 // once (contracts §2, design §3).
 type Device struct {
-	UDID             string      `json:"udid"`
-	Name             string      `json:"name"`
-	Model            string      `json:"model"` // raw, e.g. "iPhone17,2"; UI maps to marketing name
-	IOSVersion       string      `json:"ios_version"`
-	Transports       Transports  `json:"transports"`
-	Paired           string      `json:"paired"`            // yes | no | unknown
-	BackupEncryption string      `json:"backup_encryption"` // on | off | unknown
-	WifiSync         string      `json:"wifi_sync"`         // on | off | unknown — lockdown wireless_lockdown (qn.7)
-	LastSeen         string      `json:"last_seen"`
-	LastBackup       *LastBackup `json:"last_backup"` // null when the device has no backups
+	UDID             string     `json:"udid"`
+	Name             string     `json:"name"`
+	Model            string     `json:"model"` // raw, e.g. "iPhone17,2"; UI maps to marketing name
+	IOSVersion       string     `json:"ios_version"`
+	Transports       Transports `json:"transports"`
+	Paired           string     `json:"paired"`            // yes | no | unknown
+	BackupEncryption string     `json:"backup_encryption"` // on | off | unknown
+	WifiSync         string     `json:"wifi_sync"`         // on | off | unknown — lockdown wireless_lockdown (qn.7)
+	// NotificationsEnabled is the per-device notifications switch (quince#1270) — whether quince
+	// notifies about THIS device at all. A bool rather than wifi_sync's on|off|unknown, because
+	// this is quince's own policy and not a value read back off the device: there is no unknown.
+	NotificationsEnabled bool        `json:"notifications_enabled"`
+	LastSeen             string      `json:"last_seen"`
+	LastBackup           *LastBackup `json:"last_backup"` // null when the device has no backups
 }
 
 // Transports carries a per-transport last-seen timestamp; absent transports are omitted

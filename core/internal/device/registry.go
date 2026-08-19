@@ -35,6 +35,10 @@ type Registry struct {
 	// persistIdentity writes a device's identity + last_seen so an offline row survives a restart
 	// with its name (qn.6a). Nil until wired (tests/--demo keep identity in-memory only).
 	persistIdentity func(udid string, id Identity, lastSeen string)
+	// notifyPref resolves Device.notifications_enabled — the per-device notifications switch
+	// (quince#1270). Nil until wired (tests/--demo): the field then stays at its honest default,
+	// which is ON, so an unwired registry notifies exactly as it did before this existed.
+	notifyPref func(udid string) bool
 }
 
 // PersistedIdentity is one stored identity row loaded at startup (qn.6a). The device package stays
@@ -100,6 +104,20 @@ func (r *Registry) LoadPersisted(rows []PersistedIdentity) {
 func (r *Registry) SetLastBackupSource(fn func(udid string) (wire.LastBackup, bool)) {
 	r.mu.Lock()
 	r.lastBackup = fn
+	r.mu.Unlock()
+}
+
+// SetNotifyPrefSource wires where Device.notifications_enabled comes from — the app DB
+// (store.DeviceNotificationsEnabled). READ ON EVERY MERGE rather than cached, for the same
+// reason SetLastBackupSource is: there is no second copy to go stale, so the field is right
+// immediately after the switch is flipped and after a restart. Call once, before serving.
+//
+// Same declared tradeoff as the source above — the lookup runs while the registry lock is held,
+// so a device read costs one primary-key SQLite lookup per device. Caching would buy nothing
+// but a way to be wrong.
+func (r *Registry) SetNotifyPrefSource(fn func(udid string) bool) {
+	r.mu.Lock()
+	r.notifyPref = fn
 	r.mu.Unlock()
 }
 
@@ -408,6 +426,9 @@ func (r *Registry) deviceShellLocked(udid string) wire.Device {
 		Paired:           "unknown",
 		BackupEncryption: "unknown",
 		WifiSync:         "unknown",
+		// ON UNTIL THE USER SAYS OTHERWISE. Absence of a stored preference is not absence of a
+		// policy: a device that appears and is silently silent is a silent fallback.
+		NotificationsEnabled: true,
 	}
 	if id, ok := r.identity[udid]; ok {
 		dev.Name = id.Name
@@ -422,6 +443,9 @@ func (r *Registry) deviceShellLocked(udid string) wire.Device {
 		if id.WifiSync != "" {
 			dev.WifiSync = id.WifiSync
 		}
+	}
+	if r.notifyPref != nil {
+		dev.NotificationsEnabled = r.notifyPref(udid)
 	}
 	if r.lastBackup != nil {
 		if lb, ok := r.lastBackup(udid); ok {
