@@ -2,8 +2,8 @@
 
 **quince needs an encrypted origin, and a phone is not `localhost`.** The session cookie is marked
 `Secure` for any non-loopback host, so a browser reaching quince over plain `http://` on a LAN
-address accepts the login, discards the cookie, and returns you to the login form. Since `qn.6f`
-quince refuses that with a `426` naming the cause instead of looping in silence (contracts §1) — but
+address accepts the login, discards the cookie, and returns you to the login form.
+quince refuses that with a `426` naming the cause instead of looping in silence — but
 the refusal is a diagnosis, not a fix. This page is the fix.
 
 There are two supported shapes, and the choice is exactly **does quince terminate TLS**.
@@ -55,7 +55,7 @@ proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
 proxy_set_header Host              $host;
 ```
 
-**`Host` IS LOAD-BEARING FOR PASSKEYS, AND SILENTLY SO** (`qn.6k`). quince derives the WebAuthn
+**`Host` IS LOAD-BEARING FOR PASSKEYS, AND SILENTLY SO.** quince derives the WebAuthn
 relying party — the domain a passkey is bound to — from the request's `Host`, deliberately rather
 than from a config key, so that it stays correct across every tier on this page without anyone
 editing YAML. Caddy's `reverse_proxy` preserves `Host` by default; **nginx does not, which is why
