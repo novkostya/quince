@@ -84,8 +84,10 @@ lets the job engine decide.
 **Backup encryption is a managed device property.** `backup_encryption` reads lockdown's
 `com.apple.mobile.backup / WillEncrypt` (refreshed with device info). Device ops expose
 enable / change-password / disable via `idevicebackup2 encryption` / `changepw`
-(contracts §1): the password reaches the subprocess by pty prompt or the `BACKUP_PASSWORD`
-env fallback — **never argv** — and the phone's own passcode-confirmation step is
+(contracts §1): the password reaches the subprocess over an interactive pty prompt —
+**never argv** (world-readable `/proc`) and **never an env var**; the `BACKUP_PASSWORD`
+env fallback exists in the CLI and **quince does not use it** — and the phone's own
+passcode-confirmation step is
 narrated in the UI. This is Apple's device-global backup password: the same one that
 later unlocks versions in the vault; quince sets it and never stores it. Product
 stance: encryption on is the default expectation (`backup.require_encryption: true`) —
@@ -714,9 +716,12 @@ screen that offers passwordless.
   encryption changes** (qn.3 — event + UDID + outcome, never the password) — appended to
   the app DB, visible in UI.
 - **Backup-encryption management** (§3): passwords for `encryption on`/`changepw` travel
-  in TLS request bodies, reach `idevicebackup2` via pty prompt or `BACKUP_PASSWORD` env
-  (same-uid exposure, short-lived process) — argv is forbidden (world-readable
-  `/proc`); never logged, never stored; audit-trailed as an event *without* the secret.
+  in TLS request bodies and reach `idevicebackup2` over an interactive pty prompt. **Argv
+  is forbidden** (world-readable `/proc`) and **so is the environment** — the
+  `BACKUP_PASSWORD` env fallback exists in the CLI and quince does not use it, so the
+  same-uid exposure it would carry is **not a residual risk this project accepts; it is
+  one quince does not have.** Never logged, never stored; audit-trailed as an event
+  *without* the secret.
 - **Backup password**: never written to disk. Unlock flow: user submits it → core sends
   it inside the framed `initialize` request on the vault's stdin (never argv/env, never
   logged — raw RPC frames are unloggable by rule) → keys exist only in the vault
