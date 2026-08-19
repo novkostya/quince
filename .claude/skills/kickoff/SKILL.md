@@ -85,10 +85,24 @@ construction and prompts every time. Both implementer sessions in the first two-
 bare `gh`, had it denied, and rediscovered the wrapper — so it is named here rather than left to be
 found.
 
-- A number → `bin/gh-coder issue view <n> --repo novkostya/quince --comments` (try the devlog repo
-  too if it isn't there; process work lives there). **Read the comments, not only the body** — a
-  correction comment can invert a requirement, and building the uncorrected version reproduces the
-  bug the issue was filed about.
+- A number → read the body AND the comments in one call (try the devlog repo too if it isn't there;
+  process work lives there):
+
+  ```sh
+  bin/gh-coder issue view <n> --repo novkostya/quince \
+    --json title,body,comments -q '.title, .body, (.comments[]|"--- \(.author.login):\n\(.body)")'
+  ```
+
+  **NOT `--comments`, WHICH IS A COMMENTS-ONLY VIEW** (quince-devlog#279). On an issue with no
+  comments it prints **nothing at all** — not even the body — and exits `0`. Measured on
+  quince-devlog#279 itself: `--comments` returned 0 bytes, the same command without it returned
+  2547. A session following the old recipe on a fresh issue saw an empty screen from a command that
+  succeeded, and the failure looks like an empty issue rather than a wrong flag.
+
+  **Read the comments, not only the body** — a correction comment can invert a requirement, and
+  building the uncorrected version reproduces the bug the issue was filed about. That is why the
+  recipe asks for both rather than dropping the flag: `issue view <n>` alone shows the body and
+  hides every correction on it.
 - `qn.N` → the rung: its row in the devlog `progress.md` dashboard, its entry in
   `roadmap.md`, and `docs/specs/qn.N/` if it exists.
 - `pr.N` → process work; the ruling behind it, then the sequence note in the devlog.
