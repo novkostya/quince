@@ -335,10 +335,23 @@ esac
 # `quince-devlog` clone to push from. The guard is ABSENT, not fail-closed, and what stands in for
 # it is the seat's restraint. Read the journal-hook arm further down for this box's actual state.
 #
-# The guarded block below is NOT re-indented, deliberately: the semantic change is three lines and
-# re-indenting ~170 would bury it in a diff nobody can review. Stated so the next reader knows it is
-# a choice rather than an oversight.
-if [ "$ROLE" != supervisor ]; then
+# EVERY ROLE RUNS THIS CHECK, INCLUDING supervisor — quince#375, Operator 2026-08-19, the last item
+# of that block. The role guard that stood here (`if [ "$ROLE" != supervisor ]`) and the
+# supervisor-only arm it selected are both gone, because the exemption they implemented no longer
+# exists: CLAUDE.md states the ruling as *every working box carries the layer — there is no exception
+# to remember*, and a check with an exception arm is a check with an exception to remember.
+#
+# IT COULD ONLY BECOME A REFUSAL ONCE THERE WAS A COMMAND. quince#1239 flipped the old arm from a
+# false `ok` to an honest `note` and said why it stopped there: the layer was ruled and UNPLACEABLE,
+# since `provision` refused `--role supervisor` with exit 2. Refusing then would have bricked a box
+# over a state no operator could fix. `provision` learns the role in THIS SAME PR, so absence is now
+# repairable, and `preflight`'s bargain — refuse what a session can repair, report what it cannot —
+# puts it on the refusing side. Shipping the two apart would leave a window where the route exists
+# and this check still says the box may start without the layer.
+#
+# So a supervisor box with no layer now gets the SAME `bad` as any other box, naming the same fix.
+# There is no supervisor-specific sentence left to drift, which is the point of removing the arm
+# rather than editing it.
 
 PRIVATE_LAYER="${QUINCE_PRIVATE_LAYER:-/root/quince-local}"
 PATTERN_FILE="$PRIVATE_LAYER/privacy-patterns.txt"
@@ -651,39 +664,6 @@ else
 	fi
 fi
 
-else
-	# THE RULING THIS LINE CITED WAS OVERTURNED THE NEXT DAY, AND THE LINE OUTLIVED IT BY WEEKS.
-	#
-	# It read: *"role supervisor: no private layer required — RULED 2026-08-01 (quince#375) … the
-	# control is the journal pre-push hook rather than the layer: without a pattern list the hook
-	# REFUSES the push, which is fail-closed."* Every clause of that is now false, and it was
-	# printed as an `ok` — the one severity a reader does not stop on.
-	#
-	# RULED 2026-08-02 (Operator, quince#375): the supervisor box gets the FULL private layer, which
-	# OVERTURNS 2026-08-01. CLAUDE.md states it without an exception to remember: **every working
-	# box carries the layer.**
-	#
-	# THE OVERTURNED REASONING FAILED ON ONE WORD, and it is worth keeping because somebody will
-	# re-propose it. *"The hook alone closes the exposure"* is true of LEAKAGE and false of
-	# FUNCTION: `privacy-check` exits **2 — DID NOT RUN** without the pattern list, so the hook
-	# refuses every push FOREVER. It does not close the exposure so much as close the branch. A seat
-	# holding `contents: write` on five repositories, whose two artefact types include the journal,
-	# could then never write one. So the choice was never *layer vs. hook* — it was *layer vs. no
-	# journal from that seat*, and framed that way the earlier answer does not survive.
-	#
-	# AND `fail-closed` WAS FALSE ABOUT THIS BOX IN PARTICULAR. Measured on the supervisor box
-	# 2026-08-09: no git template, no `pre-push` hook, `quince.privacy-check` unset, and no
-	# `quince-devlog` clone to push from. **The guard is ABSENT rather than fail-closed** — nothing
-	# refuses, because nothing is installed. What has stood in for it is the seat's restraint.
-	#
-	# A `note`, NOT `bad`, AND THAT IS A LIMIT RATHER THAN A JUDGEMENT. The layer is ruled and
-	# UNBUILT here: `provision:27` accepts `implementer|arch` and refuses this role with exit 2, so
-	# there is no command that would place it. Refusing to start would brick the box over a state no
-	# operator can currently fix, which is the opposite of `preflight`'s bargain — refuse what a
-	# session can repair, report what it cannot. It becomes `bad` in the same change that gives
-	# `provision` the role, and quince#375 is where that ruling sits.
-	note "role supervisor: the private layer is REQUIRED here and is not asserted — RULED 2026-08-02 (quince#375), overturning 2026-08-01. Every working box carries it. This box cannot yet be given it: deploy/runner/provision accepts only implementer|arch, so the layer, the git template, the journal pre-push hook and quince.privacy-check all have no route here. Until that lands, nothing on this box refuses an unswept journal push — the guard is ABSENT, not fail-closed, and what stands in for it is this seat's restraint."
-fi
 
 # --- the journal pre-push hook (quince#308) ---------------------------------------------------
 # REPORTED, NOT ENFORCED, and the distinction is a ruling I did not make. quince#308 step 4 asks

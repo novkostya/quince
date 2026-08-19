@@ -24,9 +24,22 @@ while [ $# -gt 0 ]; do
 	*) printf 'provision: unknown argument %s\n' "$1" >&2; exit 2 ;;
 	esac
 done
-case "$ROLE" in implementer|arch) ;; *) printf 'provision: unknown role %s\n' "$ROLE" >&2; exit 2 ;; esac
-SERVICE_NAME="quince-runner"
-[ "$ROLE" = arch ] && SERVICE_NAME="quince-arch"
+# `supervisor` JOINS THE LIST — Operator ruling 2026-08-19, quince#375, the last outstanding item of
+# that block. `preflight` has accepted this role since quince#380 and this script refused it with
+# exit 2, so canon asserted a state — *every working box carries the full private layer* — that no
+# command could produce. The layer, the git template, `bin/pre-push-journal` and
+# `quince.privacy-check` all arrive through here, and for that box they arrived nowhere.
+case "$ROLE" in
+implementer | arch | supervisor) ;;
+*) printf 'provision: unknown role %s\n' "$ROLE" >&2; exit 2 ;;
+esac
+# The name is already in the wild rather than invented here: CLAUDE.md quotes that box's status line
+# as *"quince-supervisor: supervisor up"*.
+case "$ROLE" in
+arch) SERVICE_NAME="quince-arch" ;;
+supervisor) SERVICE_NAME="quince-supervisor" ;;
+*) SERVICE_NAME="quince-runner" ;;
+esac
 
 # --- THE ROLE MUST MATCH THE BOX, AND THIS REFUSES BEFORE ANYTHING IS TOUCHED (quince#121) -----
 # Placed HERE, above the package install and the launchpad update, because a refusal that arrives
@@ -90,13 +103,28 @@ _arch_token="${QUINCE_ARCH_TOKEN_FILE:-/root/.config/quince/quince-arch.token}"
 _coder_key="${QUINCE_CODER_KEY_FILE:-/root/.config/quince/quince-coder.pem}"
 _review_key="${QUINCE_REVIEW_KEY_FILE:-/root/.config/quince/quince-review.pem}"
 _analyst_key="${QUINCE_ANALYST_KEY_FILE:-/root/.config/quince/quince-analyst.pem}"
-if [ "$ROLE" = arch ]; then
-	_other_role=implementer
-	_own_creds="$_arch_token $_review_key" _other_creds="$_bot_token $_coder_key"
-else
-	_other_role=arch
-	_own_creds="$_bot_token $_coder_key" _other_creds="$_arch_token $_review_key"
-fi
+# THREE-WAY SINCE quince#375's ROLE LANDED, and this is the whole security property of the arm.
+# `_analyst_key` was already read above and only the branching never grew a third case — a supervisor
+# box holding `quince-review.pem` beside `quince-analyst.pem` could author as one and approve as the
+# other, which is exactly what quince#387 (PR 1b) refuses for the wrappers. Every seat owns one set
+# and must hold no part of either other set.
+case "$ROLE" in
+arch)
+	_other_role="implementer or supervisor"
+	_own_creds="$_arch_token $_review_key"
+	_other_creds="$_bot_token $_coder_key $_analyst_key"
+	;;
+supervisor)
+	_other_role="implementer or arch"
+	_own_creds="$_analyst_key"
+	_other_creds="$_bot_token $_coder_key $_arch_token $_review_key"
+	;;
+*)
+	_other_role="arch or supervisor"
+	_own_creds="$_bot_token $_coder_key"
+	_other_creds="$_arch_token $_review_key $_analyst_key"
+	;;
+esac
 # Names only, never contents — a guard that echoed a credential to report a credential problem would
 # be its own incident. `preflight`'s header makes the same point about the same class of check.
 _present() {
@@ -132,17 +160,28 @@ _have_other=$(_present "$_other_creds")
 # WHEN `--role supervisor` EXISTS, this becomes conditional rather than unconditional — the analyst key
 # is then that role's OWN credential and the refusal must fire only for the other two. Written as one
 # guard with one condition so that change is a line rather than an untangling.
+#
+# NOW CONDITIONAL, EXACTLY AS THE PARAGRAPH ABOVE PREDICTED (quince#375, Operator 2026-08-19). The
+# role exists, so the analyst key is the SUPERVISOR's own credential and this guard must fire only
+# for the other two roles — where it is still the both-seats refusal it always was. The three-way
+# `case` above carries the supervisor's side: on that role the analyst key is `_own_creds` and every
+# other seat's credential is `_other_creds`, so a box holding `quince-review.pem` beside it is
+# refused there rather than here.
+#
+# The two messages below are now ACTIONABLE, which they were not when written: `re-run with the right
+# --role` names an argument that exists.
 _have_analyst=$(_present "$_analyst_key")
-if [ -n "$_have_analyst" ]; then
+if [ -n "$_have_analyst" ] && [ "$ROLE" != supervisor ]; then
 	printf 'provision: this box holds the ANALYST KEY, which is the SUPERVISOR seat: %s\n' "$_have_analyst" >&2
 	printf 'provision: refusing BEFORE touching anything — and NOT because holding it is wrong. It is\n' >&2
-	printf '    that seat OWN identity, ruled on quince#375. What is wrong is that this script cannot\n' >&2
-	printf '    provision the seat: it accepts --role implementer and --role arch, and there is no\n' >&2
-	printf '    --role supervisor at all.\n' >&2
-	printf '    So neither remedy this guard usually offers applies here. Do NOT re-run with another\n' >&2
-	printf '    --role: that would configure a %s box on the supervisor machine. Do NOT remove the\n' "$ROLE" >&2
-	printf '    key: that would undo the ceremony quince#375 performed.\n' >&2
-	printf '    The supervisor box is provisioned BY HAND today. Giving it a role here is quince#375.\n' >&2
+	printf '    that seat OWN identity, ruled on quince#375. What is wrong is that you asked for\n' >&2
+	printf '    --role %s on a box that holds it: two seats, one machine, which is the state this\n' "$ROLE" >&2
+	printf '    guard exists to catch (quince#234).\n' >&2
+	printf '    THE REMEDY IS NOW REAL, and it was not until quince#375 closed: re-run this script as\n' >&2
+	printf '    sh deploy/runner/provision --role supervisor\n' >&2
+	printf '    if this IS the supervisor box. Do NOT remove the analyst key to satisfy the check —\n' >&2
+	printf '    that would undo the ceremony quince#375 performed. If this is NOT that box, the key\n' >&2
+	printf '    does not belong here and removing it is the fix.\n' >&2
 	exit 2
 fi
 
@@ -161,10 +200,12 @@ elif [ -n "$_have_other" ]; then
 	printf '    %s credential: %s\n' "$_other_role" "$_have_other" >&2
 	printf 'provision: refusing rather than provisioning this box as %s, and refusing BEFORE touching\n' "$ROLE" >&2
 	printf '    anything. That is near-certainly a missing or wrong --role: it is an ARGUMENT\n' >&2
-	printf '    (--role %s), and QUINCE_RUNNER_ROLE in the environment is NOT read as input.\n' "$_other_role" >&2
-	printf '    Re-run as: %s --role %s\n' "$0" "$_other_role" >&2
-	printf '    Continuing would install a %s-role service on a %s box (quince#121).\n' \
-		"$ROLE" "$_other_role" >&2
+	printf '    and QUINCE_RUNNER_ROLE in the environment is NOT read as input.\n' >&2
+	printf '    Re-run with the --role that matches this box — one of: %s.\n' "$_other_role" >&2
+	printf '    (Phrased as a choice rather than a command since quince#375 gave this script a THIRD\n' >&2
+	printf '    role: _other_role is now a disjunction, so pasting it after --role would not run.)\n' >&2
+	printf '    Continuing would install a %s-role service on a box that is not one (quince#121).\n' \
+		"$ROLE" >&2
 	exit 2
 fi
 

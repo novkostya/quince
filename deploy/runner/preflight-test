@@ -443,28 +443,24 @@ expect "supervisor with GH_TOKEN in the environment is refused" 1 "in the enviro
 expect "supervisor with NO credential at all still starts, and says what is lost" 0 "cannot act under its own name" -- \
 	QUINCE_RUNNER_ROLE=supervisor
 
-# THE LINE MUST NAME THE RULING IN FORCE, AND THIS CASE PINNED AN OVERTURNED ONE FOR WEEKS.
+# THE SUPERVISOR ARM IS GONE, AND THIS CASE NOW ASSERTS ITS ABSENCE — quince#375, Operator
+# 2026-08-19. There is no supervisor-specific private-layer sentence left to pin.
 #
-# It asserted the literal `RULED 2026-08-01` — the exemption ruling — which the Operator OVERTURNED
-# on 2026-08-02 (quince#375): the supervisor box gets the FULL private layer, and CLAUDE.md states
-# it with no exception to remember. So this case was not merely stale; it was holding the arm AT the
-# superseded claim, and would have failed any correction of it. A test that pins the wrong sentence
-# is worse than no test, because it makes fixing the sentence look like breaking the suite.
+# WHAT THIS CASE HAS PINNED, IN ORDER, is the whole history of that arm and is why it is worth
+# keeping rather than deleting: first the literal `unruled gap`; then `RULED 2026-08-01`, the
+# exemption; then — for weeks after the Operator OVERTURNED it on 2026-08-02 — still `RULED
+# 2026-08-01`, holding the arm AT the superseded claim and failing any correction of it (quince#1239);
+# then `RULED 2026-08-02` with a `note`, because the layer was ruled and unplaceable.
 #
-# That is this file's own defect class two turns on. The comment here previously congratulated
-# itself for moving the string when the ruling landed — *"pinning 'unruled gap' after a ruling would
-# hold the arm at the wrong claim"* — and then did not move it when the ruling was reversed.
+# Now `provision` has the role, so the exemption has no arm at all: a supervisor box runs the SAME
+# layer check as every other role and gets the SAME refusal. What is asserted is therefore the
+# BEHAVIOUR rather than an announcement — the box does not start, and the message names the command
+# that fixes it.
 #
-# WHAT IS PINNED IS STILL THE ANNOUNCEMENT, not the behaviour, and that is the point: an exemption —
-# or an obligation — a reader cannot distinguish from an unexamined default is worth no more than
-# the default. The line has to say it was DECIDED, and by which ruling.
-#
-# EXIT 0 IS PART OF THE ASSERTION. The layer is REQUIRED here and CANNOT BE PLACED: `provision`
-# refuses this role, so refusing to start would brick the box over a state no operator can fix. The
-# arm reports and does not refuse, and it becomes `bad` in the same change that teaches `provision`
-# the role — the last outstanding item of quince#375.
-expect "the private-layer arm names the ruling IN FORCE, not the one it overturned" 0 "RULED 2026-08-02" -- \
-	QUINCE_RUNNER_ROLE=supervisor
+# `provision` IS IN THE EXPECTATION ON PURPOSE. A refusal a session cannot act on is what the `note`
+# existed to avoid; asserting the remedy is named is what stops this regressing to a dead end.
+expect "supervisor with NO private layer is REFUSED, like every other role" 1 "deploy/runner/provision" -- \
+	QUINCE_RUNNER_ROLE=supervisor "QUINCE_PRIVATE_LAYER=$TMP/no-such-layer"
 
 # AND IT MUST POINT AT WHAT ACTUALLY CARRIES THE CONTROL. The ruling's own reasoning is that requiring
 # the layer would make the gate RUNNABLE without making it RUN — only `bin/pre-push-journal` invokes
