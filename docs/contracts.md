@@ -3202,10 +3202,26 @@ storage:                    # REQUIRED, qn.6c. `storage:` IS THE LIST (quince#47
       keep_daily: 30
       keep_weekly: 12
 muxers:                     # WHERE QUINCE FINDS A MUXER. Absent entirely on most installs: the
-                            # default is ONE external muxer at /var/run/usbmuxd, which is
-                            # libusbmuxd's OWN default — so a host already running usbmuxd, or a
-                            # sidecar that binds its socket there, needs no config.yml at all.
-                            # That is the point of the list: a compose file should be enough.
+                            # default is TWO external muxers, tried together (quince#1256) —
+                            #
+                            #   /var/run/usbmuxd       a muxer you ALREADY RUN. libusbmuxd's own
+                            #                          default, so it is also what every other
+                            #                          tool on that box (idevice_id, ideviceinfo)
+                            #                          looks at.
+                            #   /var/run/mux/usbmuxd   the socket the SHIPPED compose stack
+                            #                          creates. A private path so the stack can
+                            #                          bind it narrowly: the standard path would
+                            #                          mean mounting a container's whole /run,
+                            #                          since /var/run is a symlink to it.
+                            #
+                            # Whichever answers is used. The one that does not is reported
+                            # `absent` in GET /api/health — a FACT, not a fault: nobody asked for
+                            # it, so its silence is discovery coming up empty. That is what makes
+                            # a multi-entry default possible without painting every healthy
+                            # install red. A muxer you DECLARE and that does not answer is still
+                            # `unreachable`, and still loud.
+                            #
+                            # So a compose file is enough, which is the point of the list.
   - address: /run/mux/usbmuxd   # THREE FORMS (internal/muxaddr):
                             #   /run/mux/usbmuxd        a unix socket path
                             #   UNIX:/run/mux/usbmuxd   the same, libusbmuxd's own spelling
@@ -3222,6 +3238,13 @@ muxers:                     # WHERE QUINCE FINDS A MUXER. Absent entirely on mos
                             # ONE MUXER SERVING BOTH TRANSPORTS IS ONE ENTRY. netmuxd does exactly
                             # that over a single socket, and the retired two-key shape made you
                             # write its address twice and then collapsed the duplicate internally.
+                            #
+                            # WRITING THIS KEY REPLACES THE DEFAULTS — it does not extend them,
+                            # and that is the sharp edge of a multi-entry default because it is
+                            # SILENT. An operator adding a Wi-Fi muxer to the stock setup must
+                            # write the one they already had as well, or quince stops looking for
+                            # it and their devices quietly stop appearing. Named here rather than
+                            # discovered (Operator decision point D, quince#1256).
                             #
                             # `muxers: []` MEANS NONE, and is different from omitting the key.
                             # quince then sees no device at all and says so at startup — the

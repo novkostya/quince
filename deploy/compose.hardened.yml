@@ -51,12 +51,18 @@ services:
     volumes:
       - /dev/bus/usb:/dev/bus/usb
 
-      # THE SOCKET, AT QUINCE'S DEFAULT PATH — which is why this file needs no config.yml.
-      # A named volume rather than a host path, so both containers agree on it without either
-      # owning a directory on your disk. It is mounted at `/run` and the socket is
-      # `/var/run/usbmuxd`, because `/var/run` is a symlink to `/run` in both images — so the
-      # socket lands exactly where libusbmuxd, and therefore quince, looks by default.
-      - mux:/run
+      # THE SOCKET DIRECTORY — this container's whole `/run`, on the host's tmpfs.
+      #
+      # A HOST PATH RATHER THAN A NAMED VOLUME, and it is named for what it holds rather than for
+      # who reads it (Operator, 2026-08-19). `/run` is tmpfs on every Linux host — measured on
+      # three — so the socket is genuinely volatile: gone at reboot, no stale volume to remember
+      # to remove, and inspectable from the host with `ls /run/netmuxd` or `ss -lx`.
+      #
+      # ON DOCKER DESKTOP OR apple-container THE "HOST" IS A VM, so this directory lands inside
+      # that VM and is not visible from your own machine. It still works; if you would rather have
+      # a portable primitive there, a named volume is the swap — but see quince's mount below for
+      # why the path matters more than the backing store.
+      - /run/netmuxd:/run
 
       # Pairing records, shared with quince. quince PAIRS, so it holds these read-write; the muxer
       # only needs to read them — it matches a Wi-Fi device's advertisement against the record for
@@ -110,7 +116,23 @@ services:
       - ./quince/data:/data
       - ./quince/cache:/cache
       - ./quince/backups:/backups # point at a real share; backend probed at runtime
-      - mux:/run
+      # THE MUXER'S SOCKET DIRECTORY, MOUNTED NARROWLY AND READ-ONLY.
+      #
+      # `/run/mux`, NOT `/run` — this is the whole reason the sidecar socket sits at a private
+      # path instead of libusbmuxd's default. Landing it at `/var/run/usbmuxd` would mean mounting
+      # the container's ENTIRE runtime directory, because `/var/run` is a symlink to `/run`; there
+      # is no narrower mount point available for that path (`-v …:/var/run` resolves the symlink
+      # and lands at `/run` identically — measured). A subdirectory leaves quince's own `/run`
+      # untouched and writable, which is what makes `:ro` here safe rather than a gamble.
+      #
+      # `:ro` because quince CONNECTS to the socket and writes nothing here. Measured over a
+      # read-only mount: `idevice_id -l` and `-n` both exit 0, `touch` is refused.
+      #
+      # QUINCE FINDS IT WITH NO CONFIG because `/var/run/mux/usbmuxd` is one of the two DEFAULT
+      # muxer addresses (quince#1256). The other is `/var/run/usbmuxd`, for a muxer you already
+      # run — whichever answers is used, and the one that does not is reported `absent`, which is
+      # a fact rather than a fault.
+      - /run/netmuxd:/run/mux:ro
       # READ-WRITE here: quince is what pairs, so it writes the records the muxer reads. If
       # something else on this box owns them, mount this `:ro` — quince detects that it cannot
       # write, disables Pair with the reason, and goes on reading existing pairings, so a device
@@ -121,19 +143,24 @@ services:
       # certificate and set `tls:` in config.yml. See deploy/tls.md.
       # - ./quince/certs:/certs:ro
 
-volumes:
-  mux:
 
 # ── The config this expects ────────────────────────────────────────────────────────────────────
 # NOTHING. THIS FILE WORKS ON DEFAULTS, and that is a requirement rather than a happy accident
 # (Operator, 2026-08-19): an example compose you have to hand-edit config.yml before launching is
 # not an example, it is a first step.
 #
-# The muxer socket is bound at /var/run/usbmuxd, which is libusbmuxd's own default and therefore
-# quince's, so `./quince/data/config.yml` needs no muxer key at all. Storage is the only thing you
-# must declare, and the UI asks for it on first run.
+# quince looks in TWO places when you have not said otherwise (quince#1256):
 #
-# If you DO move the socket, name it once — one entry, whether it serves one transport or both:
+#   /var/run/usbmuxd        a muxer you already run — libusbmuxd's own default path
+#   /var/run/mux/usbmuxd    the socket this stack creates, bound narrowly from /run/netmuxd
+#
+# Whichever answers is used. The other is reported `absent` in /api/health — a FACT, not a fault:
+# nobody asked for it, so its silence is discovery coming up empty. A muxer you DECLARE and that
+# does not answer is still `unreachable`, and still loud.
+#
+# So storage is the only thing you must declare, and the UI asks for it on first run.
+#
+# IF YOU MOVE THE SOCKET, name it once — one entry, whether it serves one transport or both:
 #
 #   muxers:
 #     - address: /run/mux/usbmuxd
@@ -142,10 +169,14 @@ volumes:
 # to `external` — somebody else runs the daemon and quince only dials it; `managed` is refused at
 # startup, because v0.1 ships no daemon to manage.
 #
+# WRITING `muxers:` REPLACES BOTH DEFAULTS — it does not extend them. If you add a Wi-Fi muxer,
+# write the one you already had as well, or quince will stop looking for it. That is the sharp
+# edge of a multi-entry default and it is silent, so it is stated here and in contracts.md.
+#
 # THIS USED TO BE TWO KEYS POINTING AT ONE SOCKET (`devices.usbmuxd_socket` and
 # `devices.netmuxd_addr`), with a paragraph here explaining that quince opened one connection
-# because they named the same address. One entry says it once, and pointing the socket at the
-# default says it none. A `devices:` section is now REFUSED at startup, by name, with the
+# because they named the same address. One entry says it once, and a default that covers both
+# shapes says it none. A `devices:` section is now REFUSED at startup, by name, with the
 # replacement printed — it is not ignored.
 #
 # ── If you already run a muxer ─────────────────────────────────────────────────────────────────
