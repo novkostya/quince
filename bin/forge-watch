@@ -2916,14 +2916,25 @@ require_gh() {
 # looks like everywhere else. So the loop stops being something a session assembles. The correct
 # shape is the only shape, and hand-rolling is no longer the path of least resistance.
 #
-# What wakes, and what does not:
-#   - any event, including `tick-overdue` and `queue-empty` as a TRANSITION, ends the loop;
-#   - the baseline does not. `first-observation` is the observation that establishes the baseline,
-#     not a change from it, and the `queue-empty` printed beside it describes the same baseline.
-#     Waking on those would make arming a watch a busy loop: arm, exit, arm, exit;
-#   - `fetch-failed` does not, until --fail-after in a row. A single failed fetch is a missed tick,
-#     and this tool already has an idiom for those. A run of them is a watch that is not watching,
-#     and the exit says so. Nothing is swallowed either way: every tick's output is printed.
+# What wakes, and what does not: `wake_worthy` IS THE CONTRACT, and each of its arms carries its own
+# reasoning beside it. Deliberately a pointer rather than a list (quince#1260).
+#
+# THIS BLOCK USED TO ENUMERATE AND WENT STALE IN THE DIRECTION THAT MISLEADS. It opened with *"any
+# event … ends the loop"* and named two exceptions; `wake_worthy` drops on more than a dozen. So the
+# first bullet was the opposite of true for most of them, and a reader consulting this block to learn
+# the wake contract got a confident wrong answer 500 lines from the code that decides it.
+#
+# THE DRIFT WAS STRUCTURAL RATHER THAN CARELESS, which is why the fix is a shape and not a rewrite:
+# the usage header at the top of this file describes the same rule and IS kept current — quince#1231
+# moved it from "Two kinds of line do not wake" to "Three kinds" — and did not touch this one, in the
+# same change. Two descriptions of one rule, and only the one nearest the edit gets updated.
+#
+# SO DO NOT PUT THE LIST BACK, however tempting it is to be helpful here. A count is a second
+# description of the same rule and earns its own drift; that is why no number appears above.
+#
+# NOTHING IS SWALLOWED, and this is the one property worth repeating rather than pointing at, because
+# a reader who does not know it will not think to check: the filters decide only whether the LOOP
+# ENDS. Every tick's output is printed in full, dropped lines included.
 #
 # `--max-wait` exists because termination is now the ONLY thing that wakes a session, and the
 # fallback that was supposed to cover the gaps between watches — `ScheduleWakeup` — has three
