@@ -722,9 +722,30 @@ pr-title-refs-test: ## The title check's failure paths, incl. the ruled DID-NOT-
 # anything anyone later wires this into — which was the review's actual argument for deleting
 # it, and it is stronger than either of us realised. `gates-sh` greps for a reintroduced
 # `$(TITLE)` so the rule has teeth rather than living in this comment.
+#
+# THE `PR=` ROUTE MUST GO THROUGH A WRAPPER, AND WHICH ONE IS RESOLVED HERE (quince-devlog#270).
+# It called `bin/pr-title-refs` with no `--gh`, so the tool fell back to bare `gh` — which is
+# unauthenticated on an implementer box, where `bin/gh-coder` is the only credentialled route. The
+# whole route therefore reported `DID NOT RUN` (exit 2) on the box that opens the pull requests:
+#
+#   pr-title-refs: DID NOT RUN — could not read the title of novkostya/quince#1240:
+#     To get started with GitHub CLI, please run:  gh auth login
+#
+# Reproduced on this box before the fix, against a live PR opened from this clone.
+#
+# `GH_CLI` FIRST, THEN THE WRAPPER, THEN BARE `gh`. The caller's override wins so CI and the suites
+# can point this anywhere; otherwise the seat's own wrapper is preferred if it is present; otherwise
+# the old behaviour, unchanged, for any box where neither exists. `bin/pr-title-refs` already
+# accepts `--gh` and already defaults to `$GH_CLI` — nothing in the tool changes, which is why this
+# is a Makefile line rather than a tool change.
+#
+# `TITLE_ENV=` NEEDS NONE OF THIS and is why the gate was never lost: it makes no forge call at all,
+# so it worked on every box throughout. CI uses that route. This fixes the route that reads the
+# title THE FORGE ACTUALLY HOLDS, which is the one worth having when a title has just been edited.
+PR_TITLE_GH := $(if $(GH_CLI),$(GH_CLI),$(if $(wildcard bin/gh-coder),$(CURDIR)/bin/gh-coder,gh))
 .PHONY: pr-title-check
 pr-title-check: ## Bare #N in a PR title must resolve there (REPO=owner/name + TITLE_ENV=<NAME> or PR=<n>); 0 clean · 1 match · 2 DID NOT RUN
-	@bin/pr-title-refs --repo "$(REPO)" $(if $(PR),--pr "$(PR)",$(if $(TITLE_ENV),--title-env "$(TITLE_ENV)",))
+	@bin/pr-title-refs --repo "$(REPO)" --gh "$(PR_TITLE_GH)" $(if $(PR),--pr "$(PR)",$(if $(TITLE_ENV),--title-env "$(TITLE_ENV)",))
 
 # The runner spec's G1 — "`preflight` against a table of environments" — likewise proven by hand and
 # pasted into a PR until now (quince#32). preflight's refusals ARE its product: it exists to stop a
