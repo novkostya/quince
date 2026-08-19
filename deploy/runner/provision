@@ -395,11 +395,23 @@ CLAUDE_APK_REPO="https://downloads.claude.ai/claude-code/apk/stable"
 # these are SESSION tooling on a provisioned box, not product dependencies. They ship in no image
 # and `deploy/Dockerfile` is untouched.
 #
-# WHAT IT COSTS: ~55 MB of packages across both, with dependencies, measured with `apk fetch -R` on
-# Alpine 3.24.1 (imagemagick 7.1.2.27, ffmpeg 8.1.2). Stated because this box ran to 99% of a 32 GB
-# volume on 2026-08-18 and the clone reaper (quince#823) is what has to keep it clear — this is not
-# what filled it, and it is not free either. ImageMagick 7 ships `magick` AND the v6-compatible
-# `convert`, verified by listing the package rather than assuming which survived the major version.
+# WHAT IT COSTS ON DISK: ~101 MB INSTALLED, across 131 packages. Measured in a clean `alpine:3.24`
+# container, `du -sm /` before and after — 7 MB to 108 MB. imagemagick and ffmpeg account for almost
+# none of it themselves (3700 KiB and 624 KiB by `apk info -s`); the rest is transitive codec and
+# delegate libraries.
+#
+# ~55 MB IS THE DOWNLOAD, NOT THE COST, and this comment said the latter until quince#1245's review.
+# `apk fetch -R` retrieves the COMPRESSED .apk files, so summing them answers a different question
+# from the one this paragraph asks — and it understated the disk figure by about a factor of two, in
+# the sentence that invokes a disk incident. A stated cost is more useful than no stated cost and
+# worse than a wrong one.
+#
+# Stated at all because this box ran to 99% of a 32 GB volume on 2026-08-18, and because the next
+# session weighing whether to add session tooling reads this number. The clone reaper (quince#823)
+# is what has to keep that volume clear; this is not what filled it, and it is not free either.
+#
+# ImageMagick 7 ships `magick` AND the v6-compatible `convert`, verified by listing the package
+# rather than assuming which name survived the major version.
 say "installing base packages"
 apk add --no-cache git make openssh-client curl bash ripgrep libgcc libstdc++ jq \
 	imagemagick ffmpeg >/dev/null
