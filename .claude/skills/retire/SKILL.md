@@ -76,6 +76,7 @@ Nothing addressed to "the next architect". For each thing you hold:
 | a ruling you made | the **issue it rules**, in citable form — the URL and the self-declared role, never the login (quince#47) |
 | history worth keeping | the **devlog journal**, date-anchored, citing PR/issue numbers |
 | a branch built and unopened | a comment on the **issue it serves**, naming the branch — this is the item successors most often lose |
+| an issue your merged work FIXED | **that issue, closed**, with the merge quoted — `bin/stale-refs-report` is how you find it (below) |
 
 **Post through your seat's wrapper — `bin/gh-coder` on the runner, `bin/gh-review` on the architect
 box.** It is the **same** wrapper §1 reads with, which is new: this paragraph used to insist the two
@@ -86,6 +87,42 @@ wrapper, so there is one credential and nothing to get wrong here.
 **Owed work is written, not bequeathed.** If the flush reveals a DoD tail — a journal entry, a
 click-list — write it and open it for review. An entry nobody wrote is debt handed to a successor;
 an entry filed and awaiting review is a record on the forge, which is this whole rule.
+
+
+**Run the stale-refs sweep before you decide you are finished** — it is the one item on that table
+you cannot find by remembering, because the thing to notice is an issue you did **not** think about:
+
+```sh
+make stale-refs-report                      # this repo; REPO= for the devlog
+```
+
+It lists issues that are **open**, referenced by a **merged** PR that used a non-closing reference,
+with **no comment since that merge**. Exit `0` means it looked, whatever it found; **`2` is NO
+VERDICT and is never clean** (a partial sweep says so and withholds the verdict rather than
+reporting nothing to review).
+
+**`Refs` is correct and is exactly what goes stale.** A PR writes it because the author is not sure
+the fix is total, or because the PR is one of N and no single one may honestly claim the issue —
+and then **the last of those N has no way to know it was the last.** Nothing revisits it afterwards,
+so the issue reads as live work and gets re-taken. Measured: quince#529 sat fixed and open for five
+days, quince#849 for five, quince#1069 for two.
+
+**Two prescribed actions, and only these two.** For each candidate, either **close it**, quoting the
+merge that fixed it — or **comment saying why it stays open**, which is a legitimate state (a
+sentinel) and also removes it from every future sweep. What you must not do is leave it untouched,
+because the next session cannot tell your silence from nobody having looked.
+
+**It is a REPORT, not a gate: it cannot know intent, so it must not fail anything and it will not.**
+It has a known false-positive shape — a PR body that mentions an issue in prose or a table, rather
+than citing it as a trailer, is read as a reference (quince#1002). Dismiss those by reading; do
+**not** comment on an issue purely to quiet the tool, which would be the tracker's noise made worse
+by the thing built to reduce it.
+
+**THIS STEP EXISTS BECAUSE THE TOOL WAS BUILT AND INVOKED BY NOTHING.** `bin/stale-refs-report` and
+its make target have existed since quince#1234, and no skill step, hook or service ever ran it — so
+it caught things only when a session happened to be doing a deliberate sweep. That is quince#823's
+finding one subsystem over: *a reaper nobody invokes is a reaper that does not exist*, and §7 below
+is the same move for scratch clones (quince#1247).
 
 ## 3. Declare the ephemeral state
 
