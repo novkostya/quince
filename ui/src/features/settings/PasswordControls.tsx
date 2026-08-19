@@ -109,6 +109,35 @@ function credentialState(data: PasskeyList | undefined, hasPassword: boolean): C
   return rows.some((p) => worksHere(rpID, p.rp_id)) ? "passwordless" : "elsewhere-only";
 }
 
+
+// CAN A PASSKEY CONFIRM A REMOVAL *HERE* — the condition row 4 renders on (quince#1077, Operator
+// 2026-08-19: the remove offer appears "only when ≥1 passkey").
+//
+// READ AS "≥1 PASSKEY THAT WORKS AT THIS ADDRESS", NOT "≥1 PASSKEY", and that is a reading rather
+// than a quotation. Rule 2 excludes the password from authorising its own removal, so the only
+// factor left is a passkey — and `auth.Accepts` resolves it through `allowedForRemoval`, which is
+// bound to the rpId the request arrived on. A credential registered elsewhere cannot assert here,
+// so a bare count would put the offer back in front of exactly the user it cannot serve: the one
+// whose passkeys are all bound to another address.
+//
+// That is this issue's own defect — a control offered where nothing can satisfy it — so the
+// stricter test is the one that honours the ruling's purpose. Hiding is also the conservative
+// direction here, which is what the ruling chose for this row over saying the precondition.
+//
+// `credentialState` cannot answer it: it returns `has-password` the moment a password exists and
+// never looks at the passkeys, which is correct for the four-state matrix and blind for this
+// question.
+function canRemoveHere(data: PasskeyList | undefined): boolean {
+  const rows = Array.isArray(data?.passkeys) ? data.passkeys : [];
+  if (rows.length === 0) return false;
+  const rpID = rpIDOf(data);
+  // NO rpID IS NOT A REASON TO HIDE. The server has not told us the address it would bind to — an
+  // IP-only install is the case — so this cannot prove the offer would fail. Showing it leaves the
+  // server's own refusal as the answer, which is a worse screen than hiding a control that works.
+  if (!rpID) return true;
+  return rows.some((p) => worksHere(rpID, p.rp_id));
+}
+
 // The rpIds the credentials DO belong to, so the warning can name them. Same reasoning as the
 // server's `last_credential` message: "your passkeys do not work here" at a box that visibly lists
 // some reads as quince being broken, where naming the address it wants is an instruction.
@@ -474,7 +503,23 @@ export function PasswordControls() {
           IT SAYS NOTHING IN PLACE OF ITSELF, on purpose: the Passkeys card sits directly above this
           one on Settings → Auth and carries the single explanation. A second copy here would be the
           same sentence twice on one screen. */}
-      {hasPassword && webauthnAvailable() ? (
+      {/* AND NOT WITHOUT A PASSKEY THAT CAN CONFIRM IT — quince#1077, Operator 2026-08-19. This was
+          the issue's own report: pressing "Yes, remove my password" on an install with no passkeys
+          answered *"Confirm it is you before changing how you sign in"*, and nothing on that screen
+          could confirm anything. `auth.Accepts` excludes the password for `OpRemovePassword` (rule
+          2), so with no usable passkey the wire body carries `accepts: []` beside a request the
+          reader cannot act on.
+          THE RULING CHOSE REMOVAL OVER EXPLANATION, and superseded its own earlier answer to say so:
+          *"a control that cannot be used is not offered at all"*. Saying the precondition after the
+          click is the wrong moment when it is knowable at render — and this component already holds
+          the passkey list, so it needs no `accepts`, no wire change and no server change.
+          IT DOES NOT CONTRADICT THE `ReauthChallenge` NO-GATING CARVE-OUT. That one forbids hiding
+          the passkey BUTTON on a refusal, which would leave a dialog asking you to confirm with
+          nothing to confirm by — a dead end created by hiding. This is an unsolicited OFFER, and the
+          remedy (Add a passkey) is on the same page above it, so removing it leaves nothing
+          dangling. Gating is wrong when it hides the only way forward; right when it withdraws an
+          option that cannot be taken. */}
+      {hasPassword && webauthnAvailable() && canRemoveHere(list.data) ? (
       <section>
         <SectionHeading>Sign in with a passkey only</SectionHeading>
         <p className="mt-1 max-w-xl text-sm text-muted">

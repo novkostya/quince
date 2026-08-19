@@ -92,14 +92,14 @@ describe("changing the password", () => {
 // passwordless, not only in docs". The sentence that matters most is the third — a user can work
 // out that losing the phone is bad, but not that a box they cannot get a shell on is unrecoverable.
 describe("what passwordless costs is on the screen", () => {
-  it("names the recovery command, what it clears, and that it needs a shell", () => {
+  it("names the recovery command, what it clears, and that it needs a shell", async () => {
     renderControls();
 
     // `getAllBy`, BECAUSE THE COMMAND IS NOW NAMED TWICE — quince#902. It appears in the bullet that
     // introduces it and again in the one describing what it clears, which used to say "that command"
     // and is now two bullets away from its antecedent. A `getBy` here fails on "multiple elements",
     // which is a real consequence of that edit rather than a test to loosen away.
-    expect(screen.getAllByText(/quince auth reset/)).toHaveLength(2);
+    expect(await screen.findAllByText(/quince auth reset/)).toHaveLength(2);
     expect(screen.getByText(/every passkey/i)).toBeInTheDocument();
     expect(screen.getByText(/console or SSH access/i)).toBeInTheDocument();
     expect(screen.getByText(/no way back in at all/i)).toBeInTheDocument();
@@ -107,10 +107,10 @@ describe("what passwordless costs is on the screen", () => {
 
   // BEFORE the confirmation rather than inside it. A consequence read only after committing to a
   // destructive action is read too late.
-  it("shows the cost before anything has been confirmed", () => {
+  it("shows the cost before anything has been confirmed", async () => {
     renderControls();
 
-    expect(screen.getByText(/no way back in at all/i)).toBeInTheDocument();
+    expect(await screen.findByText(/no way back in at all/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /yes, remove/i })).not.toBeInTheDocument();
   });
 });
@@ -135,7 +135,7 @@ describe("removing the password", () => {
     vi.spyOn(reauth, "proveWithPasskey").mockResolvedValue("PROOF-TOKEN");
     renderControls();
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove password" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Remove password" }));
     expect(del).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: /yes, remove my password/i }));
@@ -146,11 +146,11 @@ describe("removing the password", () => {
     expect(del).toHaveBeenNthCalledWith(1, "/api/auth/password", {});
   });
 
-  it("can be backed out of", () => {
+  it("can be backed out of", async () => {
     const del = vi.spyOn(api, "del").mockResolvedValue(undefined);
     renderControls();
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove password" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Remove password" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(screen.queryByRole("button", { name: /yes, remove/i })).not.toBeInTheDocument();
@@ -181,7 +181,7 @@ describe("removing the password", () => {
     const prove = vi.spyOn(reauth, "proveWithPasskey");
     renderControls();
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove password" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Remove password" }));
     fireEvent.click(screen.getByRole("button", { name: /yes, remove my password/i }));
 
     expect(await screen.findByText(/registered for quince\.example\.net/)).toBeInTheDocument();
@@ -207,7 +207,7 @@ describe("removing the password", () => {
     );
     renderControls();
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove password" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Remove password" }));
     fireEvent.click(screen.getByRole("button", { name: /yes, remove my password/i }));
 
     expect(await screen.findByText(/shared with every visitor/i)).toBeInTheDocument();
@@ -252,13 +252,64 @@ describe("a passwordless install", () => {
   });
 });
 
+
+// THE REPORTED DEFECT — quince#1077, Operator on the rig, and the state the ruling removed the
+// control for. Pressing "Yes, remove my password" with no passkeys answered *"Confirm it is you
+// before changing how you sign in"*, and nothing on that screen could confirm anything: rule 2
+// excludes the password from authorising its own removal, so `accepts` is empty and the request is
+// unanswerable by construction.
+//
+// A CONTROL THAT CANNOT BE USED IS NOT OFFERED AT ALL — the ruling superseded its own earlier
+// answer (say the precondition) to say exactly this. So the assertion is that the section is ABSENT,
+// not that it explains itself.
+describe("removing the password is not offered without a passkey that can confirm it", () => {
+  // THE ABSENCE HAS TO WAIT FOR THE QUERY, AND MY FIRST VERSION DID NOT — it awaited the heading,
+  // which renders optimistically (`hasPassword ?? true`) before `usePasskeyList` resolves, then read
+  // the button synchronously. Mutating `canRemoveHere` to always allow left both negative tests
+  // GREEN: the section had simply not rendered yet either way. A negative assertion that races the
+  // thing it denies is the vacuous-green this project keeps filing.
+  //
+  // `findByRole` REJECTING is the synchronisation: it polls for the timeout and throws when the
+  // element never appears. In the mutant it resolves and the test fails, which is the whole point.
+  const neverOffered = () =>
+    expect(
+      screen.findByRole("button", { name: "Remove password" }, { timeout: 400 }),
+    ).rejects.toThrow();
+
+  it("is absent when there are no passkeys at all", async () => {
+    renderControls(true, []);
+
+    expect(await screen.findByRole("heading", { name: "Change your password" })).toBeInTheDocument();
+    await neverOffered();
+  });
+
+  // AND WHEN EVERY PASSKEY IS BOUND ELSEWHERE, which is the reading this PR takes of "≥1 passkey"
+  // and the one place it goes beyond the ruling's literal words. `auth.Accepts` resolves the factor
+  // through `allowedForRemoval`, which is bound to the rpId the request arrived on — so a credential
+  // registered at another address cannot confirm here, and a bare count would put the offer back in
+  // front of the one user it cannot serve. qn.6k D2's hazard: renaming the box, a proxy or a
+  // Tailscale name all land here.
+  it("is absent when every passkey belongs to another address", async () => {
+    renderControls(true, [passkeyAt(ELSEWHERE, "pk-elsewhere")], HERE);
+
+    expect(await screen.findByRole("heading", { name: "Change your password" })).toBeInTheDocument();
+    await neverOffered();
+  });
+
+  // THE CONTROL, without which both assertions above pass against a section that never renders.
+  it("IS offered when a passkey works at this address", async () => {
+    renderControls(true, [passkeyAt(HERE)], HERE);
+
+    expect(await screen.findByRole("button", { name: "Remove password" })).toBeInTheDocument();
+  });
+});
 describe("an install with a password", () => {
   it("asks to CHANGE it, and offers removal", async () => {
     renderControls(true);
 
     expect(await screen.findByRole("heading", { name: "Change your password" })).toBeInTheDocument();
     expect(screen.getByLabelText("Current password")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Remove password" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Remove password" })).toBeInTheDocument();
   });
 
   // THE FALLBACK WHILE THE LIST IS IN FLIGHT IS "a password exists", which is the safe guess of the
@@ -446,10 +497,10 @@ it("does not render an empty address list when no rp_id can be named", async () 
 // address changing is the same event as the device being lost, and it is the more likely one. This
 // page recommends one of the triggers a few lines up: *"A reverse proxy or Tailscale gives you one"*.
 describe("what passwordless costs names BOTH ways to lose the credential", () => {
-  it("says the address matters as much as the device, and that a password survives it", () => {
+  it("says the address matters as much as the device, and that a password survives it", async () => {
     renderControls();
 
-    const cost = screen.getByText(/the address matters as much as the device/i);
+    const cost = await screen.findByText(/the address matters as much as the device/i);
     // THE ASYMMETRY IS THE PART THE USER CANNOT GUESS, so it is asserted rather than left to the
     // reader of the bullet: a password is not rpId-bound and survives every item on this list.
     expect(cost.parentElement?.textContent).toMatch(/a password would have survived/i);
@@ -457,10 +508,10 @@ describe("what passwordless costs names BOTH ways to lose the credential", () =>
 
   // NAMED, NOT PRONOUNED. The command is now two bullets from its introduction, and "that command"
   // reaching that far is one insertion away from pointing at the wrong thing.
-  it("names the recovery command in the bullet that describes what it clears", () => {
+  it("names the recovery command in the bullet that describes what it clears", async () => {
     renderControls();
 
-    const clears = screen.getByText(/every passkey/i);
+    const clears = await screen.findByText(/every passkey/i);
     expect(clears.parentElement?.textContent).toMatch(/quince auth reset/);
   });
 });
