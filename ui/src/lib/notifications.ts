@@ -11,6 +11,17 @@ import { pushSupport } from "./pwa";
 
 export const notificationsKey = ["notifications"] as const;
 
+// thisDeviceKey is the OTHER half of the answer, and it is exported for one reason: so that it can
+// be invalidated by name.
+//
+// `useThisDevice` reads TWO queries and a mutation that changes the answer must refresh BOTH. This
+// key was an inline literal at its single use site, so nothing else in the tree could name it —
+// `useSubscribe` invalidated the server list, the browser's own fingerprint stayed cached at its
+// pre-subscription `null`, and the page rendered Off over a subscription that had just succeeded.
+// Operator-reported 2026-08-20: *"you have to reload or go back and forth to make Test notification
+// appear."* A constant beside `notificationsKey` is what makes forgetting one of the two visible.
+export const thisDeviceKey = ["push", "this-device-fingerprint"] as const;
+
 export function useNotifications() {
   return useQuery({
     queryKey: notificationsKey,
@@ -122,7 +133,15 @@ export function useSubscribe() {
       // both sides can compute — see `useThisDevice` for why a stored id was wrong.
       return created;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: notificationsKey }),
+    // BOTH KEYS, AND `onSettled` RATHER THAN `onSuccess` — for the reason `useUnsubscribe` states
+    // below, pointing the other way. If `pushManager.subscribe` succeeds and the POST then fails,
+    // this browser holds a registration quince does not know about, and the fingerprint cached
+    // here is the stale `null` from before it existed. That is exactly when a refetch is most
+    // needed and exactly when `onSuccess` does nothing.
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: notificationsKey });
+      qc.invalidateQueries({ queryKey: thisDeviceKey });
+    },
   });
 }
 
@@ -161,7 +180,15 @@ export function useUnsubscribe() {
     // no longer has — which is exactly when a refetch is most needed, and exactly when `onSuccess`
     // does nothing. Operator-reported 2026-08-18: *"turn off there does nothing"*, from a list that
     // had gone stale behind a device re-subscribing.
-    onSettled: () => qc.invalidateQueries({ queryKey: notificationsKey }),
+    //
+    // BOTH KEYS, EVEN THOUGH ONLY ONE IS LOAD-BEARING HERE. After a removal the server row is gone,
+    // so `find` matches nothing whatever the fingerprint holds and `on: false` is right by luck
+    // rather than by design. Invalidating both makes it right by design, and keeps the two
+    // mutations symmetrical — the asymmetry is what hid the subscribe bug.
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: notificationsKey });
+      qc.invalidateQueries({ queryKey: thisDeviceKey });
+    },
   });
 }
 // useSendTest asks quince to push one notification to every live subscription, right now.
@@ -223,7 +250,7 @@ async function fingerprintOf(endpoint: string): Promise<string> {
 export function useThisDevice() {
   const q = useNotifications();
   const mine = useQuery({
-    queryKey: ["push", "this-device-fingerprint"],
+    queryKey: thisDeviceKey,
     queryFn: async () => {
       if (!("serviceWorker" in navigator)) return null;
       const reg = await navigator.serviceWorker.ready;
