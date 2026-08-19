@@ -368,8 +368,41 @@ CLAUDE_APK_REPO="https://downloads.claude.ai/claude-code/apk/stable"
 
 # --- 1. base packages ------------------------------------------------------------------------
 # ripgrep is a runtime dependency on musl, and the built-in one is disabled below per the docs.
+#
+# imagemagick AND ffmpeg ARE HERE SO A SESSION CAN OPEN WHAT THE OPERATOR SENDS — Operator
+# instruction, 2026-08-19, quince#1045: *"install imagemagick and ffmpeg in provision script the way
+# how openssh is installed."*
+#
+# The Operator reports UI bugs with screenshots and screen recordings, and the screenshots ARE the
+# evidence — quince#1028 grew a second commit off a landscape capture, and quince#931's
+# scroll-restoration case was identified from a three-shot sequence. A box with no image tooling
+# answers from the prose alone. Measured on this box before the fix: `convert`, `magick`, `ffmpeg`,
+# `gm`, `vips` and `python3` were all absent, and every iPhone capture (1206x2622) exceeds the
+# reader's 2000px limit, so none of them could be opened at all.
+#
+# BOTH, BECAUSE THEY ANSWER DIFFERENT HALVES. imagemagick resizes a still under the limit; ffmpeg is
+# the only one of the two that reads an `.mp4` screen recording, which quince#1045 recorded as NOT
+# solved and could not be read at all. It also extracts frames, which is what turns a recording into
+# something a reader can look at.
+#
+# NOT THE ALTERNATIVE quince#1045 PROPOSED. That issue offered a ~100-line hand-written PNG halver
+# using node's own zlib, on the argument that no new runtime is added. This instruction supersedes
+# it: two packages beat a bespoke decoder that refuses 16-bit, palette and interlaced PNGs, handles
+# one halving rather than looping to a bound, and would have been a new file category for
+# `sh-lint-coverage` and the suite-totality gate.
+#
+# THE SYNOLOGY CONSTRAINT DOES NOT APPLY, and it is worth saying because it is the reflex here:
+# these are SESSION tooling on a provisioned box, not product dependencies. They ship in no image
+# and `deploy/Dockerfile` is untouched.
+#
+# WHAT IT COSTS: ~55 MB of packages across both, with dependencies, measured with `apk fetch -R` on
+# Alpine 3.24.1 (imagemagick 7.1.2.27, ffmpeg 8.1.2). Stated because this box ran to 99% of a 32 GB
+# volume on 2026-08-18 and the clone reaper (quince#823) is what has to keep it clear — this is not
+# what filled it, and it is not free either. ImageMagick 7 ships `magick` AND the v6-compatible
+# `convert`, verified by listing the package rather than assuming which survived the major version.
 say "installing base packages"
-apk add --no-cache git make openssh-client curl bash ripgrep libgcc libstdc++ jq >/dev/null
+apk add --no-cache git make openssh-client curl bash ripgrep libgcc libstdc++ jq \
+	imagemagick ffmpeg >/dev/null
 say "base packages present"
 
 # --- 2. Claude Code, from the signed apk repository -------------------------------------------
