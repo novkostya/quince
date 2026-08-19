@@ -23,6 +23,14 @@ import { useDevicesStore } from "@/stores/devices";
 // THE NAME FALLS BACK EXACTLY AS THE NOTIFICATION'S WOULD — name, then model, then a generic. That
 // is `notify.deviceName`'s chain, and matching it means the switch is labelled with the words the
 // push itself will use. A UDID is never shown: it is Operator-private and meaningless to a reader.
+// NotificationsResponse is `PUT /api/devices/{udid}/notifications`'s 200 body (contracts §1).
+//
+// `enabled` IS WHAT QUINCE RECORDED, not what the request carried — true by construction since
+// quince#1292, which is why this component reads it instead of its own argument.
+interface NotificationsResponse {
+  enabled: boolean;
+}
+
 function subjectName(device: Device): string {
   return device.name || device.model || "this iPhone or iPad";
 }
@@ -35,24 +43,38 @@ export function DeviceNotificationsControl({
   put,
 }: {
   device: Device;
-  put?: (path: string, body: unknown) => Promise<unknown>;
+  // TYPED AS THE CONTRACT, NOT AS `unknown`. The response body is what this component reads,
+  // so the seam a test injects has to promise the same shape the API does — otherwise the
+  // production path and the test path differ in the one thing under test.
+  put?: (path: string, body: unknown) => Promise<NotificationsResponse>;
 }) {
   const upsert = useDevicesStore((s) => s.upsert);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const send = put ?? ((path: string, body: unknown) => api.put(path, body));
+  const send =
+    put ?? ((path: string, body: unknown) => api.put<NotificationsResponse>(path, body));
 
   const onChange = async (enabled: boolean) => {
     setSaving(true);
     setError(null);
     try {
-      await send(`/api/devices/${device.udid}/notifications`, { enabled });
-      // THE STORE IS UPDATED FROM THE CONFIRMED WRITE, not optimistically before it. The daemon also
+      const res = await send(`/api/devices/${device.udid}/notifications`, { enabled });
+      // THE STORE TAKES THE RESPONSE'S VALUE, NOT THE ONE THIS COMPONENT ASKED FOR.
+      //
+      // `PUT …/notifications` returns what quince RECORDED, by construction rather than by
+      // coincidence (quince#1292): the handler echoes what the write reported storing, resolved
+      // through the same registry read that publishes `device.updated`. This is that
+      // guarantee's client, and the whole point of it is that a client never has to ASSUME its
+      // own request succeeded in order to render the control it just moved. Reading `enabled`
+      // here instead would be that assumption, correct today and silently wrong the moment
+      // storage gains a policy that refuses or coerces.
+      //
+      // Not optimistic, either — this runs after the write. The daemon also
       // publishes `device.updated`, which arrives with the same value and is idempotent — this is
       // what makes the control move on a page whose socket is down, rather than sitting on the old
       // value until somebody refreshes.
-      upsert({ ...device, notifications_enabled: enabled });
+      upsert({ ...device, notifications_enabled: res.enabled });
     } catch (e) {
       // THE CHECKBOX DOES NOT MOVE ON A FAILED WRITE, because it renders the stored value and the
       // stored value did not change. What the user gets is the reason, which is the difference
