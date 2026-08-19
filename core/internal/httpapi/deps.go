@@ -227,17 +227,30 @@ func (UnavailableDeviceOps) Op(string) (wire.Op, bool) { return wire.Op{}, false
 // Status + reason rather than an error, matching DeviceOps, so the handler maps outcomes
 // without cross-package sentinel errors. 200 = written.
 type DeviceNotifications interface {
-	// SetNotificationsEnabled records the choice and makes it live. 404 when the UDID is one
+	// SetNotificationsEnabled records the choice and makes it live, and RETURNS WHAT IT WROTE.
+	//
+	// THE STORED VALUE COMES BACK SO THE ECHO CAN BE TRUE BY CONSTRUCTION (quince#1281 review).
+	// The response body is meant to carry what quince RECORDED, which is the reason the echo
+	// exists at all — a client never has to assume its own request succeeded. With a
+	// (status, reason) signature the handler could only echo what it was ASKED for, and the two
+	// agreed by accident: nothing but "the store writes the bool it is given" kept them equal.
+	// A storage policy that ever refused or coerced would leave the handler echoing the request
+	// and the frozen contract silently false.
+	//
+	// 404 when the UDID is one
 	// quince does not know — an unknown device is not a device that is muted, and answering 200
 	// to a write against nothing is the silent no-op this project forbids.
-	SetNotificationsEnabled(udid string, enabled bool) (status int, reason string)
+	SetNotificationsEnabled(udid string, enabled bool) (stored bool, status int, reason string)
 }
 
 // UnavailableDeviceNotifications stands in when nothing is wired: 503, never a silent no-op.
 type UnavailableDeviceNotifications struct{}
 
-func (UnavailableDeviceNotifications) SetNotificationsEnabled(string, bool) (int, string) {
-	return http.StatusServiceUnavailable, "notification settings are unavailable"
+func (UnavailableDeviceNotifications) SetNotificationsEnabled(string, bool) (bool, int, string) {
+	// `false` is not an answer here and is never read: the status is not 200, so the handler
+	// writes an error rather than a body. Naming it is cheaper than a reader wondering whether
+	// an unwired server reports every device as muted.
+	return false, http.StatusServiceUnavailable, "notification settings are unavailable"
 }
 
 // MuxerControl drives POST /api/devices/rescan and reports muxer-supervision health for
