@@ -192,10 +192,32 @@ defect in a docs PR exactly as a failing test is in a code PR.
 ```sh
 OID=$(bin/gh-review pr view <n> --repo novkostya/quince --json headRefOid -q .headRefOid)   # BEFORE reading
 
-bin/gh-review pr review <n> --repo novkostya/quince --commit-id "$OID" --approve         -b "<what you ran + what you checked>"
-bin/gh-review pr review <n> --repo novkostya/quince --commit-id "$OID" --request-changes -b "<blocking findings, numbered>"
-bin/gh-review pr review <n> --repo novkostya/quince --commit-id "$OID" --comment         -b "<observations, no verdict>"
+# The verdict body goes to a FILE, is swept, and is passed with --body-file.
+BODY="$HOME/scratch/<seat>/bodies/<n>-verdict.md"
+cat > "$BODY" <<'MD'
+…what you ran, what you checked, and the verdict…
+MD
+make privacy-check TEXT="$BODY"
+
+bin/gh-review pr review <n> --repo novkostya/quince --commit-id "$OID" --approve         --body-file "$BODY"
+bin/gh-review pr review <n> --repo novkostya/quince --commit-id "$OID" --request-changes --body-file "$BODY"
+bin/gh-review pr review <n> --repo novkostya/quince --commit-id "$OID" --comment         --body-file "$BODY"
 ```
+
+**NEVER `-b "…"`, AND THE WRAPPER NOW REFUSES IT** (quince-devlog#249). This block modelled `-b`
+three times — the single most-copied command in this workflow — and **backticks in a double-quoted
+bash argument are command substitution**. Every body written in this project is dense with them:
+identifiers, paths, fenced blocks. Hit twice in one session by `arch1`, and caught only because the
+result was checked afterwards: bash substituted before `gh` saw anything, no comment was created,
+and **the exit path did not look like a failure**.
+
+`bin/gh-review` refuses `--body`/`-b` on every path including this one — measured, exit `2`, ahead
+of even the boundary refusal — so following the old recipe now costs a cycle rather than a silent
+non-post. **The refusal is the control; this block is no longer allowed to teach around it.**
+
+A quoted heredoc delimiter (`'MD'`, not `MD`) is what stops substitution inside the file too, and
+the file is what `make privacy-check TEXT=` can sweep — the one thing an inline body makes
+impossible, since there is nothing to point at.
 
 **`--commit-id` is REQUIRED and `bin/gh-review` refuses without it** (quince#110). `gh pr review` has
 no such flag, and the REST endpoint it calls defaults the field to *"the most recent commit in the pull
