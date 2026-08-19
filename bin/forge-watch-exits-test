@@ -323,6 +323,7 @@ else
 	hook_wrapper() { # <review-key-path> <arch-token-path> -> the wrapper(s) the Stop hook names
 		XDG_STATE_HOME="$_er_w/state" QUINCE_SESSION_ID=exits-test-role \
 			QUINCE_CODER_KEY_FILE="$_er_w/absent" QUINCE_BOT_TOKEN_FILE="$_er_w/absent" \
+			QUINCE_ANALYST_KEY_FILE="$_er_w/absent" \
 			QUINCE_REVIEW_KEY_FILE="$1" QUINCE_ARCH_TOKEN_FILE="$2" \
 			"$FW" owed --hook 2>&1 | grep -oE 'bin/gh-[a-z]+' | sort -u | tr '\n' ' '
 	}

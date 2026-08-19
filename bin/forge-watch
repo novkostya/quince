@@ -3781,7 +3781,12 @@ watch_loop() {
 	# announcement stays here — it is an arm-time fact — but the answer comes from the shared helper.
 	_wsuppress=$(suppress_for_role "$_wrole")
 	case "$_wrole" in
-	implementer | architect) ;;
+	# `analyst` JOINS THE SILENT ARM (quince#1290). The ANSWER now comes from
+	# `suppress_for_role`; this case decides only whether to ANNOUNCE a degraded mode. Without
+	# `analyst` here the note fires on a box whose role was determined perfectly well, claiming
+	# *"this box could not determine its role (owed_role=analyst)"* — false, and the same defect
+	# quince#1290 exists to fix, relocated rather than removed.
+	implementer | architect | analyst) ;;
 	*)
 		printf 'note: branch-ownership suppression is DISABLED — this box could not determine its role (owed_role=%s), so every PR event wakes. Reported rather than silent (quince#292).\n' \
 			"${_wrole:-empty}"
@@ -4220,6 +4225,22 @@ suppress_for_role() { # <role> -> yes|no
 	# proposal the arm never matches, and the seat stays deaf with a fix that ships and changes
 	# nothing.
 	architect) printf 'no\n' ;;
+	# THE ANALYST ANSWERS LIKE THE ARCHITECT, AND FOR THE ARCHITECT'S REASON (quince#1290).
+	# quince#174 suppresses another declared runner's branches because on the implementer seat
+	# "somebody else owns that branch" means "not my business". Here it means the opposite:
+	# reading OTHER seats' pull requests is a standing part of the job — architect-authored
+	# canon in particular, which arrives on `arch<N>/…` branches this seat does not own and
+	# could never wake for under suppression.
+	#
+	# "OWNS BRANCHES" IS NOT THE TEST, and quince#1282's first ruling reached the right answer
+	# from that wrong premise before withdrawing it. The architect owns branches too and is `no`.
+	# The question is whether reading other seats' work is part of the job.
+	#
+	# STATED, NOT INHERITED FROM `*)`. The fallthrough reaches this same `no` by accident and
+	# then makes both callers announce a degraded mode — *"could not determine its role
+	# (owed_role=analyst)"* — which is false once the role is named. An accidental right answer
+	# with a wrong explanation is what quince#1290 was filed about.
+	analyst) printf 'no\n' ;;
 	# UNIDENTIFIABLE FAILS OPEN — every PR event wakes. Noise rather than deafness, which is the
 	# right direction, and both callers announce it rather than degrading silently.
 	*) printf 'no\n' ;;
@@ -4261,6 +4282,29 @@ owed_role() {
 	# authoring seat is the one that must never think it may approve.
 	if [ -f "${QUINCE_CODER_KEY_FILE:-$HOME_DIR/.config/quince/quince-coder.pem}" ]; then
 		printf 'implementer %s/bin/gh-coder author\n' "$(repo_root)"
+	elif [ -f "${QUINCE_ANALYST_KEY_FILE:-$HOME_DIR/.config/quince/quince-analyst.pem}" ]; then
+		# THE SUPERVISOR SEAT, ADDED THIRD AND FOR THE THIRD TIME (quince#1290). Everything this
+		# function says above about the implementer and architect arms happened again here, in the
+		# shape the comment already named: on the supervisor box every arm missed, `none` fell out,
+		# and the Stop hook printed "no forge credential on this box" every turn about a box holding
+		# `quince-analyst.pem`. It read as normal because that is exactly what a credential-less box
+		# says, which is why it survived from the identity's creation (quince#375) until an Operator
+		# asked what the message after every response was.
+		#
+		# THE TOOL ALREADY KNEW. `--gh`'s validation refusal names *"bin/gh-analyst on the supervisor
+		# box"* in as many words — so the wrapper was known to the message and unknown to the code that
+		# decides. Same split as `deploy/runner/provision`'s `layer_wrapper` (quince#1262), same day.
+		#
+		# `author`, NOT `all`. `all` is the REVIEWER mode: the whole declared set, for a seat whose
+		# arrival queue authorship cannot derive. This seat authors its own pull requests on five
+		# repositories and its reading of other seats' work carries no verdict — it comments, it
+		# cannot approve or merge (quince#375). So what it owes a watch over is what it OPENED, which
+		# is the implementer's question and the implementer's mode.
+		#
+		# AFTER THE CODER KEY AND BEFORE THE REVIEW KEY, by the precedence rule this function already
+		# states: *the authoring seat is the one that must never think it may approve.* The analyst is
+		# an authoring seat, so it takes the same side of the review key that the coder does.
+		printf 'analyst %s/bin/gh-analyst author\n' "$(repo_root)"
 	elif [ -f "${QUINCE_REVIEW_KEY_FILE:-$HOME_DIR/.config/quince/quince-review.pem}" ]; then
 		# FIELD 2 IS THE **READ** WRAPPER, AND quince#299 GOT THAT WRONG BY ANSWERING A DIFFERENT
 		# QUESTION (quince#303). Its argument was *"the key IS the App's and the App is what casts
@@ -4618,12 +4662,19 @@ status)
 				elif [ "$(suppress_for_role "$_rrole")" = yes ]; then
 					printf 'note: %s PR(s) on this record belong to another runner declared on this box (%s). Their events are printed but do NOT wake this watch (role %s).\n' \
 						"$_rcnt" "$_rnames" "$_rrole"
-				elif [ "$_rrole" = architect ]; then
+				elif [ "$_rrole" = architect ] || [ "$_rrole" = analyst ]; then
 					# NAMED, NOT MERELY OMITTED. Dropping the note here would leave a reader with no
 					# answer at the one moment they are reasoning about wakes, and the answer is the
-					# interesting one: reviewing other runners' branches is the entire job (quince#292).
-					printf 'note: %s PR(s) on this record belong to another runner declared on this box (%s). Branch-ownership suppression is OFF for role architect, so their events DO wake this watch (quince#292).\n' \
-						"$_rcnt" "$_rnames"
+					# interesting one: reading other runners' branches is the job (quince#292).
+					#
+					# THE ANALYST IS HERE TOO, AND THE ROLE IS NO LONGER HARDCODED (quince#1290). This
+					# arm tested `= architect` literally, so the supervisor seat — suppression OFF, role
+					# perfectly well determined — fell through to the DEGRADED arm below and `status`
+					# reported *"could not determine its role (owed_role=analyst)"*. quince#1282 exists
+					# to make `status` say what `watch` does about suppression; on this seat it said
+					# something false instead, which is the same defect one surface over.
+					printf 'note: %s PR(s) on this record belong to another runner declared on this box (%s). Branch-ownership suppression is OFF for role %s, so their events DO wake this watch (quince#292).\n' \
+						"$_rcnt" "$_rnames" "$_rrole"
 				else
 					# THE DEGRADED ARM IS SURFACED HERE TOO. `watch` announces it at arm time and
 					# `status` is where a session actually looks, so a box that cannot name its role

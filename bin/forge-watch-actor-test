@@ -39,6 +39,10 @@ export QUINCE_CODER_KEY_FILE="$WORK/coder.pem"
 export QUINCE_ARCH_TOKEN_FILE="$WORK/arch.token"
 export QUINCE_BOT_TOKEN_FILE="$WORK/bot.token"
 export QUINCE_REVIEW_KEY_FILE="$WORK/review.pem"
+# PINNED LIKE THE OTHER FOUR (quince#1290). This suite runs on any seat's box, and once `owed_role`
+# learned the analyst key an unpinned path let it read the REAL store — resolving the role to
+# `analyst` on the supervisor box and failing three assertions that are about the architect.
+export QUINCE_ANALYST_KEY_FILE="$WORK/analyst.pem"
 
 FORGE_SEATS_FILE=$WORK/seats
 export FORGE_SEATS_FILE
@@ -94,7 +98,7 @@ STATE=$(./bin/forge-watch runner path)/novkostya-quince.state.json
 # all, so the PAT is the only credential that resolves to `architect` today. quince#299 fixes that;
 # this suite deliberately does not depend on it, so the two can land in either order.
 seat() {
-	rm -f "$QUINCE_CODER_KEY_FILE" "$QUINCE_REVIEW_KEY_FILE" "$QUINCE_ARCH_TOKEN_FILE"
+	rm -f "$QUINCE_CODER_KEY_FILE" "$QUINCE_REVIEW_KEY_FILE" "$QUINCE_ARCH_TOKEN_FILE" "$QUINCE_ANALYST_KEY_FILE"
 	case "$1" in
 	implementer) printf 'a credential\n' >"$QUINCE_CODER_KEY_FILE" ;;
 	architect) printf 'a credential\n' >"$QUINCE_ARCH_TOKEN_FILE" ;;

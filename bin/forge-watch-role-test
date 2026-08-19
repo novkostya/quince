@@ -84,19 +84,22 @@ CODER="$WORK/coder.pem"
 ARCH="$WORK/arch.token"
 BOT="$WORK/bot.token"
 REVIEW="$WORK/review.pem"
+ANALYST="$WORK/analyst.pem"
 
 # `$1` = which credential to place (or none). Returns the watch output for a baseline tick plus a
 # tick in which the other seat's PR moves.
 run_role() {
-	rm -f "$CODER" "$ARCH" "$BOT" "$REVIEW"
+	rm -f "$CODER" "$ARCH" "$BOT" "$REVIEW" "$ANALYST"
 	[ "$1" = none ] || printf 'a credential\n' >"$1"
 	rm -rf "$WORK/state"
 	XDG_STATE_HOME="$WORK/state" QUINCE_CODER_KEY_FILE="$CODER" QUINCE_ARCH_TOKEN_FILE="$ARCH" \
 		QUINCE_BOT_TOKEN_FILE="$BOT" QUINCE_REVIEW_KEY_FILE="$REVIEW" \
+		QUINCE_ANALYST_KEY_FILE="$ANALYST" \
 		./bin/forge-watch runner set r4 >/dev/null 2>&1
 	printf '1\n' >"$WORK/turn"
 	XDG_STATE_HOME="$WORK/state" QUINCE_CODER_KEY_FILE="$CODER" QUINCE_ARCH_TOKEN_FILE="$ARCH" \
 		QUINCE_BOT_TOKEN_FILE="$BOT" QUINCE_REVIEW_KEY_FILE="$REVIEW" \
+		QUINCE_ANALYST_KEY_FILE="$ANALYST" \
 		./bin/forge-watch watch --repo "$REPO" --gh "$WORK/gh" --no-issues \
 		--interval 1 --max-wait 3 >/dev/null 2>&1 || true
 	# A SECOND declared runner in the registry, so `r1` is genuinely somebody else's rather than
@@ -106,6 +109,7 @@ run_role() {
 	printf '2\n' >"$WORK/turn"
 	XDG_STATE_HOME="$WORK/state" QUINCE_CODER_KEY_FILE="$CODER" QUINCE_ARCH_TOKEN_FILE="$ARCH" \
 		QUINCE_BOT_TOKEN_FILE="$BOT" QUINCE_REVIEW_KEY_FILE="$REVIEW" \
+		QUINCE_ANALYST_KEY_FILE="$ANALYST" \
 		./bin/forge-watch watch --repo "$REPO" --gh "$WORK/gh" --no-issues \
 		--interval 1 --max-wait 4 >"$WORK/out" 2>&1 || true
 	cat "$WORK/out"
@@ -198,6 +202,7 @@ printf '\n(5) status agrees with watch about suppression\n'
 status_note() {
 	XDG_STATE_HOME="$WORK/state" QUINCE_CODER_KEY_FILE="$CODER" QUINCE_ARCH_TOKEN_FILE="$ARCH" \
 		QUINCE_BOT_TOKEN_FILE="$BOT" QUINCE_REVIEW_KEY_FILE="$REVIEW" \
+		QUINCE_ANALYST_KEY_FILE="$ANALYST" \
 		./bin/forge-watch status --repo "$REPO" 2>&1 |
 		grep 'another runner declared on this box' || :
 }
@@ -247,6 +252,51 @@ agree "unidentifiable role" "$_out" "$_note"
 case "$_note" in
 *'could not determine its role'*) ok "...and status surfaces the degraded mode, not only the arm" ;;
 *) bad "...and status surfaces the degraded mode, not only the arm" ;;
+esac
+# (6) THE SUPERVISOR SEAT — the analyst App key, which resolved to `none` until quince#1290. That
+# box authors pull requests on five repositories, so `none` there is quince#238's finding a third
+# time: the `Stop` hook stops asserting that a watch is owed, on a seat that can end a session with
+# an open PR and nothing watching it.
+#
+# THE ASSERTION IS (2)'s AND NOT (1)'s, and that is the substance rather than a copy. This seat reads
+# OTHER seats' pull requests as a standing part of the job — architect-authored canon arrives on
+# `arch<N>/…` branches it does not own — so branch-ownership suppression must NOT apply, exactly as
+# on the architect seat and for the same reason. If this ever starts matching (1), the seat has gone
+# deaf to the work it exists to read.
+_out=$(run_role "$ANALYST")
+if printf '%s\n' "$_out" | grep -q 'EXITING on the event'; then
+	ok "analyst: another seat's PR DOES wake — reading others' branches is the job (quince#1290)"
+else
+	bad "analyst: suppressed another seat's PR — the supervisor seat cannot see what it reviews" \
+		"the \$_wrole case needs an 'analyst)' arm beside 'architect)'."
+	printf '%s\n' "$_out" | grep -E '^event=|watch-idle|DISABLED' | sed 's/^/    | /'
+fi
+# The role must be KNOWN, not merely permissive. Without this the arm above passes via the `*)`
+# fallback, which reaches the same suppression answer by accident while printing that the role could
+# not be determined — a false sentence, and the defect quince#1290 was filed about.
+if printf '%s\n' "$_out" | grep -q 'suppression is DISABLED'; then
+	bad "the analyst key resolved to an UNKNOWN role — owed_role's arm is missing, or the \$_wrole case has none" \
+		"the note claims the role could not be determined, which is false once owed_role names it."
+else
+	ok "...and does so as a KNOWN role, printing no degraded-mode note"
+fi
+
+# (7) `status` MUST SAY IT FOR THE ANALYST TOO — the same claim as (5), one seat over (quince#1290).
+#
+# (5) proved `status` stops contradicting `watch` on the ARCHITECT seat. It could not have caught
+# this one: `status`'s informative arm tested `= architect` LITERALLY, so the supervisor seat — role
+# determined, suppression off — fell past it into the DEGRADED arm and reported *"could not determine
+# its role (owed_role=analyst)"*. A false sentence in the surface quince#1261 exists to make truthful.
+#
+# THE ROLE IS NAMED IN THE MESSAGE, so this asserts the role rather than merely the absence of the
+# degraded note — a hardcoded second literal would pass an assertion that only looked for "OFF".
+_out=$(run_role "$ANALYST")
+_note=$(status_note)
+agree "analyst" "$_out" "$_note"
+case "$_note" in
+*'suppression is OFF for role analyst'*) ok "status names the analyst role and says suppression is OFF (quince#1290)" ;;
+*'could not determine its role'*) bad "status reports the analyst role as undeterminable — the informative arm still tests '= architect' literally" ;;
+*) bad "status said nothing usable about the analyst seat's suppression" "note was: $_note" ;;
 esac
 
 printf '\nforge-watch-role-test: %d passed, %d failed\n' "$pass" "$fail"
