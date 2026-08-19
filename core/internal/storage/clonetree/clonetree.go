@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // Strategy selects how regular files are materialized.
@@ -243,8 +244,9 @@ const (
 	// either, because it is not.
 	//
 	// SEPARATE FROM ReflinkUnsupported RATHER THAN FOLDED INTO IT, so the sentence an operator
-	// reads matches what happened. Both lead to the same backend today; quince#790 is the open
-	// ruling on whether this one should instead settle the source and retry.
+	// reads matches what happened. It now means something narrower than it did: the probe RETRIES a
+	// transient EAGAIN for ~6 s (quince#790, ruled 2026-08-19), so reaching this outcome means the
+	// clone was still declined after waiting out a txg boundary — not that nobody waited.
 	ReflinkUnavailable
 )
 
@@ -255,6 +257,38 @@ const (
 // `cp --reflink=always`. 1 MiB is far above any filesystem's inline/tail-packing threshold and
 // costs one write, once, per storage at startup.
 const reflinkProbeSize = 1 << 20
+
+// THE RETRY BOUND, AND WHY IT IS FIVE AT ONE SECOND (quince#790, Operator ruling 2026-08-19).
+//
+// ZFS block cloning refuses a source not yet in a SYNCED transaction group, so the probe's
+// write-then-clone loses a race the filesystem resolves on its own within one txg. Measured on the
+// lab rig: five retries at one second, identically across three runs, against a default
+// `zfs_txg_timeout` of 5 s.
+//
+// SO THIS WAITS FOR A BOUNDARY, IT DOES NOT FORCE ONE — which is the whole reason the number tracks
+// that sysctl rather than being tuned by feel. Lower it without lowering `zfs_txg_timeout` and the
+// probe starts reporting `ReflinkUnavailable` on a filesystem that can reflink, which selects
+// hardlink and reintroduces exactly the aliasing risk this ruling removes.
+//
+// The worst case is ~6 s once per storage at startup, bounded, and only on a filesystem that
+// answers EAGAIN at all — every other outcome returns on the first attempt.
+const (
+	reflinkProbeRetries  = 5
+	reflinkProbeInterval = time.Second
+)
+
+// reflinkProbeSleep is `time.Sleep` in production and a hook in tests, so the retry loop can be
+// driven without spending six real seconds per case. A variable rather than a parameter because the
+// probe's signature is public API (`ReflinkProbeDetail`) and this is a test seam, not an option.
+var reflinkProbeSleep = time.Sleep
+
+// probeClone is the FICLONE the PROBE calls, seamed so the retry loop is testable without a ZFS
+// pool. Deliberately separate from `reflinkFile`, which `Clone` uses for the real seed: the retry is
+// the probe's alone. A seed's source is `latest/`, written by the previous backup and therefore many
+// txgs settled, so the race this waits out should not exist there — and that is REASONING, not a
+// measurement (quince#790 asks for the seed to be exercised once reflink is selectable on ZFS).
+// Seaming only the probe keeps that question open rather than quietly answering it with a retry.
+var probeClone = reflinkFile
 
 // ReflinkProbe reports whether dir's filesystem supports the reflink strategy at all. It is the
 // bool form of ReflinkProbeDetail and deliberately treats "sharing unverifiable" as supported —
@@ -298,14 +332,54 @@ func ReflinkProbeDetail(dir string) (ReflinkResult, string) {
 	if err := os.WriteFile(src, probePattern(reflinkProbeSize), 0o600); err != nil {
 		return ReflinkUnsupported, fmt.Sprintf("cannot write a probe file: %v", err)
 	}
-	if err := reflinkFile(dst, src); err != nil {
-		if errors.Is(err, ErrReflinkUnavailable) {
-			// The probe writes its source and clones it immediately, which is precisely the race
-			// ZFS block cloning loses. Reported as declined rather than unsupported; whether to
-			// settle and retry is quince#790's open ruling.
-			return ReflinkUnavailable, fmt.Sprintf("FICLONE declined this clone: %v", err)
+	// WAIT FOR A TXG BOUNDARY RATHER THAN GIVING UP — Operator ruling 2026-08-19, quince#790.
+	//
+	// The probe writes its source and clones it immediately, which is precisely the race ZFS block
+	// cloning loses: a block not yet in a synced transaction group cannot be cloned, and FICLONE says
+	// EAGAIN. Retrying is what turns that into the answer the filesystem would give a moment later.
+	//
+	// WHY THE RULING WENT THIS WAY, kept because the trade is not the obvious one. Hardlink's safety
+	// is CONTINGENT — the seed links every regular file and rests on `idevicebackup2` unlinking
+	// before it creates, with one upstream path (`DLMessageCopyItem`) that does not and was never
+	// observed firing. Reflink cannot alias at all, by construction. And the downgrade that used to
+	// make hardlink the slow-but-safe option is RETIRED (quince#518, gate 12c on hardware
+	// 2026-08-10), so hardlink today is fast AND carries the residual risk. Six seconds once per
+	// storage at startup buys not needing the argument.
+	//
+	// NOT `fsync`, AND NOT `sync(2)`. Both are measured wrong and the reason is worth keeping: fsync
+	// commits the ZIL, block cloning needs a SYNCED TXG, and those are different events. `sync(2)`
+	// initiates one without reliably completing it — 1 success in 4, then 1 in 3, which is what an
+	// unreliable barrier looks like rather than a fix.
+	//
+	// FIVE AT ONE SECOND IS NOT A MAGIC NUMBER. It was measured identically across three runs
+	// against a default `zfs_txg_timeout` of 5 s: this WAITS FOR a boundary, it does not force one.
+	// Tuning it down without changing that sysctl would reintroduce the failure this removes.
+	deadline := reflinkProbeRetries
+	var lastErr error
+	for attempt := 0; ; attempt++ {
+		lastErr = probeClone(dst, src)
+		if lastErr == nil {
+			break
 		}
-		return ReflinkUnsupported, fmt.Sprintf("FICLONE refused: %v", err)
+		if !errors.Is(lastErr, ErrReflinkUnavailable) || attempt >= deadline {
+			break
+		}
+		// Removed between attempts: FICLONE needs a destination it can create, and a failed clone
+		// can leave one behind.
+		_ = os.Remove(dst)
+		reflinkProbeSleep(reflinkProbeInterval)
+	}
+	if lastErr != nil {
+		if errors.Is(lastErr, ErrReflinkUnavailable) {
+			// HONEST WHEN IT EXPIRES — quince#936 drew this line and the ruling says not to
+			// re-cross it. A probe that gave up reports what it OBSERVED; it does not promote a
+			// timeout into "unsupported", which would send an operator to the wrong question and
+			// select hardlink on a filesystem that can reflink.
+			return ReflinkUnavailable, fmt.Sprintf(
+				"FICLONE still declined after %d retries at %s (waiting for a synced txg): %v",
+				deadline, reflinkProbeInterval, lastErr)
+		}
+		return ReflinkUnsupported, fmt.Sprintf("FICLONE refused: %v", lastErr)
 	}
 
 	// 1. SHARING — the property the backend is chosen for.
