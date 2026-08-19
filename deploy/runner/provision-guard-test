@@ -156,7 +156,7 @@ clear_creds
 place "$CODER"
 out=$(run arch)
 case "$out" in
-*"HOLDS the"*"implementer credential"*)
+*"HOLDS the"*"implementer or supervisor credential"*)
 	ok "role arch: an implementer APP KEY is the implementer seat — refused"
 	;;
 *)
@@ -169,7 +169,7 @@ clear_creds
 place "$REVIEW"
 out=$(run implementer)
 case "$out" in
-*"HOLDS the"*"arch credential"*)
+*"HOLDS the"*"arch or supervisor credential"*)
 	ok "role implementer: a REVIEWER APP KEY is the arch seat — refused"
 	;;
 *)
@@ -504,26 +504,31 @@ case "$out" in
 	;;
 esac
 
-# THE REFUSAL MUST NOT OFFER EITHER OF THIS GUARD'S USUAL REMEDIES, and that is the whole reason it is
-# a separate branch rather than another entry in `_other_creds`. "Re-run with the right --role" sends
-# somebody to an argument that does not exist; "remove the credential that does not belong to this
-# seat" tells them to undo quince#375's ceremony. A refusal a session cannot act on is the dead end
-# quince#236 opened with.
+# THE REFUSAL NOW HAS A REAL REMEDY, AND THESE TWO CASES ASSERT THE OPPOSITE OF WHAT THEY DID
+# (quince#375, Operator 2026-08-19). They pinned *"there is no --role supervisor"* and *"Do NOT
+# re-run with another --role"*, both of which were true only while this script refused that role.
+#
+# It accepts it now, so the dead end quince#236 opened with is gone: re-running as
+# `--role supervisor` IS the fix when this is that box, and removing the key is the fix when it is
+# not. A refusal that names a command is the whole difference between a guard and a wall.
+#
+# Kept as two cases rather than deleted, because the property worth pinning is unchanged in shape —
+# *the refusal tells you what to do next* — and only the answer moved.
 case "$out" in
-*"there is no"*"--role supervisor"*)
-	ok "the refusal names WHY neither usual remedy applies — there is no --role supervisor"
+*"--role supervisor"*)
+	ok "the refusal names the command that fixes it — re-run as --role supervisor"
 	;;
 *)
-	bad "the refusal did not say that this script cannot provision the supervisor seat"
+	bad "the refusal does not name --role supervisor, which since quince#375 is the actual remedy"
 	printf '       %s\n' "$out" | head -n 6
 	;;
 esac
 case "$out" in
-*"Do NOT re-run with another"*)
-	ok "it says explicitly not to re-run with another --role, which would configure the wrong box"
+*"Do NOT remove the analyst key"*)
+	ok "…and still says not to remove the analyst key to satisfy the check, which would undo the ceremony"
 	;;
 *)
-	bad "the refusal leaves re-running as the obvious next move, and it is the wrong one"
+	bad "the refusal no longer protects the analyst key from being deleted to make the check pass"
 	;;
 esac
 
