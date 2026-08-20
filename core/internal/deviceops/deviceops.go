@@ -9,8 +9,9 @@
 // Secrets discipline (design §6, the rung's central rule): the backup-encryption password
 // reaches idevicebackup2 over the child's controlling pty (interactive mode) — NEVER argv
 // (world-readable /proc/<pid>/cmdline), never an env var, never logged, never stored. The
-// pairing record idevicepair writes is a private-key-grade secret persisted 0600 under
-// $QUINCE_DATA (amendment 1), never served, never logged.
+// pairing record is a private-key-grade secret — but it is the MUXER's to hold, not quince's
+// (qn.6r D1): `userpref_save_pair_record` is a message to the muxer with no filesystem fallback,
+// so nothing under $QUINCE_DATA holds one. quince never serves or logs a record either way.
 package deviceops
 
 import (

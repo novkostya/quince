@@ -11,7 +11,7 @@ import (
 // — not "is this mount ro", which is only one of the ways it fails.
 func TestWritableProbesRatherThanReadingAMountFlag(t *testing.T) {
 	sys := filepath.Join(t.TempDir(), "lockdown")
-	l := NewLockdownStore(t.TempDir(), sys, discard())
+	l := NewLockdownStore(sys, discard())
 
 	ok, reason := l.Writable()
 	if !ok {
@@ -56,7 +56,7 @@ func TestWritableDetectsPermissionsNotJustReadOnlyMounts(t *testing.T) {
 
 func l(t *testing.T, sys string) *LockdownStore {
 	t.Helper()
-	return NewLockdownStore(t.TempDir(), sys, discard())
+	return NewLockdownStore(sys, discard())
 }
 
 // The permissions case above skips as root, and `make gates` runs as root — so on the ladder that
