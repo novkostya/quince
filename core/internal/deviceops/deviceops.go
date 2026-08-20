@@ -15,15 +15,18 @@
 package deviceops
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"os"
 	"os/exec"
 	"regexp"
 	"syscall"
+	"time"
 
 	"github.com/novkostya/quince/core/internal/device"
 	"github.com/novkostya/quince/core/internal/muxaddr"
+	"github.com/novkostya/quince/core/internal/muxd"
 )
 
 // Transports (matching the muxd/wire strings). Pairing is USB-only at the protocol floor
@@ -66,10 +69,11 @@ type Tools struct {
 	// — so SET-BUT-EMPTY was used rather than falling back to the compiled-in default, and the CLI
 	// failed somewhere the operator could not read. A resolver returns an ERROR instead, and the op
 	// says which device nothing reports.
-	muxerFor  MuxerFor
-	Log       *slog.Logger
-	env       []string // extra child env (tests only)
-	argPrefix []string // prepended to every argv (tests only: re-exec as the fake CLI)
+	muxerFor    MuxerFor
+	Log         *slog.Logger
+	env         []string                          // extra child env (tests only)
+	argPrefix   []string                          // prepended to every argv (tests only: re-exec as the fake CLI)
+	pairRecords func(udid string) muxd.PairRecord // tests only: stand in for the muxer exchange
 	// wifiSyncKey is the lockdown key wifiSync reads; empty means "do not ask the device", which is
 	// what it meant for every build before story 3 measured the name (see the wifiSyncKey const).
 	// The empty branch stays: it is the honest answer whenever the key is unknown, not scaffolding
@@ -180,3 +184,45 @@ func setpgid(cmd *exec.Cmd) {
 // Identity is re-exported so callers can build device overlays without importing device
 // directly; it is the same type the registry's Enrich consumes.
 type Identity = device.Identity
+
+// pairRecordEndpoint resolves the muxer this device is reached through, for the pair-record
+// question. It is the same resolver the CLIs are pointed at (quince#1219 item D), so the record
+// is read from the daemon that would have written it.
+func (t *Tools) pairRecordEndpoint(udid, transport string) (muxaddr.Endpoint, error) {
+	if t.muxerFor == nil {
+		return muxaddr.Endpoint{}, errors.New("deviceops: no muxer resolver wired")
+	}
+	ep, err := t.muxerFor(udid, transport)
+	if err != nil {
+		return muxaddr.Endpoint{}, err
+	}
+	if ep.IsZero() {
+		return muxaddr.Endpoint{}, muxaddr.ErrEmpty
+	}
+	return ep, nil
+}
+
+// readPairRecord asks the muxer what it holds for this device. A resolver failure is
+// PairRecordUnknown rather than an error, because every caller's next question is the same one
+// ReadPairRecord already answers in three states, and collapsing "cannot resolve" into "cannot
+// tell" keeps that surface at three rather than four.
+//
+// pairRecords IS A TEST SEAM, in the same shape as env and argPrefix above and for the same
+// reason: the exchange itself is covered by muxd's own suite against a scripted socket, and by a
+// live probe against the digest-pinned netmuxd, so re-staging a muxer inside every pair test
+// would test the fake rather than the flow. Production never sets it.
+func (t *Tools) readPairRecord(ctx context.Context, udid, transport string) muxd.PairRecord {
+	if t.pairRecords != nil {
+		return t.pairRecords(udid)
+	}
+	ep, err := t.pairRecordEndpoint(udid, transport)
+	if err != nil {
+		return muxd.PairRecord{State: muxd.PairRecordUnknown}
+	}
+	return muxd.ReadPairRecord(ctx, ep, udid, pairRecordTimeout)
+}
+
+// pairRecordTimeout bounds one pair-record exchange. It is short because the exchange is two
+// frames over a local socket, and because it runs twice around a pair the user is standing at a
+// phone for.
+const pairRecordTimeout = 5 * time.Second

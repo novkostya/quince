@@ -9,10 +9,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/novkostya/quince/core/internal/muxaddr"
+	"github.com/novkostya/quince/core/internal/muxd"
 )
 
 // mustEP parses a muxer address the way production does. Tests go through the REAL grammar
@@ -45,6 +47,20 @@ func fakeTools(env ...string) *Tools {
 	tl.Idevicebackup2 = os.Args[0]
 	tl.argPrefix = []string{"-test.run=TestHelperProcess", "--"}
 	tl.env = append([]string{"GO_WANT_HELPER_PROCESS=1"}, env...)
+	// A pairing the muxer records: absent before, present after, tracked PER DEVICE because the
+	// single-flight tests pair two devices at once. The pair tests are about the FLOW; the
+	// exchange itself is muxd's to test (qn.6r).
+	var mu sync.Mutex
+	seen := map[string]bool{}
+	tl.pairRecords = func(udid string) muxd.PairRecord {
+		mu.Lock()
+		defer mu.Unlock()
+		if !seen[udid] {
+			seen[udid] = true
+			return muxd.PairRecord{State: muxd.PairRecordAbsent}
+		}
+		return muxd.PairRecord{State: muxd.PairRecordPresent, Digest: [32]byte{1}}
+	}
 	return tl
 }
 
