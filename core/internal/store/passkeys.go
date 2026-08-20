@@ -31,6 +31,14 @@ type Passkey struct {
 	// NEVER USED rather than "used at the epoch", and the Settings surface has to render that
 	// difference — a credential nobody has signed in with is exactly the one worth removing.
 	LastUsedAt time.Time
+
+	// ScopeUDID is the device this credential is confined to, or nil for an ADMIN credential.
+	//
+	// NIL MEANS ADMIN — see 0015_passkey_scope.sql. A POINTER because "" and "no scope" must
+	// not be the same value: a device-scoped credential whose udid is empty is not a state
+	// that means anything, and letting the zero value stand for admin is how a forgotten
+	// field becomes a privilege (spec D6).
+	ScopeUDID *string
 }
 
 // InsertPasskey records a credential.
@@ -43,10 +51,10 @@ func (s *Store) InsertPasskey(p Passkey) error {
 	_, err := s.db.Exec(
 		`INSERT INTO passkeys
 		   (credential_id, public_key, rp_id, sign_count, aaguid, transports, name, created_at,
-		    backup_eligible, backup_state)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		    backup_eligible, backup_state, scope_udid)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.CredentialID, p.PublicKey, p.RPID, p.SignCount, p.AAGUID, p.Transports, p.Name,
-		fmtTime(p.CreatedAt), p.BackupEligible, p.BackupState)
+		fmtTime(p.CreatedAt), p.BackupEligible, p.BackupState, p.ScopeUDID)
 	return err
 }
 
@@ -86,14 +94,18 @@ func scanPasskey(sc interface{ Scan(...any) error }) (Passkey, error) {
 		transports sql.NullString
 		created    string
 		lastUsed   sql.NullString
+		scopeUDID  sql.NullString
 		beligible  sql.NullBool
 		bstate     sql.NullBool
 	)
 	if err := sc.Scan(&p.CredentialID, &p.PublicKey, &p.RPID, &p.SignCount, &aaguid,
-		&transports, &p.Name, &beligible, &bstate, &created, &lastUsed); err != nil {
+		&transports, &p.Name, &beligible, &bstate, &created, &lastUsed, &scopeUDID); err != nil {
 		return Passkey{}, err
 	}
 	p.AAGUID = aaguid
+	if scopeUDID.Valid {
+		p.ScopeUDID = &scopeUDID.String
+	}
 	p.Transports = transports.String
 	// NULL stays nil rather than becoming false. A credential registered before quince recorded
 	// these cannot have them reconstructed, and false is the answer that would make a synced passkey
@@ -118,7 +130,7 @@ func scanPasskey(sc interface{ Scan(...any) error }) (Passkey, error) {
 
 const passkeyCols = `credential_id, public_key, rp_id, sign_count, aaguid, transports, name,
 	backup_eligible, backup_state,
-	created_at, last_used_at`
+	created_at, last_used_at, scope_udid`
 
 // GetPasskey returns one credential by its id, and whether it exists.
 //
@@ -210,4 +222,40 @@ func (s *Store) RenamePasskey(credentialID, name string) (renamed bool, err erro
 		return false, err
 	}
 	return n > 0, nil
+}
+
+// ListAdminPasskeys returns only the ADMIN credentials — those confined to no device.
+//
+// THIS IS THE FUNCTION spec D6 EXISTS TO CREATE, and its name is the guard. Every predicate that
+// asks *is there a credential* in order to decide something about the admin — whether passwordless
+// is reachable, whether a removal would strand the install, which credentials may prove an admin
+// operation — must ask it about these rows and not about `ListPasskeys`.
+//
+// WHY A SEPARATE FUNCTION RATHER THAN A FILTER AT EACH CALL SITE. A filter is a line somebody can
+// forget to write, and forgetting it fails in the PERMITTING direction: one scoped credential and
+// no admin passkey would answer "yes, there is a credential", the admin password could then be
+// removed, and nobody could administer quince — the admin locked out, the scoped holder unable by
+// construction, and only `quince auth reset` a way back. A named function makes the wrong question
+// visible at the call site instead of absent from it.
+//
+// `ListPasskeys` IS STILL CORRECT FOR ITS OWN CALLERS — the Settings list shows every credential,
+// because the admin managing them needs to see the scoped ones. The two questions are different and
+// this pair is what keeps them from being spelled the same way.
+func (s *Store) ListAdminPasskeys() ([]Passkey, error) {
+	rows, err := s.db.Query(`SELECT ` + passkeyCols + ` FROM passkeys
+	                         WHERE scope_udid IS NULL ORDER BY created_at, credential_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []Passkey
+	for rows.Next() {
+		p, err := scanPasskey(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }

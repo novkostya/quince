@@ -452,7 +452,10 @@ func (s *Service) RemovePassword(proofs *Proofs, pres Presented, rpID, sessionID
 // different instructions rather than different verdicts. D2 keeps ErrLastCredential for exactly this
 // — "a refusal that says only *present another credential* is correct and less useful".
 func (s *Service) passwordRemovalRefusal(rpID string) error {
-	rows, err := s.store.ListPasskeys()
+	// ADMIN CREDENTIALS ONLY (spec D6). This names where a route back IN exists, and a scoped
+	// credential is not one — pointing the admin at a household member's phone would be a
+	// remedy they cannot use. The refusal above is unchanged; only what it SAYS is scoped.
+	rows, err := s.store.ListAdminPasskeys()
 	if err != nil {
 		return err
 	}
@@ -599,7 +602,11 @@ func (s *Service) passkeyRemovalRefusal(credentialID, rpID string) error {
 	if err != nil {
 		return err
 	}
-	rows, err := s.store.ListPasskeys()
+	// ADMIN CREDENTIALS ONLY (spec D6). Removing a credential is an admin operation — D9 keeps
+	// revocation with the admin — so the question "can anything ELSE prove this removal" is a
+	// question about admin credentials. A scoped one counting here would report a prover that
+	// is not entitled to prove it.
+	rows, err := s.store.ListAdminPasskeys()
 	if err != nil {
 		return err
 	}

@@ -334,6 +334,17 @@ func existingCredentials(st *store.Store, rpID string) ([]webauthn.Credential, e
 	if err != nil {
 		return nil, err
 	}
+	return credentialsFrom(rows, rpID)
+}
+
+// credentialsFrom converts stored rows to the library's shape, keeping only this rpId's.
+//
+// SHARED BY BOTH LOADERS SO THE CONVERSION CANNOT DRIFT. The rpId filter and the flag
+// restoration below are correctness-critical for assertion — 0009 exists because a credential
+// rebuilt without its backup flags can never sign in — and two copies of that logic would be
+// two places for it to rot. Which ROWS to convert is the scope decision; how to convert them
+// is not, and only the first belongs to the caller.
+func credentialsFrom(rows []store.Passkey, rpID string) ([]webauthn.Credential, error) {
 	out := make([]webauthn.Credential, 0, len(rows))
 	for _, p := range rows {
 		if p.RPID != rpID {
@@ -367,4 +378,22 @@ func credentialDescriptors(creds []webauthn.Credential) []protocol.CredentialDes
 		out = append(out, creds[i].Descriptor())
 	}
 	return out
+}
+
+// adminCredentials loads this rpId's ADMIN credentials in the library's shape.
+//
+// THE SCOPE-AWARE SIBLING OF `existingCredentials`, and the pair is deliberate. This one answers
+// "which credentials speak for the admin"; the other answers "which credentials exist at this
+// origin". Before qn.13 those were the same question, and every caller of the second was really
+// asking the first (spec D6).
+//
+// A CALLER THAT WANTS EVERY CREDENTIAL STILL HAS ONE. The exclusion list at registration genuinely
+// means "every credential this authenticator might already hold", so it keeps `existingCredentials`
+// — narrowing it would let a duplicate be minted on an authenticator that already has a scoped one.
+func adminCredentials(st *store.Store, rpID string) ([]webauthn.Credential, error) {
+	rows, err := st.ListAdminPasskeys()
+	if err != nil {
+		return nil, err
+	}
+	return credentialsFrom(rows, rpID)
 }

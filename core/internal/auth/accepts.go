@@ -80,7 +80,12 @@ func (s *Service) Accepts(op ProofOperation, rpID, target string) ([]string, err
 		return out, nil
 	}
 
-	creds, err := existingCredentials(s.store, rpID)
+	// ADMIN CREDENTIALS ONLY, and this is the passwordless lockout (spec D6). This predicate
+	// decides whether a passkey can stand in for the password — an ADMIN question. Counting
+	// every row would let an install with one scoped credential and no admin passkey remove
+	// its admin password, after which the admin is locked out, the scoped holder cannot
+	// administer anything by construction, and only `quince auth reset` gets back in.
+	creds, err := adminCredentials(s.store, rpID)
 	if err != nil {
 		return nil, err
 	}
