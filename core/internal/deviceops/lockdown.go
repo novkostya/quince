@@ -92,12 +92,32 @@ func syncPlists(srcDir, dstDir string, overwrite bool) (int, error) {
 	return n, nil
 }
 
+// copyFile copies src over dst at 0600.
+//
+// A SAME-FILE COPY IS A NO-OP, AND PERFORMING IT DESTROYS THE FILE (quince#1309). `dst` is opened
+// with O_TRUNC before `src` is read, so when both paths resolve to one inode the source is emptied
+// and zero bytes are written back — a pairing record silently becomes 0 bytes.
+//
+// That is reachable from a deployment rather than from a bug in this package: bind the same host
+// directory at both `$QUINCE_DATA/lockdown` and the system dir and the two are one directory.
+// Measured on a running container, one inode through both paths. The guard is here rather than in
+// the caller because it is the caller's PATHS that differ while the FILE is the same — only an
+// inode comparison can tell, and only the code holding both can make it.
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = in.Close() }()
+
+	// Stat the OPEN handle, not the path: it is the file about to be read, so nothing can be
+	// swapped underneath between the check and the copy.
+	if si, serr := in.Stat(); serr == nil {
+		if di, derr := os.Stat(dst); derr == nil && os.SameFile(si, di) {
+			return nil
+		}
+	}
+
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err

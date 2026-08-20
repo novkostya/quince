@@ -94,3 +94,44 @@ func TestRestoreMissingPersistDirIsNoError(t *testing.T) {
 		t.Fatalf("expected empty system dir, got %d entries", len(entries))
 	}
 }
+
+// TestBackupSurvivesAliasedDirs is quince#1309's regression fixture, at the shape that produced it
+// rather than at the function: a deployment that binds ONE host directory at both
+// `$QUINCE_DATA/lockdown` and the system dir, which the shipped compose examples did.
+//
+// It asserts the RECORD, not the call. `Backup()` returning without error was already true while it
+// was emptying the file — the failure was silent, and a test that watched the error would have
+// passed throughout.
+func TestBackupSurvivesAliasedDirs(t *testing.T) {
+	data := t.TempDir()
+	shared := filepath.Join(data, "lockdown") // sysDir == persistDir, as the two binds made them
+	rec := filepath.Join(shared, "00008110-000E54EE0EDA801E.plist")
+	writeFile(t, rec, "PAIRING-RECORD")
+
+	NewLockdownStore(data, shared, discard()).Backup()
+
+	if got := read(t, rec); got != "PAIRING-RECORD" {
+		t.Fatalf("Backup() damaged the record through aliased dirs: got %q, want %q", got, "PAIRING-RECORD")
+	}
+}
+
+// TestCopyFileRefusesToEmptyItself pins the guard itself, so the behaviour survives a caller being
+// rewritten. Two different PATHS to one file is the case: `os.SameFile` is the only thing that can
+// see it, since neither string tells you.
+func TestCopyFileRefusesToEmptyItself(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "record.plist")
+	writeFile(t, a, "PAIRING-RECORD")
+
+	b := filepath.Join(dir, "alias.plist")
+	if err := os.Link(a, b); err != nil {
+		t.Skipf("hard links unavailable here: %v", err)
+	}
+
+	if err := copyFile(a, b); err != nil {
+		t.Fatalf("copyFile over its own inode should be a no-op, got %v", err)
+	}
+	if got := read(t, a); got != "PAIRING-RECORD" {
+		t.Fatalf("copyFile emptied the file it was reading: got %q", got)
+	}
+}

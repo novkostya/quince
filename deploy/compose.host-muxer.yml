@@ -31,14 +31,17 @@ services:
     ports:
       - "8968:8968" # change the left side if something else already uses this port
     volumes:
-      - ./quince/data:/data # config, database, pairing records — keep this
+      - ./quince/data:/data # config, database, quince's own state — keep this
       - ./quince/cache:/cache # scratch, safe to delete
 
       # ▸ Your backups go here. Point the left side at real storage — a NAS share, a ZFS
       #   dataset, a big disk. A full iPhone backup can run to tens of gigabytes.
       - ./quince/backups:/backups
 
-      - ./quince/data/lockdown:/var/lib/lockdown # pairing records, written here
+      # There is deliberately no /var/lib/lockdown here. Pairing records belong to the muxer and
+      # quince asks it for them — binding quince's own data directory there as well would make one
+      # directory answer to two names, and the copy between them empties the file.
+
 
       # Your usbmuxd's socket. This is its standard path and quince looks there by default,
       # so there is nothing to configure. If yours listens elsewhere, put your path on the left
