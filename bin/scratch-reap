@@ -185,14 +185,24 @@ for d in "$ROOT"/*; do
 	# That is the safety rule's own test: a clean clone on the default branch with nothing of its own
 	# is the freshest possible copy of the repository and holds no work that exists nowhere else.
 	#
-	# THE NAME IS READ, NEVER ASSUMED. This tool takes `--root`, not `--repo`, so it cannot know the
-	# repository — hardcoding `main` would be wrong for `ios-backup-crypt` or anything else with a
-	# different default. `origin/HEAD` is what `git clone` records, and a clone that somehow lacks it
-	# falls through to the old rule and is KEPT, which is the safe direction — and SAID, rather than
-	# silently taken, because a keep whose reason a reader cannot check is how this defect survived.
+	# THE NAME IS READ HERE, NEVER ASSUMED — but the TOOL is `main`-only until quince#1297, and the
+	# distinction matters because the obvious reading of this paragraph is wrong. `origin/HEAD` is
+	# what `git clone` records, so this check is right on a repository whose default is `master`;
+	# the ahead-comparison ABOVE still hardcodes `origin/main`, fails there, and reports the clone
+	# UNKNOWN before control ever reaches this line. So the careful read is correct and unreachable
+	# in exactly the case it exists for. Measured: a `master`-default origin yields
+	# `? onmaster — could not compare master against origin/main`.
+	#
+	# The behaviour is SAFE — UNKNOWN means kept, nothing is deleted wrongly — which is why that is
+	# a separate issue rather than a fix folded in here: it changes the rule that decides whether
+	# work is lost, and that deserves its own claim and its own review.
+	#
+	# A clone that somehow lacks `origin/HEAD` falls through to the old rule and is KEPT, which is
+	# the safe direction — and SAID, rather than silently taken, because a keep whose reason a
+	# reader cannot check is how this defect survived.
 	default_branch=$(git -C "$d" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
 	if [ -n "$default_branch" ] && [ "$branch" = "$default_branch" ]; then
-		why="$branch is the default branch and this clone is not ahead of origin/main"
+		why="$branch is the default branch and this clone is not ahead of origin/$default_branch"
 	elif git -C "$d" ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
 		kept=$((kept + 1))
 		if [ -n "$default_branch" ]; then
