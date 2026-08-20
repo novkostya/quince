@@ -7,12 +7,12 @@ survives the lock.
 Rung issue: **quince#270**, whose §9-1 was ruled by the Operator on 2026-08-20: **take option 3 —
 `vault.Vault` as the Go interface now, with an in-process implementation behind it; sidecar-vs-in-core
 deferred to a measurement.** This spec is written under that ruling. It owes two things the ruling
-asked for by name: it **specifies the spike** (D10) and it **proposes the threshold before the number
+exists** (D10.3), **confirmed by the Operator on 2026-08-20** (quince#1344).
 exists** (D10.3), for the Operator to confirm — tracked at quince#1344.
 
 **quince#184 is answered here** (D5, G1). It has been open since the conformance suite was first named
 as a shipping gate, and it is the one blocker this rung inherits rather than creates. D5 records why
-it could not have been authored before today, and what one upstream release costs to unblock it.
+it could not have been authored before today, and what one `ios-backup-crypt` release costs to unblock it.
 
 ---
 
@@ -196,7 +196,7 @@ Fact 5. Both values live in the NSKeyedArchiver record the library **already par
 Two routes were considered. Decoding the record a second time inside quince duplicates the library's
 own parser against an Apple format, so that the two could disagree about a file's size — rejected.
 **The library gains `Size int64` and `MTime time.Time` on `FileEntry`**; it is quince's own library
-and this is one release. Named in **Slices** as an upstream dependency of the slice that needs it.
+and this is one release. Named in **Slices** as a precondition of the slice that needs it.
 
 Until then `list`/`stat` **cannot answer `size`**, and *state honesty* forbids guessing. The slices
 are ordered so that no shipped surface ever serves a fabricated one (see **Slices**).
@@ -350,20 +350,21 @@ Reported as peak RSS against input size for each, plus the same three on a real 
 is available (G4). Synthetic manifests come from the fixture generator (D5), which is what makes the
 curve runnable on a session box at all.
 
-**D10.3 — the threshold, PROPOSED before the number exists. Confirmation is owed on ALL THREE clauses
-and is tracked at quince#1344.** quince#270 §6 offers *"comfortable"* and *"near the ceiling"*;
-neither is a bar, and an undefined bar means the number arrives and each reader supplies their own.
+**D10.3 — the threshold, CONFIRMED by the Operator on 2026-08-20 (quince#1344), and taken before
+the number exists.** quince#270 §6 offers *"comfortable"* and *"near the ceiling"*; neither is a bar,
+and an undefined bar means the number arrives and each reader supplies their own.
 
-**Where it is confirmed, named rather than left as a bare `PROPOSED`.** This said *"for Operator
-confirmation at spec review"* while the spec was the open PR; that moment passed when quince#1343
-merged, and deleting the clause without replacing it left a marker with no when and no where — the
-half-stale shape quince#408 exists for. **quince#1344 is the successor**, and it is the right home
-for all three clauses rather than only for (c): quince#1343 carried exactly one review, the
-architect's, and merged on it, so **the Operator has not confirmed (a) or (b) either.** The
-confirmation is outstanding for the whole threshold, which is what this marker now says.
+**The ruling, written out because git is where a decision survives.** All three clauses are confirmed
+as written, on 2026-08-20, at quince#1344 — including (a) and (b), which had never been confirmed
+either: quince#1343 carried exactly one review, the architect's, and merged on it. The threshold is
+now settled in full and the marker above is a record rather than a request.
 
-> **In-process stands if ALL THREE hold — and (c) is a RECOMMENDATION with a live alternative
-> (quince#1344): (a) peak RSS attributable to the vault stays under 256 MB
+**What was weighed, so the ruling can be argued with rather than merely cited.** The alternative to
+(c) was to **accept retention and record why** — perhaps `lock` is rare enough, or the daemon
+restarts often enough, that a high-water mark is tolerable. It was a real option, put to the Operator
+as one, and **not taken**. D10.3c records why.
+
+> **In-process stands if ALL THREE hold: (a) peak RSS attributable to the vault stays under 256 MB
 > across all three curves; (b) none of the three curves grows with input size beyond a flat streaming
 > constant; and (c) RSS returns to within 32 MB of the pre-unlock baseline within 60 s of `lock`.**
 >
@@ -420,25 +421,21 @@ unlock, peak during, and RSS at `lock + 60 s`. **The ordering the ruling require
 that code is then written to meet. What must not happen is (c) being *chosen* after its measurement,
 which is why its numbers are fixed here with the other two.
 
-**D10.3c — the alternative is LIVE, and this clause is a RECOMMENDATION, not a ruling.** Open
-question: **quince#1344**, labelled `needs-operator`.
+**D10.3c — the alternative was weighed and NOT taken. Operator, 2026-08-20 (quince#1344).**
 
-The other honest answer is to **accept retention and record why** — perhaps `lock` is rare enough, or
-the daemon restarts often enough, that a high-water mark is tolerable. **That is defensible and it is
-not the lesser option**; the architect filed quince#1344 declining to rule between the two, and
-clause (c) has exactly the status (a) and (b) already have — proposed here, the Operator's to confirm.
+The other honest answer was to **accept retention and record why** — perhaps `lock` is rare enough,
+or the daemon restarts often enough, that a high-water mark is tolerable. **It was defensible and it
+was not the lesser option**; the architect filed quince#1344 declining to rule between the two, and
+put both to the Operator with the swap specified so either could be taken mechanically.
 
-The argument for recommending (c) rather than acceptance, so it can be weighed against the argument
-for the other: the daemon this is added to must survive a multi-hour transfer on a weak NAS, so a
-permanent high-water mark set by a browse session is **paid by the backup that runs afterwards** —
-and the remedy costs one call at a rare event. **What is not defensible is neither**: an absence
-decides the question by default, at slice 2, after the number has been taken.
+**The argument that decided it:** the daemon this is added to must survive a multi-hour transfer on a
+weak NAS, so a permanent high-water mark set by a browse session is **paid by the backup that runs
+afterwards** — and the remedy costs one call at a rare event. What was never defensible is *neither*:
+an absence decides the question by default, at slice 2, after the number has been taken.
 
-**If the Operator takes acceptance instead, what changes is small and is named here so the swap is
-mechanical:** clause (c) and G7 come out, D9 keeps or drops `debug.FreeOSMemory()` as a cheap
-courtesy rather than as a bar, and the acceptance is written into this section with its reason. The
-threshold stays a two-clause bar and nothing else in the rung moves.
-
+**Recorded rather than dropped**, because the acceptance branch will be re-proposed the first time
+clause (c) is expensive to meet, and the next reader should see that it was considered and refused
+rather than never raised.
 **D10.4 — if the sidecar wins, this rung does not build it.** The interface is unchanged (D1), the
 suite is unchanged (D5), and the RPC becomes a second implementation with its own rung. The number
 is what makes that a scheduled decision instead of an open gap.
@@ -577,7 +574,7 @@ Every hard rule this rung touches *or comes near*, written before building.
 
 Each is one PR carrying one reviewable claim, **sequenced from `main`, not stacked**.
 
-| | claim | needs the upstream release? |
+| | claim | needs an `ios-backup-crypt` release? |
 | --- | --- | --- |
 | **1** | **this spec** | no |
 | **2** | **the spike** — the standalone harness, the three curves on synthetic manifests, the number for clauses (a) and (b), and stack D4's open paragraph replaced by it (D10). Clause (c) is **not** measurable here (D10.3b) | **yes** (D5, for the generator) |
@@ -588,7 +585,7 @@ Each is one PR carrying one reviewable claim, **sequenced from `main`, not stack
 | **7** | the UI — unlock dialog, browser, download, and the incomplete-file surface (D8.1) | no |
 | **8** | design §7 and §6 rewritten to the seam as built, including D11's gate wording, ruled with the number from slice 2 | no |
 
-**One upstream release gates slices 2–4**, and it is one release rather than three: `ios-backup-crypt`
+**One `ios-backup-crypt` release gates slices 2–4**, and it is one release rather than three: `ios-backup-crypt`
 needs `FileEntry.Size`/`MTime` (D4), an exported fixture generator (D5), and a caller-chosen temp dir
 (D6). It is quince's own library under the same Operator ruling as this rung, so this is scheduling,
 not a dependency on anybody outside the project — but it is **named as a precondition** rather than
