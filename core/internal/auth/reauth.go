@@ -147,6 +147,16 @@ func (s *Service) BeginReauth(cer *ReauthCeremonies, rpID, clientIP string,
 	// EVERY OTHER OPERATION STAYS DISCOVERABLE, with no allow-list at all. `add_passkey` and
 	// `set_password` are about the credential SET rather than a member of it, so restricting them
 	// would exclude nothing and cost the usernameless flow qn.6k exists for.
+	// EVERY REAUTH OPERATION IS AN ADMIN OPERATION, so every ceremony admits only admin
+	// credentials as proof (spec D6). This paragraph used to read "every other operation stays
+	// discoverable, with no allow-list at all", on the grounds that `add_passkey` and
+	// `set_password` concern the credential SET rather than a member of it. Scope breaks that:
+	// there is no longer ONE set, and those operate on the ADMIN's — so admitting any
+	// credential would let a scoped holder prove an admin operation.
+	//
+	// IT COSTS THE USERNAMELESS FLOW NOTHING. An allow-list names credentials; it does not ask
+	// for a username, and the platform still chooses among what is offered. And it is a NO-OP
+	// until a scoped credential exists, which is why the invariant lands before the rows do.
 	var opts []webauthn.LoginOption
 	if op == OpRemovePasskey {
 		allowed, err := allowedForRemoval(s.store, rpID, target)
@@ -154,6 +164,12 @@ func (s *Service) BeginReauth(cer *ReauthCeremonies, rpID, clientIP string,
 			return nil, "", err
 		}
 		opts = append(opts, webauthn.WithAllowedCredentials(allowed))
+	} else {
+		admin, err := adminCredentials(s.store, rpID)
+		if err != nil {
+			return nil, "", err
+		}
+		opts = append(opts, webauthn.WithAllowedCredentials(credentialDescriptors(admin)))
 	}
 	assertion, session, err := wa.BeginDiscoverableLogin(opts...)
 	if err != nil {
@@ -192,7 +208,12 @@ func (s *Service) provable(op ProofOperation, rpID, target string) error {
 	default:
 		return nil
 	}
-	rows, err := s.store.ListPasskeys()
+	// ADMIN CREDENTIALS ONLY (spec D6). This is the `OpRemovePassword` scan, and removing the
+	// password is only safe if an ADMIN credential survives it. A scoped credential is not a
+	// way back in for the admin — its holder can reach one device and nothing that administers
+	// quince — so counting one here would report a route that does not exist and produce the
+	// lockout ErrLastCredential is the last guard against.
+	rows, err := s.store.ListAdminPasskeys()
 	if err != nil {
 		return err
 	}
@@ -300,7 +321,10 @@ func (s *Service) FinishReauth(cer *ReauthCeremonies, proofs *Proofs, key, rpID,
 // merely unlikely — stated here because the failure would be silent and would look like a working
 // prompt.
 func allowedForRemoval(st *store.Store, rpID, target string) ([]protocol.CredentialDescriptor, error) {
-	creds, err := existingCredentials(st, rpID)
+	// ADMIN CREDENTIALS ONLY (spec D6, and the ceremony half of it). Removing a credential is
+	// an admin operation, so the set that may PROVE it is the admin set — offering a scoped
+	// credential here would let a household member prove an admin removal.
+	creds, err := adminCredentials(st, rpID)
 	if err != nil {
 		return nil, err
 	}

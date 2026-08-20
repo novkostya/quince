@@ -1,0 +1,37 @@
+-- qn.13 slice 4: a credential carries its SCOPE, and the predicates that count credentials learn
+-- to ask about the right ones.
+--
+-- SCOPE LIVES ON THE CREDENTIAL, NOT ON THE SESSION (spec D2). There are no accounts here — 0008's
+-- header is explicit that `user_handle` is one constant shared by every row and there is no user
+-- table to join to — so a capability cannot be a property of an account. It is a property of the
+-- credential, which is the only thing that exists, and a session inherits it by pointing at the
+-- credential it was minted by (0014_session_principal.sql). Two homes for one principal would
+-- invite them to disagree.
+--
+-- ONE COLUMN, NOT TWO. A `scope` enum beside a `scope_udid` would make "device-scoped to nothing"
+-- and "admin, scoped to a device" both writable, and neither is a state that means anything. The
+-- device scope IS the udid, so NULL says admin and a value says which device.
+--
+-- NULL MEANS ADMIN, AND THAT IS TRUE OF EVERY ROW THAT EXISTS TODAY — which is what makes this
+-- additive with no backfill statement. It is also, deliberately, the same shape as 0014's hazard:
+-- a default that GRANTS. It is accepted for existing rows because they genuinely are admin
+-- credentials; it is NOT accepted for new ones, and the Go layer refuses to guess — `InsertPasskey`
+-- takes the scope as a required field and the two ceremonies each state theirs.
+--
+-- THE DANGER THIS COLUMN CREATES IS THE POINT OF THE SLICE. Adding scoped rows to this table makes
+-- every existing `SELECT ... FROM passkeys` count a set it did not mean: `accepts.go` asked "is
+-- there a credential" to decide whether passwordless is reachable, and with one scoped row and no
+-- admin passkey it would answer yes — after which the admin password can be removed, the admin is
+-- locked out, the scoped holder cannot administer anything by construction, and only
+-- `quince auth reset` gets back in. So this migration ships in the SAME slice as the predicates
+-- that read it, and `idx_passkeys_admin` exists to make the correct question cheap enough that
+-- nobody writes the wrong one for speed.
+--
+-- NOT A FOREIGN KEY TO `device_identity`. A device can be forgotten while a credential scoped to it
+-- still exists, and that is a state quince must be able to SEE and report rather than one the
+-- database silently resolves by cascading a credential away.
+ALTER TABLE passkeys ADD COLUMN scope_udid TEXT;
+
+-- The admin-credential question is asked on the passwordless path, at every reauth ceremony, and at
+-- every removal. It is the one query whose cost must never be an argument for asking a broader one.
+CREATE INDEX idx_passkeys_admin ON passkeys (rp_id) WHERE scope_udid IS NULL;
