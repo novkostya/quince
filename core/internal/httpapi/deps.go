@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -31,6 +32,7 @@ type Deps struct {
 	JobControl       JobControl
 	Versions         VersionReader
 	VersionAdmin     VersionAdmin
+	VaultBrowse      VaultBrowse
 	Storages         StorageReader
 	// ZFSKeyDir is the directory POST /api/storages/zfs/key generates or finds helper keys in. Empty
 	// means `config.DefaultZFSKeyDir`, which is what production leaves it as (quince#818).
@@ -417,4 +419,55 @@ type NotificationReader interface {
 	// SendTest delivers one notification to every live subscription, so "is this working?" is
 	// answerable without waiting three days for a device to go stale.
 	SendTest(ctx context.Context) ([]wire.PushDeliveryResult, error)
+}
+
+// VaultBrowse serves the unlocked-session surface — contracts §1's four frozen routes:
+// POST /api/versions/{id}/unlock, POST /api/sessions/{id}/lock, GET
+// /api/sessions/{id}/browse and GET /api/sessions/{id}/file/{file_id}. The real
+// implementation wraps *vault.Registry over a storage-resolved version; UnavailableVaultBrowse
+// stands in when no vault is wired.
+//
+// CONSUMER-DEFINED HERE, in primitives and wire types only, so httpapi imports no vault
+// subsystem — the same pattern as DeviceReader, MuxerControl, DeviceOps and VersionAdmin.
+//
+// EVERY METHOD RETURNS A CONTRACT ERROR CODE RATHER THAN AN ERROR TO CLASSIFY. The vault
+// seam already owns that classification (`vault.Code`), and re-deriving it here from sentinel
+// errors would put the taxonomy in two places — where the second one drifts. Empty code means
+// success.
+type VaultBrowse interface {
+	// Unlock opens a version. An empty password is legitimate for a version that needs none.
+	Unlock(versionID, password string) (s wire.Session, code, message string)
+	// Lock ends a session. It is idempotent: an unknown or expired id is not an error,
+	// because the state the caller wanted is the state that exists (contracts §1 → 204).
+	Lock(sessionID string) (code, message string)
+	// Browse returns one page of the version's file tree.
+	Browse(sessionID string, q wire.BrowseQuery) (p wire.BrowsePage, code, message string)
+	// OpenFile returns the decrypted content of one file. The caller MUST close the reader.
+	//
+	// It returns the entry as well as the reader so the handler can set Content-Length from
+	// the recorded size — which is what makes a SHORT read detectable by the client rather
+	// than silently truncated (D8.1).
+	OpenFile(sessionID, fileID string) (rc io.ReadCloser, e wire.FileEntry, code, message string)
+}
+
+// UnavailableVaultBrowse is the VaultBrowse used when no vault subsystem is wired: every
+// route reports 503 honestly rather than pretending a version cannot be unlocked.
+type UnavailableVaultBrowse struct{}
+
+const vaultUnavailable = "no vault is wired (running --demo, or no storage subsystem is configured)"
+
+func (UnavailableVaultBrowse) Unlock(string, string) (wire.Session, string, string) {
+	return wire.Session{}, "unavailable", vaultUnavailable
+}
+
+func (UnavailableVaultBrowse) Lock(string) (string, string) {
+	return "unavailable", vaultUnavailable
+}
+
+func (UnavailableVaultBrowse) Browse(string, wire.BrowseQuery) (wire.BrowsePage, string, string) {
+	return wire.BrowsePage{}, "unavailable", vaultUnavailable
+}
+
+func (UnavailableVaultBrowse) OpenFile(string, string) (io.ReadCloser, wire.FileEntry, string, string) {
+	return nil, wire.FileEntry{}, "unavailable", vaultUnavailable
 }
