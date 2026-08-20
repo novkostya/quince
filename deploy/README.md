@@ -12,7 +12,6 @@ Plain English, with none of this project's internal vocabulary.
 | [`compose.yml`](compose.yml) | The example stack. Start here. |
 | [`storage.md`](storage.md) | Where backups go, and what each kind of disk gives you |
 | [`tls.md`](tls.md) | Getting HTTPS in front of quince |
-| [`upgrading.md`](upgrading.md) | Config changes between versions |
 
 ## For people working on quince
 

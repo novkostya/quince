@@ -58,7 +58,6 @@ already run `usbmuxd` on that machine.
 | --- | --- |
 | [`deploy/storage.md`](deploy/storage.md) | Where backups go, and what each kind of disk gives you |
 | [`deploy/tls.md`](deploy/tls.md) | Getting HTTPS in front of quince |
-| [`deploy/upgrading.md`](deploy/upgrading.md) | Moving to a newer version |
 | [`docs/`](docs/) | How quince is built and why — architecture, API, design decisions |
 | [quince-devlog](https://github.com/novkostya/quince-devlog) | What is being worked on, and every decision so far |
 
