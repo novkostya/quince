@@ -310,7 +310,9 @@ incomplete in the backup, and retrying will not change that.**
 
 A session is `{id, version_id, expires_at}` (contracts §2). It is created by `unlock`, ends by `lock`,
 by TTL, or by daemon exit — and in all four cases the same teardown runs: `Close()` the vault, drop
-the keys, wipe `/cache/scratch/<session_id>/`.
+the keys, wipe `/cache/scratch/<session_id>/`, then **`debug.FreeOSMemory()`**. That last step is
+D10.3's clause (c) as code rather than as a hope about the scavenger's schedule; it is a
+stop-the-world cost paid at a rare event, never in a hot path, and never during a backup.
 
 - **The config key is `vault.session_ttl`, default 15m, live-editable, no restart.** Not under
   `sessions:` — fact 12: that namespace is the **login** session's, and two different objects under
@@ -348,15 +350,15 @@ Reported as peak RSS against input size for each, plus the same three on a real 
 is available (G4). Synthetic manifests come from the fixture generator (D5), which is what makes the
 curve runnable on a session box at all.
 
-**D10.3 — the threshold, PROPOSED here for Operator confirmation at spec review, before the number
-exists.** quince#270 §6 offers *"comfortable"* and *"near the ceiling"*; neither is a bar, and an
-undefined bar means the number arrives and each reader supplies their own.
+**D10.3 — the threshold, PROPOSED here for Operator confirmation, before the number exists.**
+quince#270 §6 offers *"comfortable"* and *"near the ceiling"*; neither is a bar, and an undefined bar
+means the number arrives and each reader supplies their own.
 
-> **In-process stands if BOTH hold: (a) peak RSS attributable to the vault stays under 256 MB across
-> all three curves, and (b) none of the three curves grows with input size beyond a flat streaming
-> constant.**
+> **In-process stands if ALL THREE hold: (a) peak RSS attributable to the vault stays under 256 MB
+> across all three curves; (b) none of the three curves grows with input size beyond a flat streaming
+> constant; and (c) RSS returns to within 32 MB of the pre-unlock baseline within 60 s of `lock`.**
 >
-> **The sidecar earns its complexity if EITHER fails.**
+> **The sidecar earns its complexity if ANY fails.**
 
 The reasoning, so the bar can be argued with rather than merely met:
 
@@ -366,10 +368,54 @@ The reasoning, so the bar can be argued with rather than merely met:
   for memory added **permanently to the address space of a daemon that must survive a multi-hour
   Wi-Fi transfer** on a weak NAS. 256 MB is an order of magnitude over idle and still small enough in
   absolute terms that the daemon's survival does not depend on what else the box is running.
-- **Clause (b) is the load-bearing half.** A curve that grows with manifest rows or file bytes makes
-  any fixed number a statement about the test input, and an unbounded curve on small-RAM hardware is
-  precisely what an `rlimit` on a separate process exists to bound. A flat curve says the streaming
-  design holds; a rising one says it does not, whatever today's peak was.
+- **Clause (b) is the load-bearing half of the two ORIGINAL clauses.** A curve that grows with
+  manifest rows or file bytes makes any fixed number a statement about the test input, and an
+  unbounded curve on small-RAM hardware is precisely what an `rlimit` on a separate process exists to
+  bound. A flat curve says the streaming design holds; a rising one says it does not, whatever
+  today's peak was.
+- **Clause (c) exists because (a) and (b) together still miss the thing the sidecar was being credited
+  with** (`quince-analyst`, quince#1343). Both were written about **peak**. The sidecar's advantage
+  was never only a bounded peak — it is that the process **exits at lock and gives everything back**,
+  where in-process the allocations land in the daemon's own heap and Go returns freed memory to the
+  OS on the scavenger's schedule rather than at `lock`. As written without (c), *a daemon that peaks
+  at 200 MB and settles back to ~30 MB, and one that peaks at 200 MB and stays there, both passed* —
+  materially different outcomes on the box the bar is set for.
+  **32 MB** is about the daemon's entire idle footprint, so the clause reads as *the vault leaves
+  behind less than the daemon itself weighs*. **60 s** is deliberately generous: it is long enough
+  that ordinary scavenger lag cannot fail the clause, so what it catches is retention rather than
+  timing.
+
+**D10.3a — clause (c) is a DESIGN REQUIREMENT, not a hope about the runtime, and that is what makes
+it fair to impose.** Go exposes `debug.FreeOSMemory()`, which the session teardown (D9) can call at
+`lock` — a stop-the-world cost paid at a rare event rather than in any hot path. So the clause is
+something the in-process implementation can be *built* to satisfy, not merely something it is
+measured against and might lose to the scheduler.
+
+**Whether it is SUFFICIENT is owed to measurement, not asserted here.** Returned pages are not the
+whole of RSS — heap fragmentation can hold an address space open regardless — which is exactly why
+the clause is written as *within 32 MB of baseline* rather than *back to baseline*. If the mechanism
+turns out not to reach the bar, that is clause (c) doing its job and the sidecar earning its
+complexity, which is the outcome the threshold exists to decide rather than a defect in it.
+
+**And (c) does NOT simply hand the decision to in-process.** It names a risk with a candidate remedy;
+it does not assume the remedy works. That distinction is the whole of the paragraph above.
+
+**D10.3b — clause (c) is measured by a SECOND harness, and D10.1's cannot do it.** A standalone
+process that exits has no post-lock RSS, so the harness that produces the number for (a) and (b) is
+structurally blind to (c) — the finding that raised it says so, and it is why this is settled here
+rather than discovered at slice 2.
+
+So (c) is observed **in-process, across a lock**, on the implementation slice: baseline RSS before
+unlock, peak during, and RSS at `lock + 60 s`. **The ordering the ruling requires is untouched** —
+(a) and (b) still come from the standalone harness **before any vault code exists**, and (c) is a bar
+that code is then written to meet. What must not happen is (c) being *chosen* after its measurement,
+which is why its numbers are fixed here with the other two.
+
+**Rejected: accepting retention with a stated reason.** It was the other honest way out — perhaps
+`lock` is rare enough that a high-water mark is tolerable. It is refused because the daemon this is
+added to must survive a multi-hour transfer on a weak NAS, and a permanent high-water mark set by a
+browse session is paid by the backup that runs afterwards. A remedy that costs one call at a rare
+event is cheaper than the acceptance.
 
 **D10.4 — if the sidecar wins, this rung does not build it.** The interface is unchanged (D1), the
 suite is unchanged (D5), and the RPC becomes a second implementation with its own rung. The number
@@ -462,6 +508,10 @@ Beyond `make gates` / `make image`:
   (qn.9), so it does not bind here — this rung **adopts the same 300 ms for the first browse page**,
   which is the closest thing it ships, rather than inventing a second number or claiming a budget it
   is not under. Reported as `/usr/bin/time -v` notes where a test is not cheap.
+- **G7 — memory goes back after a lock.** D10.3's clause (c), and the one gate D10.1's harness
+  structurally cannot supply: baseline RSS before unlock, peak during, and RSS at `lock + 60 s`,
+  observed **in-process across a lock**. It runs on the implementation slice, not on the spike, and
+  the bar it asserts is fixed in D10.3 rather than read off its own result.
 
 ---
 
@@ -508,10 +558,10 @@ Each is one PR carrying one reviewable claim, **sequenced from `main`, not stack
 | | claim | needs the upstream release? |
 | --- | --- | --- |
 | **1** | **this spec** | no |
-| **2** | **the spike** — the standalone harness, the three curves on synthetic manifests, the number, and stack D4's open paragraph replaced by it (D10) | **yes** (D5, for the generator) |
+| **2** | **the spike** — the standalone harness, the three curves on synthetic manifests, the number for clauses (a) and (b), and stack D4's open paragraph replaced by it (D10). Clause (c) is **not** measurable here (D10.3b) | **yes** (D5, for the generator) |
 | **3** | `vault.Vault` + the conformance suite and its negative control, against the in-process encrypted implementation — quince#184 (D1, D2, D5, G1, G2) | **yes** (D4, D5, D6) |
 | **4** | the unencrypted implementation and the selection on `IsEncrypted` (D7) | yes |
-| **5** | the session registry, `vault.session_ttl`, teardown and the scratch wipe, plus G3 and G5 (D6, D9) | no |
+| **5** | the session registry, `vault.session_ttl`, teardown and the scratch wipe, plus G3, G5 and **G7 — D10.3 clause (c), the one measurement the spike cannot take** (D6, D9, D10.3b) | no |
 | **6** | the four REST endpoints, the error taxonomy and contracts §4/§2's amendment (D3, D8) | no |
 | **7** | the UI — unlock dialog, browser, download, and the incomplete-file surface (D8.1) | no |
 | **8** | design §7 and §6 rewritten to the seam as built, including D11's gate wording, ruled with the number from slice 2 | no |
