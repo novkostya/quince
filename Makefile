@@ -255,6 +255,10 @@ gap-heading-check: ## Find a `PROPOSED (gap)` block whose own body says RULED; 0
 demo-block-check: ## deploy/demo.md's yaml block must still be demo-deploy.yml; 0 identical · 1 drifted · 2 DID NOT RUN
 	@bin/demo-block-check
 
+.PHONY: docs-link-check
+docs-link-check: ## Every relative doc link and UI doc path must resolve in-tree; 0 clean · 1 broken · 2 DID NOT RUN
+	@bin/docs-link-check
+
 .PHONY: privacy-check-test
 privacy-check-test: ## The privacy gate's own failure-path suite (synthetic — needs no private layer)
 	@deploy/privacy/privacy-check-test
@@ -382,7 +386,7 @@ SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test prefl
                    closing-refs-check-test forge-watch-role-test forge-watch-selfcaused-test \
                    forge-watch-actor-test forge-watch-postmerge-test pre-push-shim-test loop-drift-test \
                    forge-watch-owed-scope-test forge-watch-gh-auth-test gap-heading-check-test \
-                   demo-block-check-test build-args-test release-image-test go-test-args-test \
+                   demo-block-check-test docs-link-check-test build-args-test release-image-test go-test-args-test \
                    stale-refs-report-test gh-review-commit-id-test version-test
 # THE ONE EXCLUSION, NAMED — because "no exclusion list at all" was false (quince#246 review).
 #
@@ -460,7 +464,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot \
                    bin/loop-drift bin/loop-drift-test \
                    bin/forge-watch-stderr-test bin/forge-watch-owed-scope-test bin/forge-watch-gh-auth-test \
                    bin/gap-heading-check bin/gap-heading-check-test \
-                   bin/demo-block-check bin/demo-block-check-test bin/go-test-args-test
+                   bin/demo-block-check bin/demo-block-check-test bin/docs-link-check bin/docs-link-check-test bin/go-test-args-test
 
 .PHONY: gates-sh
 gates-sh: preflight ## Shell: shellcheck (POSIX sh) + list-completeness + the `curl -k` ban
@@ -489,6 +493,16 @@ gates-sh: preflight ## Shell: shellcheck (POSIX sh) + list-completeness + the `c
 	@# `.github/**` is process-only in `bin/gate-scope` while `deploy/` is product — so the only
 	@# gate that sees both is this one, which covers `.` unconditionally.
 	@bin/demo-block-check
+
+	@# A link in the docs a stranger reads, and every doc path the UI hands a reader, must resolve
+	@# in this tree (quince#1313). Host-side: it reads `git ls-files` and the working tree, makes no
+	@# network call, and needs no container.
+	@#
+	@# HERE FOR demo-block-check's REASON, one surface over: the breakage is reachable from a change
+	@# to EITHER side — the doc that links, or the file that moves — and those live in different
+	@# gate scopes (`ui/` is gates-ui, `deploy/` and `docs/` are process-only). `gates-sh` covers `.`
+	@# unconditionally, so it is the only gate that sees both ends of a link.
+	@bin/docs-link-check
 	$(RUNTIME) run --rm -v $(ROOT):/src -w /src $(SHELLCHECK_IMAGE) \
 	  -x -P SCRIPTDIR -s sh $(SH_ENTRYPOINTS)
 	@# TLS is pinned, never disabled (docs/specs/devct/devct.md). The rule needs teeth, and a
@@ -629,6 +643,10 @@ stale-refs-report-test: ## The stale-refs report's classification and its DID-NO
 .PHONY: gap-heading-check-test
 gap-heading-check-test: ## The gap-marker gate's refusals + quince#408's three instances as fixtures
 	@bin/gap-heading-check-test
+
+.PHONY: docs-link-check-test
+docs-link-check-test: ## The link gate's own suite — every shape it must catch, and every one it must not (quince#1313)
+	@bin/docs-link-check-test
 
 .PHONY: demo-block-check-test
 demo-block-check-test: ## The demo-block gate's refusals — five routes to DID NOT RUN (quince#622)
