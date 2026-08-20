@@ -135,11 +135,10 @@ quince supervises netmuxd as
 - **Wi-Fi discovery is mDNS-only**, so a supervised netmuxd is necessary but not sufficient: the
   container must be able to receive multicast from the LAN (`deploy/compose.yml`).
 
-**Consequence — AND THE MUXER HALF OF IT IS RETIRED IN v0.1 (qn.6p).** This read *"the container
-ships `netmuxd` (pinned, source-built) + `usbmuxd` (apk, fallback)"* and it now ships **neither**:
-the operator runs the muxer and quince dials it, so a daemon in the image is one nothing could
-start (`devices.manage_muxer: true` is refused). `NETMUXD_REF` and `RUST_IMAGE` left `versions.env`
-with the build stage that consumed them. **Everything this decision RULES is untouched** — usbmuxd
+**Consequence — AND THE MUXER HALF OF IT IS RETIRED IN v0.1 (qn.6p).** The container ships
+**neither** daemon: the operator runs the muxer and quince dials it, so a daemon in the image is one
+nothing could start (`devices.manage_muxer: true` is refused). `NETMUXD_REF` and `RUST_IMAGE` left
+`versions.env` with the build stage that consumed them. **Everything this decision RULES is untouched** — usbmuxd
 stays the USB anchor, netmuxd's argv stays verified — it is parked in `muxsup` rather than shipped,
 and the netmuxd-USB audition (quince#326) is still what would change it.
 
@@ -594,16 +593,15 @@ in-tree patches, plus its runtime link deps and `openssh-client` for the zfs `ho
 **One binary and no language runtime** — the daemon is static Go and the UI is embedded in it, so
 the image carries Apple-protocol userland and nothing else executable.
 
-**NO MUXER DAEMON, since qn.6p D1 (Operator, 2026-08-16).** This sentence read *"ships usbmuxd,
-netmuxd (pinned, built from source in a CI stage), libimobiledevice-progs (later: patched-timeout
-build)"* and every clause of it has since gone false: the operator runs a muxer and quince dials it,
-so `devices.manage_muxer: true` is refused at startup and a daemon in the image would be one nothing
-could start. `netmuxd` went with it — and with them went the image's only Rust stage. The
-patched-timeout build is no longer *later*: it is what ships, and it is a source build rather than
-the `-progs` package precisely so the patches survive. Corrected rather than deleted because the
-in-container profile is DESCOPED, not abandoned, and `deploy/Dockerfile` carries the note on what
-restoring it costs — `apk add usbmuxd` replaces quince's patched shared library with a symlink into
-the stock package, silently losing patch 0001.
+**NO MUXER DAEMON, since qn.6p D1 (Operator, 2026-08-16).** The operator runs a muxer and quince
+dials it, so `devices.manage_muxer: true` is refused at startup and a daemon in the image would be
+one nothing could start. The image carries no `netmuxd` and therefore no Rust stage. The
+patched-timeout `libimobiledevice` build is what ships, and it is a **source build rather than the
+`-progs` package precisely so the patches survive**.
+
+**The in-container profile is DESCOPED, not abandoned**, and `deploy/Dockerfile` carries the note on
+what restoring it costs: **`apk add usbmuxd` replaces quince's patched shared library with a symlink
+into the stock package, silently losing patch 0001.**
 
 **Why.** Standard, boring, reproducible; multi-arch is what makes the Synology story real.
 
@@ -674,13 +672,12 @@ NO GENERATED ANNOTATION AT ALL.** Operator, 2026-08-08, relayed on
 [quince#728](https://github.com/novkostya/quince/issues/728). Raised by a Settings page that wrote
 back every optional key at its default and called it the user's config.
 
-**Both halves overturn text that stood here, and the second is the sharper reversal.** *"Every key
-annotated with a generated doc-comment"* was D12's headline promise — the OpenWrt/PVE precedent the
-whole decision cites. It is **dropped, not deferred**: there is no smaller annotation to stage
-toward, and quince#727's staging item for it is moot rather than pending.
+**Generated doc-comments are DROPPED, not deferred.** There is no smaller annotation to stage
+toward, and quince#727's staging item for it is moot rather than pending — do not pick it up as
+outstanding work.
 
 **What survives is the reason D12 exists.** *Tidy, hand-editable, diffable, no secrets, the UI edits
-the file rather than replacing it* — all unchanged. What was wrong was the belief that a config file
+the file rather than replacing it* — all unchanged. The belief this drops is that a config file
 is more legible for being complete. **A file that lists every key at its default is not
 self-documenting, it is noise a reader has to filter**, and it makes a hand-edit harder to diff
 rather than easier: the signal is what somebody chose, and defaults belong in `--help`, the UI and
@@ -708,7 +705,7 @@ onboarding, file-first truth.
 destination, not the qn.1 payload. qn.1 ships the load-bearing core — typed config,
 YAML as source of truth, atomic canonical writes, `config validate`, a small Settings
 page for safe keys, restart-required for the rest. **Generated doc-comments are CANCELLED by the
-ruling above and land nowhere** — this sentence promised them "with qn.6" until 2026-08-08. The rest
+ruling above and land nowhere.** The rest
 of the transparent-editor UX still lands with qn.6; **file-watch is `qn.6q`, inside v0.1.** The
 contract (file-first, no secrets, no UI-only state) binds from day one.
 
