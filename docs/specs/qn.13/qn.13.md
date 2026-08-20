@@ -1,6 +1,6 @@
 # qn.13 — a device-scoped passkey: its holder sees one device and nothing else
 
-**Status: SPEC. Nothing here is built.** Scoped by the Operator on 2026-08-20 (quince#1342), items
+**Status: SPEC. Nothing here is built.** **Amended 2026-08-20 after the iOS measurement** — see *Measured*, D2.1, D2.2 and D4.1. Scoped by the Operator on 2026-08-20 (quince#1342), items
 2, 3 and part of 5 of the 2026-08-17 phone-first vision. Prerequisites are done: passkeys at `qn.6k`
 (quince#657), Web Push at `qn.12` (quince#1124).
 
@@ -63,6 +63,22 @@ in the shell's shape; the admin's view of what they have issued, and revocation 
 8. **`POST /api/auth/setup/passkey/begin|finish` is a pre-auth ceremony that issues a session**
    (`contracts.md` §1). It is the structural sibling of D4's enrolment ceremony, and D4 is specified
    against it rather than invented.
+9. **Login sends an EMPTY allow-list.** `auth/passkey_login.go:35` is `wa.BeginDiscoverableLogin()`,
+   so the platform selects the credential and quince learns which one only from the assertion. The
+   library's `BeginLogin(user)` populates `allowCredentials` instead — same credentials, quince
+   choosing. This is D2.2's whole mechanism.
+10. **Registration sends a FULL exclusion list.** `auth/passkey.go:261` is
+    `webauthn.WithExclusions(credentialDescriptors(existing))` over every row at the rpId, so a
+    second credential on one authenticator is refused by the device. This is what made the
+    measurement's state impossible to create without removing the line, and it is what D4.1 rules on.
+11. **The browser already remembers a passkey fact.** `ui/src/lib/passkeyHint.ts` stores
+    `quince.passkey.seen = "1"`, read at `usePasskeyLogin.ts:41` to decide whether to fire the sheet
+    unprompted. Its header states the property D2.2 must preserve: *"it is a HINT and nothing hangs
+    on it… nothing here is a credential, a secret, or an authorisation."*
+12. **iOS collapses credentials on `(rpId, username)`, and every quince credential shares a
+    username.** `WebAuthnName()` and `WebAuthnDisplayName()` both return `adminUsername =
+    "quince-admin"` (`auth/passkey.go:157-158`, `:164`). Measured on hardware 2026-08-20: three
+    credentials, one row. This is the finding behind D2.1.
 
 ---
 
@@ -97,8 +113,67 @@ constant of fact 2, so no second account appears and no user table is invented. 
 **after** assertion, from the `credential_id` the assertion carries (fact 3).
 
 This is the honest model rather than a trick to preserve a UX property: there are no accounts, so a
-capability is a property of a credential. The no-account-picker question is real and is **owed a
-measurement** — see *Owed before build*, below.
+capability is a property of a credential. **The no-account-picker question has been MEASURED** — see
+*Measured 2026-08-20*, below — and it survives. What the measurement found instead is D2.1.
+
+### D2.1 — A scoped credential MUST NOT be named `quince-admin` (Operator, 2026-08-20)
+
+**Operator, on being shown the measurement: *"household member must not be quince-admin, that's
+wild."*** Ruled, and the reason is state honesty at the one place the user actually looks: the iOS
+sheet labels a credential with its `user.name`, so a household member's phone would tell them they
+hold **admin** — the opposite of what their credential grants.
+
+**A scoped credential carries its own `user.name`** — the device it is scoped to, which is the only
+name that is both meaningful to its holder and true.
+
+**This is a scoped EXCEPTION to quince#819, not a repeal of it, and the difference must be written
+down or somebody will "fix" it back.** `auth/passkey.go:161` requires the username to be the same
+string as the login form's anchor, because *"a passkey registered under a different name would file
+itself as a second identity beside the password rather than beside it."* A scoped credential **is**
+that second identity, deliberately: it belongs to a different principal, on a different phone, with
+different authority. The constant stays correct for admin credentials and only for those.
+
+**It also disarms the measurement's defect.** Two credentials with different usernames do not
+collapse, so the unselectable single row cannot arise even on a phone holding both.
+
+### D2.2 — quince chooses which credential is offered; the platform stops choosing
+
+The measurement showed iOS selecting a credential with no way for the user to intervene. The fix is
+for quince to stop asking it to.
+
+**The lever already exists and is one call.** `auth/passkey_login.go:35` calls
+`BeginDiscoverableLogin()` — an empty allow-list, which *is* "platform, you choose". The library's
+`BeginLogin(user)` populates `allowCredentials` instead, so quince decides what is offered. Both use
+the same discoverable credentials; only the offer differs.
+
+- **A remembered principal** → `BeginLogin` with that principal's credentials → one tap, one identity,
+  no ambiguity.
+- **"Change user"**, deliberately subtle → `BeginDiscoverableLogin()` → today's behaviour, which is
+  the correct fallback rather than a separate mode.
+
+**Where the memory lives: `ui/src/lib/passkeyHint.ts`, which already does this shape.** It stores
+`quince.passkey.seen = "1"` and is read at `usePasskeyLogin.ts:41`. This replaces the boolean with an
+identifier, keeping the file's existing degradation — private mode, disabled storage and quota all
+fall back to the button.
+
+**Store the CREDENTIAL ID, not the username.** `"1"` is not personal data and a household member's
+name is; the credential id is already public in `allowCredentials`, names exactly which credential to
+offer, and lets the server return the display name with the ceremony. Same UX, nothing personal in
+the browser.
+
+**The hint must stay a hint, which is what keeps `passkeyHint.ts`'s own security claim true** —
+*"nothing here is a credential, a secret, or an authorisation."* It selects what is **offered**;
+authority still resolves from `credential_id` **after** assertion, per D2. Nothing is granted by what
+the browser remembers.
+
+**A revoked remembered credential must fall back, not dead-end.** If `allowCredentials` names a
+credential that no longer exists, the platform reports no passkey available and the user is stuck on
+a page that should have worked. Fall back to the discoverable flow — the same degradation the file
+already handles.
+
+**This is what lets D4's exclusion-list question relax.** quince disambiguates rather than forbidding,
+so one phone holding both an admin and a scoped credential becomes supportable instead of refused —
+which is a real want, since the admin plausibly uses their own device page as its owner.
 
 ### D3 — What a scoped holder may do: a rule, and the one exception the Operator ruled
 
@@ -153,7 +228,32 @@ is spent or expired.
 **Specified against fact 8's precedent.** `POST /api/auth/setup/passkey/*` is already a pre-auth
 ceremony that issues a session; the difference is what authorizes it — there, that the install is
 unconfigured; here, the enrolment secret. Same shape, different gate, and the existing one is not
-disturbed.
+
+### D4.1 — The enrolment ceremony sends NO exclusion list, and that is a decision with a second reason
+
+Registration today sends every credential at the rpId as an exclusion list
+(`auth/passkey.go:261`, `WithExclusions(credentialDescriptors(existing))`), so the authenticator
+refuses a duplicate on a device that already holds one. That is correct for an **admin** adding a
+second passkey to a phone they already registered. It is wrong here, twice.
+
+**It would disclose the admin's credential ids to whoever scanned the QR.** The enrolment page is
+reached pre-authentication by definition — that is the whole ceremony — so an exclusion list makes
+every admin credential id readable by anyone holding a QR, spent or not. The existing code already
+names this concern in the neighbouring function: *"offering them as exclusions would tell the
+authenticator about registrations it has no business knowing exist on this origin."* An unauthenticated
+scanner has less business still.
+
+**And it would forbid a state D2.2 makes supportable.** With the exclusion list, an admin cannot
+enrol a scoped credential on their own phone at all — the authenticator refuses. That was the right
+answer while a second credential was unselectable; D2.1 and D2.2 remove both halves of that problem,
+so refusing now costs a real want for nothing.
+
+**So the enrolment ceremony excludes nothing.** The duplicate it would have prevented is prevented
+instead by the enrolment secret being single-use.
+
+**The admin's own registration path keeps its exclusion list unchanged.** Two ceremonies, two
+answers, and the difference is who is standing at the other end.
+
 
 ### D5 — The address in the QR binds three things at once, so quince must not guess it
 
@@ -290,30 +390,32 @@ gate-able signature, and this section is exactly the shape that produces it.
 
 ---
 
-## OWED BEFORE BUILD — one measurement, and this box cannot take it
+## MEASURED 2026-08-20 — ONE entry, and the reason is the finding
 
-**Do two discoverable credentials sharing one `user_handle` on one rpId present as ONE entry or TWO
-on iOS?** (quince#1342 §2.) It decides whether the no-account-picker property `qn.6k` chose
-discoverable credentials to obtain survives.
+**The question** (quince#1342 §2): do two discoverable credentials sharing one `user_handle` on one
+rpId present as ONE entry or TWO on iOS? It decided whether the no-account-picker property `qn.6k`
+chose discoverable credentials to obtain survives.
 
-**Owner: the Operator. It needs a real iPhone, and no session box has one.** Declared unrun rather
-than assumed — a spec that assumes a branch without saying it assumed is the thing quince#1342 §11
-names as not defensible.
+**Taken by the Operator on a real iPhone**, against a build with `WithExclusions` removed — that line
+is what makes the two-credential state impossible, so it had to go for the state to exist at all. The
+build was throwaway and was rolled back the same hour.
 
-**What this spec assumes, and why it is narrower than a fork.** D2 is written as though the property
-survives. The reasoning: **a picker can only appear on a phone that holds two credentials for this
-rpId at once**, and in the household case each phone holds exactly one — the admin's phone has the
-admin credential, the scoped holder's phone has theirs. The overlap cases are an admin who enrols a
-scoped credential on their **own** phone, and a holder of two scoped devices who signs in to both
-from one phone.
+**Result: THREE credentials in quince's table, ONE row on iOS** — the site, and the username
+`quince-admin`. **The property survives, and D2's premise holds.**
 
-**So the measurement most likely decides a named UX consequence in a narrow case, not the shape of
-the design** — D2's mechanism (scope on the row, resolved from `credential_id` after assertion) is
-unchanged either way, because it never consults `user_handle`.
+**But it survives for a reason the question did not anticipate, and that reason is a defect.** iOS
+collapses credentials on `(rpId, username)`, and `WebAuthnName()` returns the constant
+`adminUsername = "quince-admin"` for **every** credential (`auth/passkey.go:157`, `:164`). So the
+credentials are not merely uncluttered — they are **indistinguishable and unselectable**. In the
+measurement, sign-in used `A` and left `B` *"never used"*; the user was never asked and could not
+have chosen.
 
-**This is reasoning, not measurement, and it is flagged as such.** If the measurement comes back
-*two entries* and the Operator judges the picker unacceptable even in the narrow case, D2 reopens.
-Slice 1 below is the measurement for that reason.
+**A picker would have been better than what we have.** A picker lets you choose. One row that
+silently selects among credentials **carrying different authority** is the failure this rung must not
+ship: on a phone holding both an admin credential and a device-scoped one, iOS would decide which
+authority you signed in as.
+
+**So the measurement did not confirm the design — it found the requirement in D2.1 below.**
 
 ---
 
@@ -345,6 +447,14 @@ Slice 1 below is the measurement for that reason.
     credential's session **ends immediately, or the screen says it does not**. (D9)
 11. **A wrong address is diagnosable.** A QR generated at an address the phone cannot reach produces a
     message naming the address baked in and the remedy — not a silent failure of three things. (D5)
+12. **A household member's phone does not say `quince-admin`.** A scoped credential registered from a
+    QR shows the device's name in the platform's sign-in sheet; an admin credential still shows
+    `quince-admin`. (D2.1, G7)
+13. **One tap signs in as the right principal, and the picker is reachable.** A browser that has
+    signed in before offers that principal directly; *change user* falls back to the discoverable
+    flow; a browser that has never signed in sees today's behaviour. (D2.2, G8)
+14. **A revoked credential does not strand its browser.** With the remembered credential revoked,
+    sign-in falls back to the discoverable flow rather than reporting no passkey available. (D2.2, G8)
 
 ---
 
@@ -366,9 +476,18 @@ Beyond `make gates` / `make image`:
 - **G5 — the send filter, including the admin's mute.** A test that a scoped subscription receives
   only its device's sends and that an admin-owned `device_notification_prefs` row of `0` does not
   suppress the scoped holder's (D7, story 9).
-- **G6 — OWED TO HARDWARE, owner named.** The iOS account-picker measurement above. **Owner: the
-  Operator.** It gates no story — every story is correct whichever way it falls — but D2's prose and
-  the enrolment copy must be re-read against the answer.
+- **G6 — TAKEN 2026-08-20, on hardware, by the Operator.** The iOS account-picker measurement. Result
+  in *Measured* above: one row for three credentials, because the collapse key is `(rpId, username)`.
+  The claim it was owed to is now a fact, and the two requirements it produced are G7 and G8.
+- **G7 — no scoped credential is ever named `quince-admin`.** A test over the registration path
+  asserting that a scoped ceremony sends the device's name as `user.name` and an admin ceremony sends
+  the constant, so D2.1's exception cannot be collapsed back into quince#819's rule by a later
+  refactor. **This is the gate that protects a household member from being told they are the admin.**
+- **G8 — the hint selects, it never grants.** Tests that a remembered credential id changes only
+  which credentials are OFFERED, that the resolved principal still comes from the assertion, and that
+  a remembered credential which no longer exists **falls back to the discoverable flow** rather than
+  dead-ending. The last one is the failure mode a revocation creates, and it is the one a
+  happy-path test would miss.
 
 ---
 
@@ -389,7 +508,7 @@ Every hard rule this rung touches *or comes near*, written before building.
 | rule | how this complies |
 | --- | --- |
 | **Privacy is a commit-time gate** | No UDID, serial, hostname or LAN address enters this spec, any fixture, or the QR discussion — D5 is written about *an* address, never one. Credential ids and enrolment secrets are capability-grade and never logged, never committed, never served to another session. `make privacy-check REF=origin/main...HEAD TEXT=<path under $HOME/scratch/r63>` before push. |
-| **State honesty** | The iOS measurement is declared **unrun with its owner named**, and the assumption it licenses is marked as reasoning rather than measurement. D9 permits shipping without immediate revocation *only* if the screen says so. D5 refuses to encode a guessed address. |
+| **State honesty** | The iOS measurement has been **TAKEN** and its result is recorded with what it actually showed — including that it did **not** confirm the design but found a defect (D2.1). The spec no longer carries an assumption where a fact now exists, which is the amendment's main job. D9 permits shipping without immediate revocation *only* if the screen says so. D5 refuses to encode a guessed address. D2.2 requires the fallback that keeps a revoked hint from stranding its browser. |
 | **Troubleshooting is actionable** | D5 is this rule applied to the sharpest failure in the rung: three things break differently and two silently, so the message names the address baked in and the remedy, following `ErrUnsupportedRPID`'s house pattern. D6's refusal names why passwordless is unavailable rather than merely refusing. |
 | **Interface facts looked up live** | All eight facts carry the checkout (`acdcfe7`) and date they were established, with file and line. Fact 6 corrects quince#1342 §5 by measurement rather than by memory. No version is pinned by this rung; it adds no dependency. |
 | **Never mutate a committed version** | **Comes near, does not touch.** D3 grants *back up now*, *retry* and *cancel* to a new principal — the same job engine, entered by the same routes, with no new write path into `latest/`, `versions/` or a snapshot. *Delete a version* is refused (D3), which is the only capability in the list that could reach a committed artifact. Nothing here changes when quince#591's zfs in-place ruling is built. |
@@ -399,7 +518,7 @@ Every hard rule this rung touches *or comes near*, written before building.
 | **Subprocesses** | None beyond the existing job engine, entered by existing routes. |
 | **Every hardware bug becomes a replay fixture** | No hardware path is touched. G6 names what hardware still owes and to whom. |
 | **Docs are part of the diff** | `contracts.md` §1 (D10) and `design.md` §6 (the principal, the scope, and D6's invariant) move with the slices that change them, not with this spec — **this PR asserts no new canon; it proposes.** The roadmap row and the devlog dashboard follow the ruling, not the proposal. Coverage and a known-untested list ride each build slice. |
-| **Don't improvise architecture** | The four proposed items are now **ruled by the architect** (quince#1347 review; `/docs/specs/**` is that seat's under `CODEOWNERS`), and the one genuine gap — the iOS measurement — is a **pointer with an owner**, not an assertion about state, per the 2026-08-18 retirement of the `PROPOSED (gap)` block (quince#1219). **Provenance is stated per ruling rather than in bulk, because three of these have three different origins**: D3's exception and D6's invariant are **transcribed Operator rulings** quoted verbatim from quince#1342; **D7's admin-mute rule is an Operator instruction given in session and relayed here** — not on the forge, and D7 says so in its own words rather than leaving a citation that cannot be followed; D9's marked-rows requirement is **relayed** by the analyst seat without a quote. Written out in full here because git is where a decision survives. Nothing is built past any of it. |
+| **Don't improvise architecture** | The four proposed items are now **ruled by the architect** (quince#1347 review; `/docs/specs/**` is that seat's under `CODEOWNERS`), and the measurement that was the one genuine gap has since been **taken**, and its section states the result rather than the owner (2026-08-20). **Provenance is stated per ruling rather than in bulk, because three of these have three different origins**: D3's exception and D6's invariant are **transcribed Operator rulings** quoted verbatim from quince#1342; **D7's admin-mute rule is an Operator instruction given in session and relayed here** — not on the forge, and D7 says so in its own words rather than leaving a citation that cannot be followed; D9's marked-rows requirement is **relayed** by the analyst seat without a quote. Written out in full here because git is where a decision survives. Nothing is built past any of it. |
 | **Approver ≠ author** | Authored by an implementer session as `quince-coder`; reviewed by the architect. This spec touches the security model, so it is reviewed **before** code exists, which is why it is PR 1. |
 
 ---
@@ -410,15 +529,17 @@ Each is one PR carrying one reviewable claim, **sequenced from `main`, not stack
 
 | | claim | gated? |
 | --- | --- | --- |
-| **1** | **this spec** | — |
-| **2** | **the iOS measurement** (G6) — a report, not code. Re-reads D2's prose against the answer. | Operator hardware |
+| **1** | **the spec** — merged, quince#1347 | — |
+| **2** | **the iOS measurement** — **DONE 2026-08-20**, Operator, on hardware. Result and consequences in *Measured*, D2.1, D2.2, D4.1 | — |
 | **3** | the principal: `sessions_auth` gains its credential, `Authenticate` returns it, `authGuard` binds it into the request context — **no behaviour change, no scope yet** (D1, G2) | no |
 | **4** | scope on the credential, and D6's invariant with its gate — **before anything can mint a scoped row** (D2, D6, G1) | no |
 | **5** | quince#1001, and quince#1259's reachable-and-scope-aware `ErrLastCredential` (D9) | no |
-| **6** | the enrolment ceremony and the QR, against fact 8's precedent (D4, D5, G4) | no — ruled 2 |
-| **7** | authorization at every route, and the shell's shape (D3, D8, G3) | no — ruled 1 |
-| **8** | the send-path filter and the preference's owner column, backfilled admin-owned (D7, G5) | no |
-| **9** | the admin's view: marked rows, listed secrets, revocation from the device page (D9, ruling 2) | no — ruled 2 |
+| **6** | the credential username: scoped rows carry their device, admin rows keep `quince-admin` (D2.1, G7) | no |
+| **7** | the remembered principal and the subtle *change user* — `passkeyHint` holds a credential id, login sends `allowCredentials` (D2.2, G8) | no |
+| **8** | the enrolment ceremony and the QR, against fact 8's precedent, excluding nothing (D4, D4.1, D5, G4) | no |
+| **9** | authorization at every route, and the shell's shape (D3, D8, G3) | no |
+| **10** | the send-path filter and the preference's owner column, backfilled admin-owned (D7, G5) | no |
+| **11** | the admin's view: marked rows, listed secrets, revocation from the device page (D9) | no |
 
 **Slice 3 before slice 4, and slice 4 before anything mints a scoped credential.** D6's invariant is
 worthless if a scoped row can exist before the predicates know what one is — that ordering is the
