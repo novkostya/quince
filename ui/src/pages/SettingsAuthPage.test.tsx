@@ -219,10 +219,15 @@ describe("the auth page orders its sections by credential state", () => {
     expect(order[0]).toBe("Passkeys");
     expect(order).toContain("No passkey of yours works at this address");
   });
-
   // AN INSTALL WITH NOTHING TO SIGN IN WITH LEADS WITH THE PANEL THAT SAYS SO. This is the one
   // no-password state where passkeys do NOT lead, because there are none — leading with an empty
   // list would open the page on the section with the least to say.
+  //
+  // THE SENTENCE ABOVE AND THE ASSERTION BELOW AGREE FOR THE FIRST TIME HERE — quince#1319 review.
+  // In the previous slice the panel was a statement section BELOW a "Set a password" form section,
+  // so `order[0]` named the form while this comment named the panel; both were defensible readings
+  // of "leads" and they pointed at different headings. Combining the two into one section settles
+  // it: the panel's heading IS the section's heading, so there is only one thing "leads" can mean.
   it("leads with the honest panel when there are no credentials at all", async () => {
     renderAt(false, []);
     // WAITED ON A DATA-DEPENDENT ELEMENT. The Add row renders before the list answers, so awaiting
@@ -230,9 +235,13 @@ describe("the auth page orders its sections by credential state", () => {
     // rendered from `supported`, which only the payload carries.
     await screen.findByText(/a passkey is tied to the address/i);
 
-    const order = sections();
-    expect(order[0]).toBe("This quince has no way to sign in");
-    expect(order.indexOf("This quince has no way to sign in")).toBeLessThan(order.indexOf("Passkeys"));
+    // THE WHOLE SEQUENCE, not `order[0]` plus an `indexOf`. Two weaker assertions about one list
+    // were what let the prose and the code drift apart in the first place.
+    expect(sections()).toEqual([
+      "This quince has no way to sign in",
+      "Passkeys",
+      "Signing in over plain HTTP",
+    ]);
   });
 });
 
