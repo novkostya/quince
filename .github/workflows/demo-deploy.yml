@@ -44,7 +44,17 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      # `fetch-depth: 0` IS REQUIRED, and `fetch-tags` is NOT a lighter substitute for it.
+      # deploy/version derives this build's version with `git describe --tags`, and the default
+      # depth-1 checkout has no tags at all. Measured 2026-08-20 against a real `--depth 1` clone
+      # of this repository: with the tags then fetched explicitly, `git describe --tags --always`
+      # STILL returned a bare sha — the tagged commits are outside the shallow history, so nothing
+      # can compute a distance to them. Only full history relates HEAD to a tag.
+      # ci.yml already passes fetch-depth: 0 on every job for its own reason; this is the workflow
+      # that builds the one artifact a stranger looks at, and it did not (quince#615).
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: superfly/flyctl-actions/setup-flyctl@master
       # NOT a bare `flyctl deploy`. deploy/fly-deploy supplies the build-args the Dockerfile
       # needs from versions.env — without them four ARGs arrive empty and the build dies

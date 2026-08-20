@@ -157,7 +157,17 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      # `fetch-depth: 0` IS REQUIRED, and `fetch-tags` is NOT a lighter substitute for it.
+      # deploy/version derives this build's version with `git describe --tags`, and the default
+      # depth-1 checkout has no tags at all. Measured 2026-08-20 against a real `--depth 1` clone
+      # of this repository: with the tags then fetched explicitly, `git describe --tags --always`
+      # STILL returned a bare sha — the tagged commits are outside the shallow history, so nothing
+      # can compute a distance to them. Only full history relates HEAD to a tag.
+      # ci.yml already passes fetch-depth: 0 on every job for its own reason; this is the workflow
+      # that builds the one artifact a stranger looks at, and it did not (quince#615).
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: superfly/flyctl-actions/setup-flyctl@master
       # NOT a bare `flyctl deploy`. deploy/fly-deploy supplies the build-args the Dockerfile
       # needs from versions.env — without them four ARGs arrive empty and the build dies
@@ -222,6 +232,22 @@ defaults and worked silently, which is why the build looked healthy until it did
 `ARG` lines** rather than repeating it — so a newly added ARG is either found or reported, never
 quietly empty. It runs where flyctl is installed and authenticated (a CI runner, or the Operator's
 machine) and refuses with an explanation anywhere else.
+
+**`VERSION` comes from a SECOND source, and that split is deliberate.** `versions.env` holds
+toolchain pins; a version is not one, so `build-args` correctly has nothing to look up for it and
+announces the gap — `using the Dockerfile default for: VERSION`. For months that default is what
+the demo shipped, reporting `version: "0.0.0-dev"` to every visitor while a hand-built image
+reported a real version, because the Makefile had an override point the deploy did not
+(quince#615). `deploy/version` is now that second source, shared by the Makefile and this script so
+the two cannot drift.
+
+**The deploy needs full history, not just tags.** `deploy/version` runs `git describe --tags`, and
+`actions/checkout` defaults to a depth-1 clone that has none — so `demo-deploy.yml` passes
+`fetch-depth: 0`. Fetching the tags alone is **not** a lighter substitute: measured against a real
+`--depth 1` clone of this repository, `git describe --tags --always` still returned a bare sha with
+the tags present, because the tagged commits lie outside the shallow history and nothing can
+compute a distance to them. When the derivation cannot run it says which of the three reasons
+applies and stamps `0.0.0-dev` rather than guessing.
 
 ## A custom domain, when it is wanted
 

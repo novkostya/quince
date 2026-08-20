@@ -1,0 +1,168 @@
+#!/bin/sh
+# version-test — the derivation's three fallbacks, and the contract its two callers depend on.
+#
+# WHY THIS SUITE EXISTS. `deploy/version` decides what every quince build calls itself, and its
+# interesting behaviour is entirely in the paths where it CANNOT derive one. Those are exactly the
+# paths nobody exercises by hand: you run it in a full checkout, it prints a version, and the three
+# announcements below have never fired in front of anyone. quince#615 is what an unannounced
+# fallback costs — a public demo reporting `0.0.0-dev` for months while a hand build reported a
+# real version, with nothing anywhere saying the two differed.
+#
+# EVERY CASE BUILDS ITS OWN REPOSITORY. Nothing here reads the real tags, which change with every
+# release; the cases assert the SHAPE of the answer and which arm produced it. The one real-tree
+# case at the end asserts a RELATION between this repository's files rather than any value in them.
+set -eu
+
+HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH='' cd -- "$HERE/.." && pwd)
+# Overridable so a reviewer can reproduce a negative control rather than take it on report — the
+# same hook, for the same reason, as build-args-test.
+VB="${QUINCE_VERSION_BIN:-$HERE/version}"
+[ -x "$VB" ] || { printf 'version-test: %s is not executable\n' "$VB" >&2; exit 2; }
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT INT TERM
+
+pass=0
+fail=0
+
+# `git` in a throwaway tree, with an identity, so `commit` cannot fail on an unconfigured box.
+git_init() { # <dir>
+	mkdir -p "$1"
+	git -C "$1" init -q
+	git -C "$1" config user.email t@example.invalid
+	git -C "$1" config user.name 'test'
+}
+
+commit() { # <dir> <message>
+	: > "$1/f$(date +%s%N 2>/dev/null || echo x)$$" 2>/dev/null || true
+	git -C "$1" add -A
+	git -C "$1" commit -q --allow-empty -m "$2"
+}
+
+# `run <dir>` — the script, in a tree that has its own copy at deploy/version so the `cd ..` in its
+# header lands on the fixture rather than on this repository.
+run() { # <dir>  -> sets OUT (stdout), ERR (stderr), RC
+	mkdir -p "$1/deploy"
+	# Case 7 runs against THIS repository, where the destination IS the source. `cp` refuses that,
+	# and the refusal arrives as a suite failure that looks like a defect in the script under test.
+	[ "$1/deploy/version" -ef "$VB" ] || {
+		cp "$VB" "$1/deploy/version"
+		chmod +x "$1/deploy/version"
+	}
+	OUT=$(cd "$1" && ./deploy/version 2>"$TMP/.err") && RC=0 || RC=$?
+	ERR=$(cat "$TMP/.err")
+}
+
+ok()   { printf 'ok    %s\n' "$1"; pass=$((pass + 1)); }
+bad()  { printf 'FAIL  %s\n  %s\n' "$1" "$2"; fail=$((fail + 1)); }
+
+want_stdout() { # <name> <expected-stdout>
+	if [ "$OUT" = "$2" ]; then ok "$1"; else bad "$1" "stdout was [$OUT], wanted [$2]"; fi
+}
+
+want_err_has() { # <name> <substring>
+	if printf '%s' "$ERR" | grep -qF "$2"; then ok "$1"
+	else bad "$1" "stderr did not contain [$2]; it was: $ERR"; fi
+}
+
+# ---------------------------------------------------------------------------
+# 1. A TAGGED COMMIT derives that tag, with the leading v stripped.
+#
+# The v-stripping is not cosmetic. `release.yml` strips it with `${GITHUB_REF_NAME#v}` and
+# `release-image` REFUSES a leading v, so a derivation that kept it would spell the same version
+# two ways depending on how the image was built.
+D=$TMP/tagged; git_init "$D"; commit "$D" first
+git -C "$D" tag v1.2.3
+run "$D"
+want_stdout "a tagged commit derives the tag without its leading v" "1.2.3"
+if [ "$RC" -eq 0 ]; then ok "exit 0 on the derived path"; else bad "exit 0 on the derived path" "got $RC"; fi
+if [ -z "$ERR" ]; then ok "the derived path is SILENT on stderr"; else bad "the derived path is SILENT on stderr" "said: $ERR"; fi
+
+# 2. COMMITS PAST A TAG carry the distance and the commit, which is the whole point of describing
+#    rather than reading a tag: a demo built from main is not the release it descends from.
+D=$TMP/past; git_init "$D"; commit "$D" first
+git -C "$D" tag v1.2.3
+commit "$D" second
+run "$D"
+case "$OUT" in
+	1.2.3-1-g*) ok "a commit past a tag carries distance and sha" ;;
+	*) bad "a commit past a tag carries distance and sha" "stdout was [$OUT], wanted 1.2.3-1-g<sha>" ;;
+esac
+
+# 3. A DIRTY TREE says so. An unstamped local build must not be mistakable for the release it
+#    descends from; `state honesty` is the rule and this is the one-word version of it.
+D=$TMP/dirty; git_init "$D"; commit "$D" first
+git -C "$D" tag v1.2.3
+echo change > "$D/uncommitted"
+git -C "$D" add -A
+run "$D"
+case "$OUT" in
+	*-dirty) ok "a dirty tree is stamped -dirty" ;;
+	*) bad "a dirty tree is stamped -dirty" "stdout was [$OUT]" ;;
+esac
+
+# ---------------------------------------------------------------------------
+# THE THREE FALLBACKS. Each prints the SAME version and a DIFFERENT reason, and that is the
+# requirement rather than an accident: `0.0.0-dev` with no explanation is what quince#615 was.
+# Three distinguishable causes with three different remedies must not collapse into one sentence.
+# ---------------------------------------------------------------------------
+
+# 4. NOT A GIT CHECKOUT — a source tarball, or an unpacked release.
+D=$TMP/nogit; mkdir -p "$D"
+run "$D"
+want_stdout "no git checkout still emits a usable version on stdout" "0.0.0-dev"
+if [ "$RC" -eq 0 ]; then ok "the fallback EXITS 0 — a build must not die for want of a version"
+else bad "the fallback EXITS 0" "got $RC"; fi
+want_err_has "no git checkout says which of the three it is" "this is not a git checkout"
+
+# 5. A REPOSITORY WITH NO TAGS — a fork, or a shallow clone that fetched none.
+D=$TMP/notags; git_init "$D"; commit "$D" first
+run "$D"
+want_stdout "no tags still emits a usable version" "0.0.0-dev"
+want_err_has "no tags names the shallow-clone default as the likely cause" "no tags are present"
+
+# 6. TAGS PRESENT, HISTORY ABSENT — the trap `fetch-tags` walks into (quince#615).
+#
+#    THIS IS THE CASE THAT MATTERS and the reason this suite is not three lines long. Fetching the
+#    tags into a depth-1 clone LOOKS like the fix and is not: the tagged commits are outside the
+#    shallow history, so describe still cannot relate HEAD to them. Anyone who reaches for
+#    `fetch-tags: true` instead of `fetch-depth: 0` gets a green workflow and an unversioned build.
+D=$TMP/shallow_src; git_init "$D"; commit "$D" first
+git -C "$D" tag v1.2.3
+i=0; while [ "$i" -lt 3 ]; do commit "$D" "more-$i"; i=$((i + 1)); done
+S=$TMP/shallow
+git clone -q --depth 1 "file://$D" "$S" 2>/dev/null
+git -C "$S" fetch -q --tags 2>/dev/null || true
+if [ -n "$(git -C "$S" tag)" ]; then ok "control: the shallow clone really does have the tag"
+else bad "control: the shallow clone really does have the tag" "it has none, so case 6 proves nothing"; fi
+run "$S"
+want_stdout "tags without history STILL falls back — fetch-tags is not the remedy" "0.0.0-dev"
+want_err_has "and it says so, naming history rather than tags" "not the history between"
+
+# ---------------------------------------------------------------------------
+# 7. THE REAL TREE — a relation, not a value.
+#
+# Asserts only that this repository's own checkout derives SOMETHING other than the fallback, and
+# that stdout carries one line and nothing else. A caller substitutes this into a shell variable;
+# a stray line would become part of the version stamp.
+run "$ROOT"
+if [ "$OUT" != "0.0.0-dev" ]; then ok "this repository derives a real version"
+else bad "this repository derives a real version" "got the fallback: $ERR"; fi
+if [ "$(printf '%s\n' "$OUT" | wc -l)" -eq 1 ]; then ok "stdout is exactly one line"
+else bad "stdout is exactly one line" "got: $OUT"; fi
+case "$OUT" in
+	v*) bad "the real tree's version has no leading v" "got [$OUT]" ;;
+	*)  ok "the real tree's version has no leading v" ;;
+esac
+
+# 8. THE CALLERS BOTH USE IT. A derivation with one caller silently reintroduces the drift this
+#    exists to end, and that drift is exactly what quince#615 was: the Makefile had an override
+#    point and the deploy did not.
+if grep -q 'shell deploy/version' "$ROOT/Makefile"; then ok "the Makefile derives VERSION rather than defaulting it"
+else bad "the Makefile derives VERSION rather than defaulting it" "no 'shell deploy/version' in Makefile"; fi
+if grep -q 'deploy/version' "$ROOT/deploy/fly-deploy"; then ok "fly-deploy supplies VERSION from the same source"
+else bad "fly-deploy supplies VERSION from the same source" "no reference in deploy/fly-deploy"; fi
+
+printf '\nversion-test: %s passed, %s failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

@@ -94,7 +94,15 @@ DEMO_PORT   ?= 0
 # construction rather than by discipline. Override when serving from somewhere else.
 DEMO_HOST   ?= quince-runner
 
-VERSION ?= 0.0.0-dev
+# DERIVED, NOT DEFAULTED (quince#615). This was the literal `0.0.0-dev` until now, which meant every
+# build that was not a tagged release reported itself as unversioned — including the public demo,
+# whose entire job is a first impression. `deploy/version` is the single derivation, shared with
+# `deploy/fly-deploy` so the two paths cannot drift; it announces on stderr when it has to fall
+# back, so an unstamped build says so rather than looking deliberate.
+#
+# STILL `?=`, which is the point: the Operator overrides this by hand and must keep being able to.
+# A command-line `VERSION=` wins and the derivation never runs.
+VERSION ?= $(shell deploy/version)
 
 # ---------------------------------------------------------------------------
 # SCOPE — an OPTIONAL git range that lets a gate decline work its change cannot affect.
@@ -239,6 +247,10 @@ build-args-test: ## The Dockerfile-ARG derivation every container build depends 
 release-image-test: ## The release build's refusals and the argv it produces (quince#724)
 	@deploy/release-image-test
 
+.PHONY: version-test
+version-test: ## The version derivation and its three announced fallbacks (quince#615)
+	@deploy/version-test
+
 # ---------------------------------------------------------------------------
 # Toolchain images — built once from the Dockerfile stages, reused by gates.
 # ---------------------------------------------------------------------------
@@ -355,7 +367,7 @@ SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test prefl
                    forge-watch-actor-test forge-watch-postmerge-test pre-push-shim-test loop-drift-test \
                    forge-watch-owed-scope-test forge-watch-gh-auth-test gap-heading-check-test \
                    demo-block-check-test build-args-test release-image-test go-test-args-test \
-                   stale-refs-report-test gh-review-commit-id-test
+                   stale-refs-report-test gh-review-commit-id-test version-test
 # THE ONE EXCLUSION, NAMED — because "no exclusion list at all" was false (quince#246 review).
 #
 # `bin/forge-fetch-equivalence-test` needs a LIVE FORGE and a CREDENTIAL: it compares the `gh pr list`
@@ -422,6 +434,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot \
                    deploy/storageless-smoke \
                    deploy/fly-deploy deploy/build-args deploy/build-args-test \
                    deploy/release-image deploy/release-image-test \
+                   deploy/version deploy/version-test \
                    bin/allowlist-coverage bin/allowlist-coverage-test \
                    bin/suite-coverage bin/suite-coverage-test bin/gates-sh-exit-test \
                    bin/forge-watch-counters-test bin/closing-refs-check bin/closing-refs-check-test \

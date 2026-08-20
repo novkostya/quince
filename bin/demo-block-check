@@ -3,11 +3,19 @@
 #
 # THE DUPLICATION IS DELIBERATE AND STAYS (quince#622). `deploy/demo.md` carries a byte-identical
 # copy of the deploy workflow, and its own prose says why: *"It lives here rather than in a PR
-# comment so there is one copy rather than two that drift."* The reason is structural —
-# **no agent seat can write under `.github/workflows/**`** (quince#113, measured for the implementer
-# PAT, the architect PAT and the coder App) — so the reference copy has to live somewhere an agent
-# can actually maintain. Deleting the duplication is not the fix; it would remove the thing that
-# caught the one real defect this arrangement has seen.
+# comment so there is one copy rather than two that drift."*
+#
+# ITS ORIGINAL REASON HAS EXPIRED, AND THE DUPLICATION SURVIVES IT. This read *"the reason is
+# structural — no agent seat can write under `.github/workflows/**` (quince#113, measured for the
+# implementer PAT, the architect PAT and the coder App) — so the reference copy has to live
+# somewhere an agent can actually maintain."* That is **false since 2026-08-17**: `quince-coder`
+# was granted `workflows: write` and pushed one (quince#1116), as `quince-review[bot]` already
+# could (quince#894). Corrected rather than deleted, because the sentence is what the refusal at
+# the bottom of this file was routing on, and a reader who fixes one without the other keeps the
+# misrouting.
+#
+# What the duplication is worth NOW is the near-miss below: a reviewable copy in a document, which
+# is what caught the one real defect this arrangement has seen. Deleting it is still not the fix.
 #
 # THE NEAR-MISS, which is the whole argument. quince#618 installed `cron: "0 22 * * *"` — a value
 # `deploy/demo.md` had already tried and moved away from, quoting GitHub that top-of-hour queued
@@ -156,7 +164,7 @@ right, deliberately. quince#618 is why: the doc was correct and the workflow was
 that resolved toward the running file would have picked the wrong side on the only instance there
 has been. Decide, then make them identical again.
 
-If the workflow is the side that must change, note that no agent seat can push under
-.github/workflows/** (quince#113) — that edit needs the Operator.
+If the workflow is the side that must change, this seat can make that edit: quince-coder holds
+workflows: write since 2026-08-17 (quince#1116). Do not route it to the Operator.
 EOF
 exit 1
