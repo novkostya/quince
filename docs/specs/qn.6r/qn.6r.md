@@ -107,12 +107,12 @@ hazard was acceptable, and the regression tests go with the code they cover.
 **RULED — Operator, 2026-08-20: `qn.6p` D7's refuse-before-the-walk half is retired.** *"Yes, of
 course can be retired"*, clarified as *"I mean, there's no other options."*
 
-**IT IS A FORECLOSURE, NOT A TRADE, and the distinction is the reason this paragraph is worded the
-way it is.** Nothing was chosen between: there is no safe pre-check, none can be built against this
-muxer, and no candidate survives contact with the protocol. The post-check is not the option that
-won — it is the only shape that can be honest. A reader who takes this for a decision will ask
-*why not just do the pre-check*, which is a question this spec forecloses rather than one it
-declines to re-open.
+**THE COST IS REAL AND ACCEPTED, AND THERE WAS NO ALTERNATIVE TO ACCEPTING IT.** Both halves are
+true and they were never in tension. Nothing was chosen between: there is no safe pre-check, none
+can be built against this muxer, and no candidate survives contact with the protocol. The
+post-check is not the option that won — it is the only shape that can be honest. A reader who
+takes this for a decision will ask *why not just do the pre-check*, which is a question this spec
+forecloses rather than one it declines to re-open.
 
 **D7's INTENT survives and its PROMISE does not.** *A pairing that cannot be recorded is not
 reported as a pairing* — kept, and it is the point. *Refuse before somebody walks to the phone and
@@ -177,8 +177,8 @@ failed, so quince does too.
 
 **What is lost, stated plainly:** the user can still walk to the phone and tap Trust for a pairing
 that will not be recorded. quince finds out immediately afterwards and says so, but it cannot spend
-that walk on the user's behalf any more — not as a price that was accepted, but because no probe
-that could spend it exists.
+that walk on the user's behalf any more. **It is a real cost and it is accepted — and there was no
+alternative to accepting it**, because no probe that could spend it exists.
 
 **One case is still refusable before the walk, and it is kept:** if the muxer is unreachable, the
 pairing certainly cannot happen. That answer already exists in the muxer health state (qn.6p D5) and
