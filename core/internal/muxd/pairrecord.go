@@ -1,8 +1,10 @@
 package muxd
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -91,14 +93,27 @@ type pairRecordReply struct {
 	PairRecordData []byte `plist:"PairRecordData"`
 }
 
+// usbmuxdNoRecord is what usbmuxd answers when it holds no record for the requested udid:
+// `send_pair_record` calls `send_result(client, tag, ENOENT)` (usbmuxd `src/client.c`), and
+// ENOENT is 2. A MISSING `PairRecordID` gets EINVAL from the same function, and every other
+// non-zero number is some other failure — so "non-zero means absent" would read a malformed
+// request, or a code nobody has seen, as a confident *no record*. Every one of those must be
+// PairRecordUnknown, because a false Absent is the one direction that bypasses Recorded()'s
+// comparison rather than tripping it: the absent→present arm never reaches the digest.
+const usbmuxdNoRecord = 2
+
 // ReadPairRecord asks one muxer whether it holds a pairing record for udid.
 //
-// THREE MEANINGS, FOUR SHAPES ON THE WIRE (D5), and the EOF arm is why this is not a plain error
-// check. netmuxd answers *no record* by closing with no reply — but a muxer that DIES mid-request
-// closes exactly the same way, and so does one restarted underneath the exchange. Read naively an
-// EOF is *the record is not there* wearing *quince cannot tell*'s clothes. So on EOF quince dials
-// again: reachable means the muxer is alive and its silence was its answer; unreachable means it
-// went away and quince does not know.
+// THREE MEANINGS, FOUR SHAPES ON THE WIRE (D5), and the silent arm is why this is not a plain
+// error check. netmuxd answers *no record* by closing with no reply — but a muxer that DIES
+// mid-request closes the same way, and one that is RESTARTED leaves a new process accepting on
+// the same socket path.
+//
+// SO THE SECOND ASK IS A RE-ASK, NOT A PING. A bare dial observes a socket accepting; it cannot
+// observe a silence, and it cannot tell the original process from its replacement. `muxsup`
+// restarting the daemon is not a race — it is the supervised path, and the store is a directory
+// that survives the restart, so a ping would report Absent with full confidence about a record
+// that is still there (quince#1336 review).
 //
 // A SHORT-LIVED CONNECTION OF ITS OWN, not the Listen stream — that is a long-lived subscription
 // whose framing carries no request/response discipline.
@@ -113,18 +128,49 @@ func ReadPairRecord(ctx context.Context, ep muxaddr.Endpoint, udid string, timeo
 	if !errors.Is(err, errNoReply) {
 		return PairRecord{State: PairRecordUnknown}
 	}
-	// The muxer accepted the request and closed without answering. Ask again whether it is there
-	// at all: that is what separates "its silence was the answer" from "it went away".
-	conn, dialErr := dialEndpoint(ctx, ep)
-	if dialErr != nil {
+
+	// Silent once. Ask the whole question again rather than checking the socket is up.
+	rec, err = askPairRecord(ctx, ep, udid)
+	switch {
+	case err == nil:
+		return rec // it answered this time — take the answer over the silence
+	case errors.Is(err, errNoReply):
+		return PairRecord{State: PairRecordAbsent} // silent twice, and reachable twice
+	default:
 		return PairRecord{State: PairRecordUnknown}
 	}
-	_ = conn.Close()
-	return PairRecord{State: PairRecordAbsent}
 }
 
-// errNoReply is the muxer accepting a request and closing without writing a frame.
+// errNoReply is the muxer accepting a request and closing before writing ANY byte of a frame.
+// A close part-way through one is not this: it is the muxer dying while answering, which is the
+// strongest available evidence that it WAS answering.
 var errNoReply = errors.New("muxd: muxer closed without replying")
+
+// readFrame reads one framed message, distinguishing a clean close before any byte from a
+// truncated frame. `readPlist` cannot: `binary.Read` and `io.ReadFull` each yield io.EOF or
+// io.ErrUnexpectedEOF, so three distinct wire events arrive as one and two of them are deaths.
+func readFrame(conn net.Conn) ([]byte, error) {
+	var raw [16]byte
+	n, err := io.ReadFull(conn, raw[:])
+	if err != nil {
+		if n == 0 && errors.Is(err, io.EOF) {
+			return nil, errNoReply
+		}
+		return nil, fmt.Errorf("muxd: truncated pair-record reply header after %d byte(s): %w", n, err)
+	}
+	var h header
+	if err := binary.Read(bytes.NewReader(raw[:]), binary.LittleEndian, &h); err != nil {
+		return nil, err
+	}
+	if h.Length < 16 || h.Length > 16+maxPayload {
+		return nil, fmt.Errorf("muxd: implausible pair-record reply length %d", h.Length)
+	}
+	body := make([]byte, h.Length-16)
+	if _, err := io.ReadFull(conn, body); err != nil {
+		return nil, fmt.Errorf("muxd: truncated pair-record reply body: %w", err)
+	}
+	return body, nil
+}
 
 func dialEndpoint(ctx context.Context, ep muxaddr.Endpoint) (net.Conn, error) {
 	network, address := ep.DialArgs()
@@ -153,11 +199,8 @@ func askPairRecord(ctx context.Context, ep muxaddr.Endpoint, udid string) (PairR
 		return PairRecord{}, err
 	}
 
-	body, _, err := readPlist(conn)
+	body, err := readFrame(conn)
 	if err != nil {
-		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-			return PairRecord{}, errNoReply
-		}
 		return PairRecord{}, err
 	}
 
@@ -169,10 +212,8 @@ func askPairRecord(ctx context.Context, ep muxaddr.Endpoint, udid string) (PairR
 		// THE ONLY PLACE THE BODY IS TOUCHED. Hashed here and never returned, logged or measured.
 		return PairRecord{State: PairRecordPresent, Digest: sha256.Sum256(msg.PairRecordData)}, nil
 	}
-	// A Result with a non-zero Number is usbmuxd's "no record". A zero Number with no data is not
-	// an answer this call can use, and quince says it does not know rather than guessing absent.
-	if msg.Number != 0 {
+	if msg.Number == usbmuxdNoRecord {
 		return PairRecord{State: PairRecordAbsent}, nil
 	}
-	return PairRecord{}, fmt.Errorf("muxd: ReadPairRecord reply carried neither a record nor a result")
+	return PairRecord{}, fmt.Errorf("muxd: ReadPairRecord answered result %d, which is not a record and not a no-record", msg.Number)
 }
