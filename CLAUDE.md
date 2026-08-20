@@ -525,7 +525,7 @@ is the bootstrap artefact of an identity that did not yet exist.
 quince#330 deleted the `.claude/seats` list, so there is no enumeration to update. Widening the
 alternation itself is the cost, and `analyst<N>` is the first time it has been paid.
 
-**What does not change.** `approver ≠ author` is untouched, and it is untouched *mechanically*
+**What does not change, and what the ruling added.** `approver ≠ author` is untouched, and it is untouched *mechanically*
 rather than by restraint: GitHub refuses an approval from a pull request's own author, and
 `.github/CODEOWNERS` routes canon to `@novkostya`, which no App can satisfy. **The seat can author
 code and open pull requests; it holds no `administration` and cannot merge.**
@@ -1232,6 +1232,11 @@ placed both since quince#308, so `deploy/runner/provision` for this role install
 **Check a claim against the box it is FOR, not only against the mechanism it names.** That is what
 `provision:27` decides and it is the thing a remedy for this section keeps missing: a fix verified
 at the script can still be impossible on the machine it was written for.
+
+**And check whether an issue is still OPEN before describing it as outstanding work.** A closed-issue
+event is easy to read and not connect, so a ruling can arrive in canon citing work that finished
+hours earlier — and a stale *"not built"* in a document is read as authority by the next session,
+which then cites it onward.
 
 **`preflight`'s "reach" is presence, not freshness — and this paragraph committed the same
 defect one size up (quince#121).** Measured on the architect box: a clone at an HTTPS remote
