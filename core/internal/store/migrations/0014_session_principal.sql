@@ -1,0 +1,28 @@
+-- qn.13 slice 3: a session records WHAT AUTHENTICATED IT, which is the first principal quince has.
+--
+-- THE RUNG'S FIRST ACT, AND IT IS A MIGRATION RATHER THAN A ONE-LINE FIX. quince#1342 located the
+-- gap at `httpapi/middleware.go`'s `authGuard`, which reads
+-- `if _, err := d.Auth.Authenticate(...)` and discards the returned session. That reads as a
+-- principal being thrown away. It is not: `sessions_auth` recorded a session's LIFETIME and nothing
+-- about its origin, so the discarded value had no identity in it to begin with. Nothing upstream
+-- of that line had a principal to hand over, and this column is what creates one.
+--
+-- NULL MEANS THE ADMIN, and that is a decision with a hazard worth naming here rather than in a
+-- review comment. A password login has no credential, so NULL is the honest value for it — and
+-- every session that exists at upgrade time keeps working, which is what makes this additive.
+-- The hazard is the shape this rung exists to fix in three other places (spec D6): a default that
+-- GRANTS. It is accepted here, and only here, for two reasons: the alternative is invalidating
+-- every live session on upgrade, and this column is written at exactly one place per login path
+-- rather than being a set that can gain members. The spec's G2 asserts that.
+--
+-- NO SCOPE COLUMN, AND DELIBERATELY NOT YET. Scope is slice 4, on `passkeys` rather than here,
+-- because it is a property of the credential and not of the session (spec D2) — a session inherits
+-- it by pointing at the credential. Adding a scope here would give one principal two homes and
+-- invite them to disagree. This is `0013_device_notification_prefs.sql`'s *"DO NOT ADD THAT COLUMN
+-- NOW"* discipline applied to the rung that ruling was waiting for.
+--
+-- NOT A FOREIGN KEY. A credential can be removed while a session it minted is still live, and that
+-- is exactly the case quince#1001 is about. A constraint here would either refuse the removal or
+-- cascade the session away silently, and both would decide quince#1001 by accident. The join miss
+-- is a state this rung must be able to SEE.
+ALTER TABLE sessions_auth ADD COLUMN credential_id TEXT;

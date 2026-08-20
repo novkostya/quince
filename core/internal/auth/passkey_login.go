@@ -118,6 +118,10 @@ func (s *Service) FinishPasskeyAssertion(cer *PasskeyCeremonies, key, rpID, clie
 		CreatedAt:  now,
 		LastSeenAt: now,
 		ExpiresAt:  now.Add(s.absoluteTimeout),
+		// THE CREDENTIAL THAT JUST PROVED ITSELF, which is what makes this session attributable.
+		// `resolved` is the row the assertion was verified against, so this is the one identity
+		// quince can state without inferring anything (spec D1).
+		CredentialID: &resolved.CredentialID,
 	}
 	if err := s.store.CreateAuthSession(sess); err != nil {
 		return store.AuthSession{}, "", err

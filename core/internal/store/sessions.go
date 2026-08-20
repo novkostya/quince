@@ -6,28 +6,41 @@ import (
 	"time"
 )
 
-// AuthSession is an admin cookie session.
+// AuthSession is a cookie session, and it records WHAT AUTHENTICATED IT.
 type AuthSession struct {
 	ID         string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
 	ExpiresAt  time.Time
+
+	// CredentialID is the passkey that minted this session, or nil for a password login.
+	//
+	// NIL MEANS THE ADMIN — see 0014_session_principal.sql, which carries the reasoning and
+	// the hazard. A POINTER rather than a string, because "" and "no credential" must not be
+	// the same value: the second is a fact about how this session was created and the first
+	// would be an empty credential id, which is not a thing that exists.
+	CredentialID *string
 }
 
 // CreateAuthSession inserts a new session.
 func (s *Store) CreateAuthSession(sess AuthSession) error {
 	_, err := s.db.Exec(
-		`INSERT INTO sessions_auth (id, created_at, last_seen_at, expires_at) VALUES (?, ?, ?, ?)`,
-		sess.ID, fmtTime(sess.CreatedAt), fmtTime(sess.LastSeenAt), fmtTime(sess.ExpiresAt))
+		`INSERT INTO sessions_auth (id, created_at, last_seen_at, expires_at, credential_id)
+		 VALUES (?, ?, ?, ?, ?)`,
+		sess.ID, fmtTime(sess.CreatedAt), fmtTime(sess.LastSeenAt), fmtTime(sess.ExpiresAt),
+		sess.CredentialID)
 	return err
 }
 
 // GetAuthSession fetches a session by id.
 func (s *Store) GetAuthSession(id string) (AuthSession, bool, error) {
 	var created, lastSeen, expires string
+	// NULL is the ordinary case for a password login, so this scans into a nullable rather
+	// than defaulting — a default here would invent a credential that was never presented.
+	var credential sql.NullString
 	err := s.db.QueryRow(
-		`SELECT created_at, last_seen_at, expires_at FROM sessions_auth WHERE id = ?`, id).
-		Scan(&created, &lastSeen, &expires)
+		`SELECT created_at, last_seen_at, expires_at, credential_id FROM sessions_auth WHERE id = ?`, id).
+		Scan(&created, &lastSeen, &expires, &credential)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AuthSession{}, false, nil
 	}
@@ -43,6 +56,9 @@ func (s *Store) GetAuthSession(id string) (AuthSession, bool, error) {
 	}
 	if sess.ExpiresAt, err = parseTime(expires); err != nil {
 		return AuthSession{}, false, err
+	}
+	if credential.Valid {
+		sess.CredentialID = &credential.String
 	}
 	return sess, true, nil
 }
