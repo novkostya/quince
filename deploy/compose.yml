@@ -51,8 +51,10 @@ services:
       # Where the socket to quince is created. /run is memory-backed, so nothing survives a reboot.
       - /run/netmuxd:/run
 
-      # Pairing records. quince creates them; the muxer only reads them.
-      - ./quince/data/lockdown:/var/lib/lockdown:ro
+      # Pairing records, and the muxer owns them: it writes one when you pair a device and reads it
+      # back to serve that device over Wi-Fi. This must be writable — a pairing it cannot save is a
+      # pairing that does not survive, and the phone asks you to trust it all over again.
+      - ./quince/data/lockdown:/var/lib/lockdown
 
       # This host has an identity file in that same directory, and netmuxd reads everything there
       # as though it were a phone. Left visible, it shadows the real device and Wi-Fi silently
