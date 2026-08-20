@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
+	"github.com/novkostya/quince/core/internal/store"
 )
 
 // AN rpId MUST BE A DOMAIN — spec story 4. A bare IP cannot be one, and that is a protocol
@@ -193,7 +194,7 @@ func TestBeginRegistrationOnAFreshBox(t *testing.T) {
 	st := newResetStore(t)
 	cer := NewPasskeyCeremonies()
 
-	options, key, err := BeginPasskeyRegistration(st, cer, rpHome)
+	options, key, err := BeginPasskeyRegistration(st, cer, rpHome, store.AdminScope())
 	if err != nil {
 		t.Fatalf("BeginPasskeyRegistration: %v", err)
 	}
@@ -213,7 +214,7 @@ func TestBeginRegistrationRefusesAnIPAddress(t *testing.T) {
 	st := newResetStore(t)
 	cer := NewPasskeyCeremonies()
 
-	_, _, err := BeginPasskeyRegistration(st, cer, "192.0.2.10")
+	_, _, err := BeginPasskeyRegistration(st, cer, "192.0.2.10", store.AdminScope())
 
 	var un ErrUnsupportedRPID
 	if !errors.As(err, &un) {
@@ -230,12 +231,12 @@ func TestFinishRefusesACeremonyFromAnotherDomain(t *testing.T) {
 	st := newResetStore(t)
 	cer := NewPasskeyCeremonies()
 
-	_, key, err := BeginPasskeyRegistration(st, cer, rpHome)
+	_, key, err := BeginPasskeyRegistration(st, cer, rpHome, store.AdminScope())
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
 
-	_, err = FinishPasskeyRegistration(st, cer, key, "phone", rpOther, nil, time.Now().UTC())
+	_, err = FinishPasskeyRegistration(st, cer, key, "phone", rpOther, nil, time.Now().UTC(), store.AdminScope())
 
 	var mm ErrRPIDMismatch
 	if !errors.As(err, &mm) {
@@ -251,7 +252,7 @@ func TestFinishWithNoCeremonyIsNamed(t *testing.T) {
 	st := newResetStore(t)
 	cer := NewPasskeyCeremonies()
 
-	_, err := FinishPasskeyRegistration(st, cer, "not-a-key", "phone", rpHome, nil, time.Now().UTC())
+	_, err := FinishPasskeyRegistration(st, cer, "not-a-key", "phone", rpHome, nil, time.Now().UTC(), store.AdminScope())
 	if !errors.Is(err, ErrNoChallenge) {
 		t.Fatalf("got %v, want ErrNoChallenge", err)
 	}
@@ -267,7 +268,7 @@ func TestRegistrationRequiresADiscoverableCredential(t *testing.T) {
 	st := newResetStore(t)
 	cer := NewPasskeyCeremonies()
 
-	options, _, err := BeginPasskeyRegistration(st, cer, rpHome)
+	options, _, err := BeginPasskeyRegistration(st, cer, rpHome, store.AdminScope())
 	if err != nil {
 		t.Fatalf("BeginPasskeyRegistration: %v", err)
 	}

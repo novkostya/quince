@@ -85,7 +85,7 @@ func (d Deps) handlePasskeyRegisterBegin() http.HandlerFunc {
 		}
 
 		rpID := auth.RPIDFromRequest(r)
-		options, ceremony, err := auth.BeginPasskeyRegistration(d.Store, d.Passkeys, rpID)
+		options, ceremony, err := auth.BeginPasskeyRegistration(d.Store, d.Passkeys, rpID, store.AdminScope())
 		if err != nil {
 			if d.writePasskeyError(w, err) {
 				return
@@ -188,7 +188,9 @@ func (d Deps) handlePasskeyRegisterFinish() http.HandlerFunc {
 		}
 
 		pk, err := auth.FinishPasskeyRegistration(d.Store, d.Passkeys, ceremony, name,
-			auth.RPIDFromRequest(r), r, time.Now().UTC())
+			// The admin adding a passkey from Settings. Scoped credentials come from enrolment,
+			// which is a different endpoint.
+			auth.RPIDFromRequest(r), r, time.Now().UTC(), store.AdminScope())
 		if err != nil {
 			if d.writePasskeyError(w, err) {
 				return

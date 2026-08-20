@@ -151,16 +151,46 @@ func (p *PasskeyCeremonies) take(key string, want ceremonyKind) (pendingCeremony
 type passkeyUser struct {
 	handle []byte
 	creds  []webauthn.Credential
+	// name is what the PLATFORM shows for this credential. Empty means the admin.
+	//
+	// IT EXISTS BECAUSE OF A MEASUREMENT (spec D2.1, taken 2026-08-20). iOS collapses credentials on
+	// `(rpId, username)`, and every quince credential carried `adminUsername` — so three credentials
+	// on one iPhone presented as ONE row, indistinguishable and unselectable, and sign-in silently
+	// used one of them. Under this rung those credentials can carry DIFFERENT AUTHORITY, which makes
+	// a silent choice between them the failure the rung must not ship.
+	name string
 }
 
-func (u passkeyUser) WebAuthnID() []byte                         { return u.handle }
-func (u passkeyUser) WebAuthnName() string                       { return adminUsername }
-func (u passkeyUser) WebAuthnDisplayName() string                { return adminUsername }
+func (u passkeyUser) WebAuthnID() []byte { return u.handle }
+
+// WebAuthnName is what the sign-in sheet shows, and for a scoped credential it must not say `admin`.
+//
+// Operator, 2026-08-20: "household member must not be quince-admin, that's wild." A scoped
+// credential's holder reaches one device; a sheet labelling it `quince-admin` tells them they hold
+// the opposite. That is the state-honesty rule at the one place a user actually looks.
+func (u passkeyUser) WebAuthnName() string {
+	if u.name == "" {
+		return adminUsername
+	}
+	return u.name
+}
+
+func (u passkeyUser) WebAuthnDisplayName() string                { return u.WebAuthnName() }
 func (u passkeyUser) WebAuthnCredentials() []webauthn.Credential { return u.creds }
 
-// adminUsername is the anchor quince#819 put on the login form, and it must be THE SAME STRING.
-// The keychain keys a credential on (origin, username), so a passkey registered under a different
-// name would file itself as a second identity beside the password rather than beside it.
+// adminUsername is the anchor quince#819 put on the login form, and for an ADMIN credential it must
+// be THE SAME STRING. The keychain keys a credential on (origin, username), so an admin passkey
+// registered under a different name would file itself as a second identity beside the password
+// rather than beside it.
+//
+// A SCOPED CREDENTIAL IS THAT SECOND IDENTITY, DELIBERATELY, and this is a scoped EXCEPTION to
+// quince#819 rather than a repeal of it — spec D2.1. It belongs to a different principal, on a
+// different phone, with different authority, so filing it separately is what it should do. The
+// constant stays correct for admin credentials and only for those; do not "restore" it for the
+// scoped path.
+//
+// IT ALSO DISARMS THE COLLAPSE the measurement found: two credentials with different usernames do
+// not merge into one unselectable row, so the platform cannot silently choose between authorities.
 const adminUsername = "quince-admin"
 
 // userHandle returns the admin's stable WebAuthn id, minting it once.
@@ -239,12 +269,22 @@ func relyingParty(rpID string) (*webauthn.WebAuthn, error) {
 
 // BeginPasskeyRegistration starts the ceremony for the single admin, returning the options the
 // browser needs and an opaque key the finish call must present.
-func BeginPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, rpID string) (any, string, error) {
+// The `scope` argument decides what the platform will SHOW for this credential — the constant
+// for an admin one, the device's name for a scoped one (spec D2.1). It is a positional
+// argument for the same reason `store.InsertPasskey`'s is: a ceremony that forgot it would
+// label a household member's phone `quince-admin`, and a forgotten argument is a compile error
+// where a forgotten field is a silent wrong answer.
+func BeginPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, rpID string,
+	scope store.Scope) (any, string, error) {
 	wa, err := relyingParty(rpID)
 	if err != nil {
 		return nil, "", err
 	}
 	handle, err := userHandle(st)
+	if err != nil {
+		return nil, "", err
+	}
+	username, err := scopeUsername(st, scope)
 	if err != nil {
 		return nil, "", err
 	}
@@ -257,7 +297,7 @@ func BeginPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, rpID stri
 	// by the device with "you already have a passkey here" instead of silently minting a duplicate
 	// the user cannot tell apart in the list.
 	creation, session, err := wa.BeginRegistration(
-		passkeyUser{handle: handle, creds: existing},
+		passkeyUser{handle: handle, creds: existing, name: username},
 		webauthn.WithExclusions(credentialDescriptors(existing)),
 	)
 	if err != nil {
@@ -272,7 +312,7 @@ func BeginPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, rpID stri
 
 // FinishPasskeyRegistration verifies the authenticator's response and stores the credential.
 func FinishPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, key, name, rpID string,
-	r *http.Request, now time.Time) (store.Passkey, error) {
+	r *http.Request, now time.Time, scope store.Scope) (store.Passkey, error) {
 	pending, ok := cer.take(key, ceremonyRegister)
 	if !ok {
 		return store.Passkey{}, ErrNoChallenge
@@ -292,12 +332,21 @@ func FinishPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, key, nam
 	if err != nil {
 		return store.Passkey{}, err
 	}
+	username, err := scopeUsername(st, scope)
+	if err != nil {
+		return store.Passkey{}, err
+	}
 	existing, err := existingCredentials(st, pending.rpID)
 	if err != nil {
 		return store.Passkey{}, err
 	}
 
-	cred, err := wa.FinishRegistration(passkeyUser{handle: handle, creds: existing}, pending.session, r)
+	// THE SAME USER OBJECT AS `Begin`, name included. The library compares what it built the
+	// challenge from against what it verifies, so a name that differed between the two halves
+	// of one ceremony would be a mismatch found at the worst moment — after Face ID.
+	cred, err := wa.FinishRegistration(
+		passkeyUser{handle: handle, creds: existing, name: username},
+		pending.session, r)
 	if err != nil {
 		return store.Passkey{}, err
 	}
@@ -321,7 +370,7 @@ func FinishPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, key, nam
 	// THE ADMIN CEREMONY STATES ITS SCOPE, rather than being correct by falling through a
 	// default. This is the only registration path today; the scoped one arrives with
 	// enrolment, and when it does the compiler will require it to answer this same question.
-	if err := st.InsertPasskey(pk, store.AdminScope()); err != nil {
+	if err := st.InsertPasskey(pk, scope); err != nil {
 		return store.Passkey{}, err
 	}
 	return pk, nil
@@ -400,3 +449,41 @@ func adminCredentials(st *store.Store, rpID string) ([]webauthn.Credential, erro
 	}
 	return credentialsFrom(rows, rpID)
 }
+
+// scopeUsername is what the platform will SHOW for a credential with this scope.
+//
+// EMPTY MEANS THE ADMIN, and `passkeyUser.WebAuthnName` turns that into `adminUsername`. A scoped
+// credential gets its DEVICE'S NAME (spec D2.1) — the only name that is both meaningful to its
+// holder and true.
+//
+// AN UNKNOWN DEVICE IS AN ERROR, NOT A FALLBACK, and the reason is the measurement this rule came
+// from. iOS collapses credentials on `(rpId, username)`, so a generic fallback like "quince device"
+// would make every unknown-device credential collapse into ONE unselectable row — reintroducing the
+// exact defect D2.1 exists to remove, at the moment quince is least sure what it is looking at. The
+// udid itself is not an option either: it is Operator-private and would be displayed on a screen.
+//
+// It is also not a state that should arise. Enrolment is reached from a device's own page, so the
+// device is known by construction; if it is not, refusing is the honest answer.
+func scopeUsername(st *store.Store, scope store.Scope) (string, error) {
+	if scope.IsAdmin() {
+		return "", nil
+	}
+	udid := scope.UDID()
+	rows, err := st.ListDeviceIdentities()
+	if err != nil {
+		return "", err
+	}
+	for _, d := range rows {
+		if d.UDID == udid && d.Name != "" {
+			return d.Name, nil
+		}
+	}
+	return "", ErrUnknownScopeDevice
+}
+
+// ErrUnknownScopeDevice — a credential was scoped to a device quince cannot name.
+//
+// Named rather than generic because the remedy is specific: the device has to be known to quince
+// before a credential can be confined to it, and a caller meeting this has issued the QR for
+// something that is not on the Devices list.
+var ErrUnknownScopeDevice = errors.New("auth: cannot name the device this credential is scoped to")

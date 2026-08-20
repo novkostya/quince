@@ -53,3 +53,6 @@ func (s Scope) value() *string {
 	}
 	return &s.udid
 }
+
+// UDID returns the device a scoped credential is confined to, empty for an admin scope.
+func (s Scope) UDID() string { return s.udid }
