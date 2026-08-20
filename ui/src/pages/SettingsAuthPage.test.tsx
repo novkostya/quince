@@ -215,9 +215,14 @@ describe("the auth page orders its sections by credential state", () => {
     // rendered from `supported`, which only the payload carries.
     await screen.findByText(/a passkey is tied to the address/i);
 
-    const order = sections();
-    expect(order[0]).toBe("Passkeys");
-    expect(order).toContain("No passkey of yours works at this address");
+    // THE WHOLE SEQUENCE, like its three siblings — quince#1321 review. This was `order[0]` plus a
+    // `toContain`, which is the pattern the commit above calls out: two weaker claims about one
+    // list, neither of which pins where the third section sits.
+    expect(sections()).toEqual([
+      "Passkeys",
+      "No passkey of yours works at this address",
+      "Signing in over plain HTTP",
+    ]);
   });
   // AN INSTALL WITH NOTHING TO SIGN IN WITH LEADS WITH THE PANEL THAT SAYS SO. This is the one
   // no-password state where passkeys do NOT lead, because there are none — leading with an empty
@@ -289,6 +294,14 @@ describe("the section that describes a state carries the form that ends it", () 
   // AND THE ONE STATE THAT OFFERS NO FORM SAYS WHY, rather than merely omitting it — the third
   // acceptance bullet. Rule 1 refuses a credential change from a caller that cannot prove a present
   // credential, so a form here would 4xx every time it was submitted.
+  //
+  // THIS IS WHAT HOLDS THE GUARD IN PLACE, AND IT WAS MEASURED RATHER THAN ASSUMED — quince#1321
+  // review. Deleting the `elsewhere-only` ternary in `PasswordControls` and running the suite turns
+  // exactly this test red, and nothing else: `Tests 1 failed | 814 passed`.
+  //
+  // AN ABSENCE ASSERTION NEEDS A CONTROL, which is the two tests directly above: the SAME query, on
+  // the same page, returns the field in `passwordless` and in `unconfigured`. Without them this
+  // would pass against a component that rendered nothing at all.
   it("offers no form where one cannot succeed, and says so", async () => {
     renderAt(false, [passkeyAt(ELSEWHERE)]);
 
