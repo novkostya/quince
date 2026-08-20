@@ -39,10 +39,9 @@ alternative is a `§8` amendment to `qn.6k`'s spec. This document assumes the ru
 reversal. If the Operator wants an amendment instead, or wants `qn.6l`, the rename is the whole of
 the change.
 
-**THE QUESTION IS STILL UNANSWERED, AND THE ESCAPE HATCH THIS PARAGRAPH OFFERED HAS CLOSED.** It read
-*"a directory rename before this PR merges costs nothing"* — and this spec merged as quince#842,
-after which six more PRs cited `qn.6m` in their titles, bodies and commit messages, and
-`docs/contracts.md` gained two blocks naming `qn.6m D3` and `D4`. A rename is now a change across
+**THE QUESTION IS STILL UNANSWERED, AND RENAMING THE RUNG IS NO LONGER FREE.** This spec merged as
+quince#842, after which six more PRs cited `qn.6m` in their titles, bodies and commit messages, and
+`docs/contracts.md` gained two blocks naming `qn.6m D3` and `D4`. A rename is a change across
 merged canon and a set of unrewritable commit messages rather than a `git mv`.
 
 **That is not an argument for leaving it undecided — it is the cost of the decision, stated where it
