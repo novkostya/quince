@@ -5,7 +5,7 @@ re-derived every time somebody swept these files for internal jargon, so it is w
 
 ## For anyone running quince
 
-Plain English, no rung numbers, no references to how this project works.
+Plain English, with none of this project's internal vocabulary.
 
 | | |
 | --- | --- |
