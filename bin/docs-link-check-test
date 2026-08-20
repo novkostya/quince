@@ -1,0 +1,247 @@
+#!/bin/sh
+# docs-link-check-test — the gate must FAIL on each shape it exists to catch, and must not fire on
+# the shapes that are correct.
+#
+# A LINK CHECKER THAT NEVER FAILS IS THE FAILURE MODE. It runs green on a tree whose links all
+# resolve, which is every tree until the day one does not — so a broken matcher is indistinguishable
+# from a clean repository, forever. Almost every assertion here is therefore a NEGATIVE control: a
+# tree constructed to be broken, which must be reported.
+#
+# HERMETIC, against a synthetic repo. quince#1313's instances are all historical — the files exist
+# now — so asserting against this repository would pin nothing. The fixtures below reconstruct each
+# instance's SHAPE instead, which is what has to keep working.
+set -eu
+
+cd "$(dirname "$0")/.."
+DLC=$PWD/bin/docs-link-check
+pass=0
+fail=0
+ok() {
+	printf '  ok   %s\n' "$*"
+	pass=$((pass + 1))
+}
+bad() {
+	printf '  FAIL %s\n' "$*"
+	fail=$((fail + 1))
+}
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT INT TERM
+export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+
+# fresh_repo — a synthetic tree with this repository's shape. The tool reads `git ls-files`, so
+# everything must be ADDED or it does not exist as far as the check is concerned — which is itself
+# the property part 7 pins.
+fresh_repo() {
+	rm -rf "$WORK/r"
+	mkdir -p "$WORK/r/bin" "$WORK/r/deploy" "$WORK/r/docs/specs/qn.1" "$WORK/r/ui/src/components"
+	git init -q "$WORK/r"
+	cp "$DLC" "$WORK/r/bin/docs-link-check"
+	printf 'x\n' >"$WORK/r/deploy/compose.yml"
+	printf 'x\n' >"$WORK/r/deploy/storage.md"
+	printf '# readme\n' >"$WORK/r/README.md"
+	printf '# deploy\n' >"$WORK/r/deploy/README.md"
+}
+
+commit_all() { git -C "$WORK/r" add -A && git -C "$WORK/r" commit -qm t; }
+
+# `set +e` inside the subshell: these helpers exist to CAPTURE a non-zero exit, and under `set -e`
+# the subshell dies before `echo $?` runs. Same shape as bin/gate-scope-test's note.
+run() { (set +e; cd "$WORK/r" && ./bin/docs-link-check >"$WORK/out" 2>&1; echo $?); }
+out() { cat "$WORK/out"; }
+
+# --- 1. A CLEAN TREE IS CLEAN (the positive control) -------------------------------------------
+# Without this, a tool that reported everything broken would pass every negative test below.
+fresh_repo
+printf 'see [compose](deploy/compose.yml)\n' >>"$WORK/r/README.md"
+commit_all
+rc=$(run)
+if [ "$rc" = 0 ]; then ok "a tree whose links all resolve exits 0"; else
+	bad "a clean tree did not exit 0 (got $rc)"
+	out | sed 's/^/    | /'
+fi
+case "$(out)" in
+*"clean"*"link(s)"*) ok "...and says how many links it checked, so a silent zero-link run is visible" ;;
+*) bad "...and says how many links it checked" ;;
+esac
+
+# --- 2. quince#1313 INSTANCE 1: A RELATIVE LINK TO A FILE THAT DOES NOT EXIST -------------------
+fresh_repo
+printf 'see [compose](deploy/not-yet.yml)\n' >>"$WORK/r/README.md"
+commit_all
+rc=$(run)
+if [ "$rc" = 1 ]; then ok "a relative link to a missing file is a finding (exit 1)"; else
+	bad "a broken relative link was not caught (exit $rc)"
+	out | sed 's/^/    | /'
+fi
+case "$(out)" in
+*"README.md"*"deploy/not-yet.yml"*) ok "...and names both the file it is in and the target" ;;
+*) bad "...and names both the file it is in and the target" ;;
+esac
+
+# --- 3. INSTANCE 1 IN ITS ORIGINAL FORM: A FULL URL INTO THIS REPO'S OWN main -------------------
+# The install block was `wget https://raw.githubusercontent.com/…/main/deploy/compose.yml`. There is
+# no `](…)` anywhere near it, so a relative-link scanner alone would have said nothing.
+fresh_repo
+printf 'wget https://raw.githubusercontent.com/novkostya/quince/main/deploy/absent.yml\n' >>"$WORK/r/README.md"
+commit_all
+rc=$(run)
+if [ "$rc" = 1 ]; then ok "a raw.githubusercontent URL into our own main is checked (exit 1)"; else
+	bad "the wget form — quince#1313's actual first instance — was not caught (exit $rc)"
+	out | sed 's/^/    | /'
+fi
+fresh_repo
+printf 'see https://github.com/novkostya/quince/blob/main/deploy/absent.md\n' >>"$WORK/r/README.md"
+commit_all
+if [ "$(run)" = 1 ]; then ok "...and so is the blob/main form, which is what DocLink builds"; else
+	bad "the blob/main URL form was not caught"
+fi
+
+# --- 4. A URL PINNED TO A TAG IS NOT OUR TREE'S QUESTION ----------------------------------------
+# It is a claim about a different tree, which this working copy cannot settle. Judging it here would
+# produce a permanent false finding on every release link.
+fresh_repo
+printf 'see https://github.com/novkostya/quince/blob/v0.1.0/deploy/absent.md\n' >>"$WORK/r/README.md"
+commit_all
+if [ "$(run)" = 0 ]; then ok "a URL pinned to a tag is left alone — it is not a claim about this tree"; else
+	bad "a tag-pinned URL was judged against the working tree"
+	out | sed 's/^/    | /'
+fi
+
+# --- 5. quince#1313 INSTANCE 3: A DOC PATH THE UI HANDS A READER --------------------------------
+# The sharper half: DocLink builds a blob/main URL with no validation, so a stale path is a silent
+# 404 for a reader who followed a link THE PRODUCT gave them.
+fresh_repo
+printf 'export const X = () => <DocLink path="deploy/gone.md" />;\n' >"$WORK/r/ui/src/components/D.tsx"
+commit_all
+rc=$(run)
+if [ "$rc" = 1 ]; then ok "a UI doc path that does not resolve is a finding (exit 1)"; else
+	bad "a stale DocLink path was not caught (exit $rc)"
+	out | sed 's/^/    | /'
+fi
+case "$(out)" in
+*"hands a reader"*) ok "...and says why it is worse than a broken doc link" ;;
+*) bad "...and says why it is worse than a broken doc link" ;;
+esac
+
+# THE INDIRECTION, which is why the matcher is keyed on SHAPE and not on the component name.
+# OnboardingHTTPSPage passes a `docs` prop assigned three lines from the DocLink that renders it, so
+# a matcher looking for `DocLink path=` would miss exactly the case a stale path hides behind.
+fresh_repo
+printf 'const docs = "deploy/gone.md";\nexport const X = () => <Row docs={docs} />;\n' >"$WORK/r/ui/src/components/D.tsx"
+commit_all
+if [ "$(run)" = 1 ]; then ok "a doc path reached through a variable is caught — the matcher is by shape"; else
+	bad "an indirected doc path was missed; the matcher has become component-name-keyed"
+fi
+
+# --- 6. THE THINGS THAT MUST NOT FIRE -----------------------------------------------------------
+# Each of these is a correct construct. A gate that fires on them is one people learn to skim.
+fresh_repo
+cat >>"$WORK/r/README.md" <<'MD'
+[external](https://example.com/nope.md)
+[mail](mailto:someone@example.com)
+[anchor](#a-heading)
+[with anchor](deploy/storage.md#section)
+[a directory](deploy/)
+MD
+commit_all
+rc=$(run)
+if [ "$rc" = 0 ]; then ok "external URLs, mailto, bare anchors, file#anchor and directories are all clean"; else
+	bad "the gate fired on a correct construct (exit $rc)"
+	out | sed 's/^/    | /'
+fi
+
+# THE ANCHOR CONTROL. `file.md#section` must resolve the FILE — asserted by breaking the file.
+fresh_repo
+printf '[with anchor](deploy/absent.md#section)\n' >>"$WORK/r/README.md"
+commit_all
+if [ "$(run)" = 1 ]; then ok "...and file#anchor still checks the FILE (the control for the line above)"; else
+	bad "a fragment made a broken link invisible"
+fi
+
+# --- 7. RESOLUTION IS RELATIVE TO THE LINKING FILE, NOT THE ROOT --------------------------------
+# The one piece of arithmetic that, if wrong, makes every link in a subdirectory look broken — or
+# worse, makes a broken one look fine.
+fresh_repo
+printf '[sibling](storage.md)\n' >>"$WORK/r/deploy/README.md"
+commit_all
+if [ "$(run)" = 0 ]; then ok "a sibling link in a subdirectory resolves against its own directory"; else
+	bad "a valid sibling link was reported broken — resolution is against the root, not the file"
+	out | sed 's/^/    | /'
+fi
+fresh_repo
+printf '[up and over](../README.md)\n' >>"$WORK/r/deploy/README.md"
+commit_all
+if [ "$(run)" = 0 ]; then ok "a ../ link resolves without realpath (which would follow symlinks)"; else
+	bad "a ../ link was reported broken"
+	out | sed 's/^/    | /'
+fi
+fresh_repo
+printf '[sibling](absent.md)\n' >>"$WORK/r/deploy/README.md"
+commit_all
+if [ "$(run)" = 1 ]; then ok "...and a BROKEN sibling link is still caught (the control)"; else
+	bad "subdirectory resolution passes everything — it is not checking"
+fi
+
+# --- 8. UNTRACKED IS NOT PRESENT ----------------------------------------------------------------
+# The question a link asks is "what does a reader who clones this get". A file present only in
+# somebody's working copy must not satisfy it.
+fresh_repo
+printf '[untracked](deploy/local-only.md)\n' >>"$WORK/r/README.md"
+commit_all
+printf 'x\n' >"$WORK/r/deploy/local-only.md" # exists on disk, never added
+if [ "$(run)" = 1 ]; then ok "an UNTRACKED target does not satisfy a link — a reader would not get it"; else
+	bad "an untracked file satisfied a link; the check reads the disk rather than the tree"
+	out | sed 's/^/    | /'
+fi
+
+# --- 9. THE SPEC TREE IS EXCLUDED, AND SAYS SO --------------------------------------------------
+# Specs routinely cite paths the rung is about to create. That is correct, and would otherwise be a
+# permanent finding. Excluded deliberately — and COUNTED, so the exclusion is visible rather than silent.
+fresh_repo
+printf '[future](../../deploy/not-built-yet.md)\n' >"$WORK/r/docs/specs/qn.1/qn.1.md"
+commit_all
+rc=$(run)
+if [ "$rc" = 0 ]; then ok "a spec citing a path its rung will create is not a finding"; else
+	bad "the spec tree is being checked; every in-progress rung would go red (exit $rc)"
+	out | sed 's/^/    | /'
+fi
+case "$(out)" in
+*"spec file(s) excluded"*) ok "...and the exclusion is COUNTED in the output, not silent" ;;
+*) bad "...and the exclusion is counted in the output (no silent caps)" ;;
+esac
+
+# --- 10. A TRACKED PATH MISSING FROM DISK IS NOT NOISE ------------------------------------------
+# A partial checkout or a mid-rebase tree lists files that are not there. The tool must not emit
+# awk/sed errors about them — a diagnostic that is really an internal error teaches a reader to
+# ignore the output.
+fresh_repo
+printf '[ok](deploy/compose.yml)\n' >>"$WORK/r/README.md"
+commit_all
+rm "$WORK/r/deploy/storage.md"
+run >/dev/null
+case "$(out)" in
+*"awk:"* | *"sed:"* | *"No such file or directory"*)
+	bad "a tracked-but-absent file produced tool errors on stderr"
+	out | sed 's/^/    | /'
+	;;
+*) ok "a tracked path missing from disk is skipped quietly, not reported as a tool error" ;;
+esac
+
+# --- 11. IT REFUSES RATHER THAN PASSING WHEN IT CANNOT LOOK -------------------------------------
+# Exit 2 is DID NOT RUN, the shape quince#41 established: a gate that cannot run must not exit 0.
+rm -rf "$WORK/nogit"
+mkdir -p "$WORK/nogit/bin"
+cp "$DLC" "$WORK/nogit/bin/docs-link-check"
+rc=$( (set +e; cd "$WORK/nogit" && ./bin/docs-link-check >"$WORK/out" 2>&1; echo $?) )
+if [ "$rc" = 2 ]; then ok "outside a git repository it exits 2 (DID NOT RUN), never 0"; else
+	bad "a check that could not run exited $rc — 0 would be a false clean"
+	out | sed 's/^/    | /'
+fi
+case "$(out)" in
+*"NOT a clean result"*) ok "...and says so, rather than leaving the caller to read an exit code" ;;
+*) bad "...and says so in words" ;;
+esac
+
+printf '\ndocs-link-check-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

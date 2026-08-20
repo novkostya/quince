@@ -1,0 +1,246 @@
+#!/bin/sh
+# docs-link-check — every relative link in the docs, and every doc path the UI hands a reader,
+# must resolve to a file that is actually in this tree.
+#
+# WHY THIS EXISTS (quince#1313). Three PRs in one night documented paths that did not exist when
+# they were written and existed by the time they merged, because independent PRs happened to land
+# in the right order. `README.md`'s install block opens with a `wget` of `deploy/compose.yml` — the
+# FIRST command a stranger runs — and that file was created twenty minutes earlier by a different
+# PR. Had they merged the other way round, the documented install would have opened with a 404.
+#
+# Nothing enforced the ordering, nobody chose it, and the reviewer verified it by hand each time.
+# That is the shape this project keeps paying for: a rule a person has to remember to apply is one
+# that eventually is not applied.
+#
+# THE UI HALF IS THE SHARPER ONE. `DocLink` builds a `blob/main/<path>` URL with no validation, so a
+# stale path is a silent 404 for a reader who followed a link THE PRODUCT HANDED THEM. A broken link
+# in a doc is a reader's dead end; a broken link in the app is quince being wrong at them.
+#
+# OFFLINE AND TREE-LOCAL, DELIBERATELY. This resolves against the working tree and makes no network
+# call — so it cannot answer "does this URL 200", and it is not trying to. Every instance in
+# quince#1313 was a path inside this repository, which is the class an offline check can settle
+# completely. An external-URL checker is a different tool with a different failure mode (it goes red
+# when somebody else's site is down) and is deliberately not this one.
+set -eu
+
+ME=docs-link-check
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+cd "$ROOT"
+
+
+findings=0
+scanned=0
+links=0
+
+note() { printf '%s: %s\n' "$ME" "$1" >&2; }
+
+cannot_run() {
+	note "$1"
+	note "this is NOT a clean result — nothing was checked."
+	exit 2
+}
+
+command -v git >/dev/null 2>&1 || cannot_run "git is not on PATH, so the tracked file set cannot be read"
+git rev-parse --git-dir >/dev/null 2>&1 || cannot_run "not inside a git repository"
+
+# THE TRACKED SET, READ ONCE. Membership here — not `[ -e ]` on disk — is what decides whether a
+# link resolves.
+#
+# "PRESENT ON DISK" IS THE WRONG QUESTION AND IT FAILS IN THE UNSAFE DIRECTION. A file that exists
+# only in somebody's working copy would satisfy a link for them and 404 for every reader who clones
+# the repository — so the check would be greenest exactly on the machine where the mistake was made.
+# quince#1313's whole class is "the reader gets a 404", and the reader has the tracked tree.
+TRACKED=$(mktemp)
+trap 'rm -f "$TRACKED"' EXIT INT TERM
+git ls-files >"$TRACKED" 2>/dev/null || cannot_run "git ls-files failed, so the tracked set is unknown"
+[ -s "$TRACKED" ] || cannot_run "the tracked file set is empty, which is never a real answer"
+
+# in_tree <path> — is this path a tracked FILE, or a directory containing tracked files?
+#
+# `grep -qxF` for the file case: fixed-string, whole-line, so a path containing regex metacharacters
+# cannot match something else. The directory case is a prefix test, because git tracks files and not
+# directories — a directory "exists" exactly when something under it does.
+in_tree() {
+	grep -qxF "$1" "$TRACKED" && return 0
+	grep -qF "$1/" "$TRACKED" 2>/dev/null && case "$(grep -m1 -F "$1/" "$TRACKED")" in "$1"/*) return 0 ;; esac
+	return 1
+}
+
+# THE MARKDOWN SET IS `git ls-files`, MINUS THE SPEC TREE.
+#
+# TRACKED FILES AND NOT A GLOB, so a file that exists only in someone's working copy cannot make
+# this pass or fail. It is the same question the link is about: what does a reader who clones this
+# repository get?
+#
+# `docs/specs/**` IS EXCLUDED AND THAT IS A DECISION. Specs are rung-scoped working documents that
+# routinely cite paths a rung is ABOUT to create — a spec naming its own future files is correct and
+# would be a permanent finding here. The excluded set is named rather than globbed away silently, and
+# the count is printed, so a reader can see what was not checked.
+MD_FILES=$(git ls-files '*.md' | grep -v '^docs/specs/' || true)
+MD_SKIPPED=$(git ls-files '*.md' | grep -c '^docs/specs/' || true)
+[ -n "$MD_FILES" ] || cannot_run "no markdown files found — the scan set is empty, which is never a real answer"
+
+# extract_links <file> — every link target in the file, one per line.
+#
+# awk AND NOT `grep -o`, because a line can carry several links and because the three greps this
+# project runs under disagree about extended-regex edge cases — `grep` on a session box is ugrep,
+# which is neither the BusyBox this gate runs under in `gates-sh` nor the GNU one in CI
+# (quince#1338). `match()`/`substr()` behave identically in all of them.
+extract_links() {
+	awk '
+	{
+		line = $0
+		while (match(line, /\]\([^)]*\)/)) {
+			target = substr(line, RSTART + 2, RLENGTH - 3)
+			line = substr(line, RSTART + RLENGTH)
+			print target
+		}
+	}' "$1"
+}
+
+check_target() { # <target> <containing-file>
+	_t=$1
+	_src=$2
+
+	# Strip a fragment. `file.md#section` resolves as `file.md`; the anchor itself is not checked,
+	# because heading anchors are generated by whatever renders the file and this tool renders nothing.
+	_t=${_t%%#*}
+	# A bare `#anchor` is an in-page link with no file to resolve.
+	[ -n "$_t" ] || return 0
+	# Strip a title: `[x](path "Title")`.
+	_t=${_t%% *}
+	[ -n "$_t" ] || return 0
+
+	case "$_t" in
+	http://* | https://* | mailto:* | tel:* | ftp://*) return 0 ;;
+	# A protocol-relative or absolute-from-web-root link is not a tree path.
+	//* | /*) return 0 ;;
+	# Angle-bracket form: `[x](<path with spaces>)`.
+	"<"*) _t=${_t#<}; _t=${_t%>} ;;
+	esac
+
+	links=$((links + 1))
+
+	# Resolve relative to the DIRECTORY OF THE FILE THE LINK IS IN, which is what a renderer does.
+	# Getting this wrong would make every link in a subdirectory look broken, so it is the one piece
+	# of arithmetic the suite pins hardest.
+	_dir=$(dirname "$_src")
+	if [ "$_dir" = "." ]; then _p=$_t; else _p="$_dir/$_t"; fi
+
+	# Normalise `a/b/../c` without realpath, which BusyBox and GNU spell differently and which
+	# resolves symlinks — wrong here, since `local` is a symlink into the private layer and a link
+	# through one should be judged on the tree, not on the box.
+	_p=$(printf '%s\n' "$_p" | awk -F/ '{
+		n = 0
+		for (i = 1; i <= NF; i++) {
+			if ($i == "" || $i == ".") continue
+			if ($i == "..") { if (n > 0) n--; continue }
+			out[++n] = $i
+		}
+		s = ""
+		for (i = 1; i <= n; i++) s = s (i > 1 ? "/" : "") out[i]
+		print s
+	}')
+
+	# `in_tree` answers for a file and for a directory alike, so a trailing slash needs no separate
+	# arm: git tracks files, and a directory resolves exactly when something under it is tracked.
+	in_tree "$_p" && return 0
+
+	printf '%s: %s -> %s (resolves to %s, which is not in the tree)\n' "$ME" "$_src" "$_t" "$_p"
+	findings=$((findings + 1))
+	return 0
+}
+
+for f in $MD_FILES; do
+	# A tracked path that is not on disk (a partial checkout, a mid-rebase tree) is not this
+	# tool's question, and letting awk fail on it would put noise on stderr and answer nothing.
+	[ -f "$f" ] || continue
+	scanned=$((scanned + 1))
+	for t in $(extract_links "$f" | tr ' ' '\001'); do
+		check_target "$(printf '%s' "$t" | tr '\001' ' ')" "$f"
+	done
+done
+
+# THE UI HALF. Every string literal in `ui/src` that LOOKS LIKE a repo doc path must be one.
+#
+# BY SHAPE, NOT BY PARSING JSX, and that is deliberate. `DocLink path=` takes a literal at some call
+# sites and a variable at others — `OnboardingHTTPSPage` passes a `docs` prop that is assigned
+# `deploy/tls.md` three lines away — so a matcher keyed on the component name would miss exactly the
+# indirection a stale path hides behind. Matching the shape catches both, and it keeps working if
+# somebody builds a second link component.
+#
+# IT OVER-APPROXIMATES, AND THE DIRECTION IS SAFE: a literal that merely looks like a doc path but is
+# never rendered would also be required to exist. The only way to satisfy this wrongly is to add the
+# file, and the finding names the literal so a false positive is one line to read. Under-approximating
+# would reintroduce the silent 404 this exists to stop.
+UI_FILES=$(git ls-files 'ui/src/*' || true)
+if [ -n "$UI_FILES" ]; then
+	for f in $UI_FILES; do
+		case "$f" in
+		*.ts | *.tsx) ;;
+		*) continue ;;
+		esac
+		[ -f "$f" ] || continue
+		scanned=$((scanned + 1))
+		for t in $(grep -oE '"(deploy|docs)/[A-Za-z0-9._/-]+\.md"' "$f" 2>/dev/null | tr -d '"' | sort -u); do
+			links=$((links + 1))
+			in_tree "$t" && continue
+			printf '%s: %s -> %s (a doc path the UI hands a reader; not in the tree)\n' "$ME" "$f" "$t"
+			findings=$((findings + 1))
+		done
+	done
+fi
+
+# THE SELF-URL HALF. A link to THIS repository's own tree, written as a full URL, is a tree-path
+# assertion wearing a URL's clothes — and it is checkable offline exactly like a relative link.
+#
+# THIS IS THE FORM quince#1313's FIRST INSTANCE TOOK. `README.md`'s install block opened with
+# `wget https://raw.githubusercontent.com/novkostya/quince/main/deploy/compose.yml` — the first
+# command a stranger runs — against a file that did not exist when the PR was written. A relative-link
+# checker would have said nothing about it, because there is no `](…)` anywhere near it.
+#
+# BOTH FORMS, because they are the two GitHub serves for a path in a branch:
+#   https://github.com/novkostya/quince/blob/main/<path>          what `DocLink` builds
+#   https://raw.githubusercontent.com/novkostya/quince/main/<path> what an install line fetches
+#
+# `main` ONLY, deliberately. A URL pinned to a tag or a commit is a claim about THAT tree, not this
+# one, and this working copy cannot settle it — so those are left alone rather than judged against
+# the wrong tree. `main` is the branch every one of these links points at, and it is the branch this
+# check is standing in.
+#
+# EVERY TRACKED TEXT FILE, not just the docs set: the whole point is that the URL can appear in a
+# shell line, a compose comment, a test fixture or a component, none of which a markdown link scanner
+# reaches.
+self_url_paths() { # <file>
+	sed -n \
+		-e 's|.*https://github\.com/novkostya/quince/blob/main/\([A-Za-z0-9._/-]*\).*|\1|p' \
+		-e 's|.*https://raw\.githubusercontent\.com/novkostya/quince/main/\([A-Za-z0-9._/-]*\).*|\1|p' \
+		"$1" 2>/dev/null | sed 's|[.,)]*$||' | grep -v '^$' | sort -u
+}
+
+for f in $(git ls-files); do
+	case "$f" in
+	*.md | *.yml | *.yaml | *.ts | *.tsx | *.sh | *.txt) ;;
+	*) continue ;;
+	esac
+	[ -f "$f" ] || continue
+	for t in $(self_url_paths "$f"); do
+		# A template rather than a literal — `blob/main/${path}` in DocLink — leaves nothing to
+		# resolve, and the literal it is called with is caught by the UI pass above.
+		case "$t" in *'$'* | '') continue ;; esac
+		links=$((links + 1))
+		in_tree "$t" && continue
+		printf '%s: %s -> %s (a full URL into this repository'"'"'s own main; not in the tree)\n' "$ME" "$f" "$t"
+		findings=$((findings + 1))
+	done
+done
+
+if [ "$findings" -eq 0 ]; then
+	printf '%s: clean — %d link(s) across %d file(s) all resolve (%d spec file(s) excluded by design)\n' \
+		"$ME" "$links" "$scanned" "$MD_SKIPPED"
+	exit 0
+fi
+
+note "$findings broken link(s). Each names the file it is in and what it resolves to."
+note "a link in the docs is a reader's dead end; a link the UI hands over is quince being wrong at them."
+exit 1
