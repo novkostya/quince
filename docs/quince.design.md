@@ -479,9 +479,9 @@ cause and the remedy. That last case is the bug this block exists to prevent.
 by the ruling in the next block (2026-08-01). A missing medium no longer stops the daemon: it is
 served as `reachable: false` with a reason. What survives unchanged, and is the part that mattered,
 is that quince **writes nothing** to such a path and it **never accepts a job** — the bare
-mountpoint is still never treated as an empty new storage. Kept rather than rewritten because it
-records a real run against the real image; read it as *what the one-storage build did*, not as
-current behaviour.
+mountpoint is still never treated as an empty new storage. **This measurement is from the
+one-storage build** — read it as what that build did, not as current behaviour; it is kept because
+it records a real run against the real image.
 
 Spec: `docs/specs/qn.6c/qn.6c.md`, gap 4.
 
