@@ -243,5 +243,75 @@ else
 	cat "$WORK/flat.out"
 fi
 
+
+# ---------------------------------------------------------------------------------------------
+# A REPOSITORY WHOSE DEFAULT BRANCH IS NOT `main` — quince#1297.
+#
+# THE DEFECT. The ahead-comparison hardcoded `origin/main`, so on such a repository `git cherry`
+# failed on a ref that does not exist, every clone was reported UNKNOWN, and nothing downstream ran
+# — including quince#1248's default-branch check, whose whole point was to read the name rather than
+# assume it. The careful read was unreachable in exactly the case it existed for.
+#
+# THE BEHAVIOUR WAS SAFE AND THE REASON WAS NOT. UNKNOWN means kept, so nothing was ever deleted
+# wrongly; but the reason a reader saw was "could not compare against origin/main", which names a
+# branch that repository does not have. A keep whose reason is not the true one is what quince#1248
+# was filed about, one rule over.
+#
+# THIS SUITE COULD NOT SEE IT because its origin is `main`, like every repository this project
+# works on day to day. A second origin is the whole cost of covering it.
+#
+# IT ALSO PINS TWO THINGS quince#1284 HAD TO DECLARE UNTESTED, and that is the point of doing it
+# here rather than separately: on a `main` origin `origin/$default_branch` and `origin/main` are the
+# same string, so no assertion could tell the fixed form from the broken one.
+printf '\n'
+MORIGIN=$WORK/master-origin.git
+git init -q --bare "$MORIGIN"
+git -C "$MORIGIN" symbolic-ref HEAD refs/heads/master
+git clone -q "$MORIGIN" "$WORK/mseed" 2>/dev/null
+git -C "$WORK/mseed" checkout -qb master 2>/dev/null || true
+printf 'x\n' >"$WORK/mseed/f"
+git -C "$WORK/mseed" add f
+git -C "$WORK/mseed" -c user.email=t@t -c user.name=t commit -qm init
+git -C "$WORK/mseed" push -q origin master
+
+MROOT=$WORK/mscratch
+mkdir -p "$MROOT"
+git clone -q "$MORIGIN" "$MROOT/onmaster"
+git clone -q "$MORIGIN" "$MROOT/ahead-on-master"
+printf 'y\n' >>"$MROOT/ahead-on-master/f"
+git -C "$MROOT/ahead-on-master" -c user.email=t@t -c user.name=t commit -qam 'work that is nowhere else'
+
+mout=$WORK/master.out
+"$REAP" --root "$MROOT" >"$mout" 2>&1 || true
+
+if grep -q 'would reap onmaster' "$mout"; then
+	ok "a default-branch clone is reaped on a master-default repository"
+else
+	bad "the reaper did nothing on a master-default repository — the ahead-comparison assumed origin/main"
+	cat "$mout"
+fi
+# THE MESSAGE MUST NAME THE BRANCH THE CODE READ. quince#1284 fixed this and could not test it,
+# because on a `main` origin the fixed and broken forms produce identical output.
+if grep -q 'not ahead of origin/master' "$mout"; then
+	ok "…and the reason names origin/master, not a hardcoded origin/main"
+else
+	bad "the reap reason named the wrong branch — it hardcodes origin/main somewhere"
+	grep 'onmaster' "$mout" | sed 's/^/    | /'
+fi
+if grep -q 'KEEP   ahead-on-master' "$mout" && grep -q 'not in origin/master' "$mout"; then
+	ok "…and rule 2 still keeps unlanded work, comparing against origin/master"
+else
+	bad "rule 2 mis-handled a master-default clone holding work that exists nowhere else"
+	cat "$mout"
+fi
+# THE NEGATIVE CONTROL: nothing may be UNJUDGED here. That count was 1-of-1 before this change and
+# is the signature of the tool declining to look at all.
+if grep -q '0 unjudged' "$mout"; then
+	ok "…and NOTHING is unjudged — the tool can actually look at this repository now"
+else
+	bad "a master-default clone is still UNKNOWN — the comparison did not learn the default branch"
+	grep 'unjudged' "$mout" | sed 's/^/    | /'
+fi
+
 printf '\nscratch-reap-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
