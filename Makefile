@@ -121,9 +121,29 @@ VERSION ?= $(shell deploy/version)
 # decision the untested path is the whole hazard — a ladder that quietly shrinks.
 SCOPE ?=
 
+# THE LADDER — every gate `make gates` can run, so the SKIPPED set is derivable rather than
+# remembered. It is deliberately NARROWER than `bin/gate-scope`'s vocabulary: `image` and `e2e` are
+# separate targets CI runs beside the ladder, not sub-targets of `gates`, so they must never become
+# prerequisites of it.
+#
+# THAT NARROWING IS WHY THE FILTER BELOW EXISTS. `gate-scope --list` answers "which gates does this
+# range require" over all five, which is the question its callers ask; `gates` needs the ladder's
+# share of that answer. Filtering here keeps the tool honest for every other caller and keeps the
+# ladder's roster in the file that owns the ladder.
+#
+# `gate-scope-test` asserts this list is a subset of gate-scope's vocabulary and that every name in
+# it is one gate-scope answers about, because a skipped-set computed from a stale roster would
+# under-report exactly the gate nobody noticed was gone.
+ALL_GATES := gates-go gates-ui gates-sh
+
 # Parse-time, once. With no SCOPE, gate-scope returns every gate and exit 0, so all three lines below
 # are the same values the Makefile has always had.
-SCOPED_GATES  := $(shell bin/gate-scope --list "$(SCOPE)")
+#
+# `filter` AND NOT `filter-out`: an allowlist against the ladder roster, so a gate added to
+# gate-scope and not to `ALL_GATES` is dropped here rather than silently becoming a prerequisite of
+# `gates`. The empty-ladder guard below still catches a gate-scope that answers nothing at all,
+# because `gates-sh` is unconditional and so is always in a real answer.
+SCOPED_GATES  := $(filter $(ALL_GATES),$(shell bin/gate-scope --list "$(SCOPE)"))
 IMAGE_NEEDED  := $(shell bin/gate-scope --needed image "$(SCOPE)" >/dev/null 2>&1; echo $$?)
 E2E_NEEDED    := $(shell bin/gate-scope --needed e2e   "$(SCOPE)" >/dev/null 2>&1; echo $$?)
 
@@ -269,11 +289,7 @@ tc-node: preflight
 # ---------------------------------------------------------------------------
 # Gate ladder.
 # ---------------------------------------------------------------------------
-# EVERY gate `gates` can run, so the SKIPPED set is derivable rather than remembered. It is a
-# literal list beside a literal list — `bin/gate-scope`'s own `covers()` is the other one — and
-# `gate-scope-test` asserts the two agree, because a skipped-set computed from a stale roster would
-# under-report exactly the gate nobody noticed was gone.
-ALL_GATES := gates-go gates-ui gates-sh
+# The ladder roster lives above, beside SCOPED_GATES, because that is where it is applied.
 
 .PHONY: gates
 # Prerequisites come from gate-scope so the SKIPPING is visible as a dependency list rather than

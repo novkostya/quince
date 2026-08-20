@@ -41,7 +41,9 @@ usage() {
 usage: gate-scope --list [<git-range>]
        gate-scope --needed <gate> [<git-range>]
 
-  --list            print the `gates` sub-targets that this range requires, one per line.
+  --list            print the gates this range requires, one per line — the ladder sub-targets and
+                    `image` and `e2e` alike, because `--needed` answers about all five.
+                    A caller that wants only `make gates`' sub-targets filters this set.
                     With no range: every gate. Never prints an empty list.
   --needed <gate>   exit 0 if <gate> must run, 3 if the range provably does not touch it.
                     ANY other exit means run — skip on 3 and only on 3.
@@ -64,8 +66,21 @@ die() {
 	exit 2
 }
 
-# The gate ladder, in `gates`' own order. `gates-sh` is here and is never filtered — see the header.
-ALL_GATES='gates-go gates-ui gates-sh'
+# THE FULL GATE VOCABULARY, in ladder order. Every gate this tool can answer about: what `--list`
+# prints and what `--needed` accepts, from one roster, so the two verbs cannot answer about
+# different sets of gates. `covers()` below must carry a branch for each name here, and
+# `gate-scope-test` asserts that it does.
+#
+# `image` AND `e2e` BELONG HERE EVEN THOUGH THEY ARE NOT `make gates` SUB-TARGETS. They are separate
+# Makefile targets that CI runs beside the ladder, and a caller that wants only the ladder filters
+# this set — the Makefile does exactly that, with its own roster. Omitting them here to match the
+# ladder is the shape to avoid: `--needed image` would still answer about them while `--list` could
+# not name them, so a needed gate reads as a not-needed one. That falls in the direction that skips
+# work, and it reaches PR evidence as a false "not needed" claim.
+#
+# `gates-sh` is here and is never filtered — see the header. It is also what guarantees a caller
+# filtering for the ladder never gets an empty set, since it covers `.` and so is always required.
+ALL_GATES='gates-go gates-ui gates-sh image e2e'
 
 # cannot_answer — say why, then take the SAFE direction for the mode, and exit 2.
 #
@@ -153,10 +168,10 @@ case "${1:-}" in
 	;;
 --needed)
 	MODE=needed
-	[ $# -ge 2 ] || die "--needed takes a gate name" "gates: $ALL_GATES image e2e"
+	[ $# -ge 2 ] || die "--needed takes a gate name" "gates: $ALL_GATES"
 	GATE=$2
 	RANGE=${3:-}
-	covers "$GATE" >/dev/null || die "unknown gate: $GATE" "gates: $ALL_GATES image e2e"
+	covers "$GATE" >/dev/null || die "unknown gate: $GATE" "gates: $ALL_GATES"
 	;;
 -h | --help | help | '') usage; exit 0 ;;
 *) usage >&2; die "unknown option: $1" ;;
