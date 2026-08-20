@@ -97,10 +97,6 @@ export function PasswordControls() {
   const [changeBusy, setChangeBusy] = useState(false);
   const [changeMsg, setChangeMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const [confirming, setConfirming] = useState(false);
-  const [removeBusy, setRemoveBusy] = useState(false);
-  const [removeErr, setRemoveErr] = useState<string | null>(null);
-
   async function submitChange(e: React.FormEvent) {
     e.preventDefault();
     // CAPTURED BEFORE THE AWAIT, and that is not style — it is what makes the reset below possible.
@@ -209,22 +205,6 @@ export function PasswordControls() {
       setChangeMsg({ ok: false, text: messageFor(err, "Could not change the password.") });
     } finally {
       setChangeBusy(false);
-    }
-  }
-
-  async function submitRemove() {
-    setRemoveBusy(true);
-    setRemoveErr(null);
-    try {
-      await removePassword();
-      // The passkey list is what decides whether this was allowed, and going passwordless changes
-      // what that surface should say about itself — so it is refetched rather than left stale.
-      await qc.invalidateQueries({ queryKey: passkeysKey });
-      setConfirming(false);
-    } catch (err) {
-      setRemoveErr(messageFor(err, "Could not remove the password."));
-    } finally {
-      setRemoveBusy(false);
     }
   }
 
@@ -420,37 +400,85 @@ export function PasswordControls() {
           </p>
         </section>
       ) : null}
-      {/* AND NOT WHERE A PASSKEY CANNOT BE CREATED AT ALL (quince#1076). This was the sharpest of the
-          three surfaces offering a ceremony the browser cannot start: it is a DESTRUCTIVE change
-          whose replacement credential is unobtainable on the connection the reader is using. Over
-          plain http `navigator.credentials` does not exist, so *"remove the password and use Face ID
-          or Touch ID"* is an offer to lock yourself out.
+    </div>
+  );
+}
 
-          IT DOES NOT CONTRADICT THE `NOT DISABLED WHEN IT CANNOT WORK` PARAGRAPH BELOW, which is
-          about the server's rpId rule and stands unchanged. That rule is the server's to enforce and
-          to name addresses for; whether THIS BROWSER exposes WebAuthn is a client fact the server
-          cannot see, so nothing here re-derives a server decision.
+// THE REMOVE-PASSWORD OFFER, MOUNTED BY THE PAGE RATHER THAN BY `PasswordControls` — quince#1316.
+//
+// IT LEFT THIS COMPONENT BECAUSE THE RULED ORDER PUTS `Passkeys` BETWEEN THEM. Rows 1, 2 and 4 of
+// the matrix are password form → passkeys → remove, and a component cannot interleave a sibling it
+// does not render. So the section the page must place separately becomes something the page CAN
+// place: its own export, guarding itself, so the page decides WHERE it goes and this file keeps
+// deciding WHETHER it does.
+//
+// THE GUARD IS UNCHANGED AND STILL LIVES HERE, as an early return rather than a ternary in the
+// tree. Moving the condition to the page would have made the caller responsible for a rule about
+// credentials — the split `credentialState` exists to prevent — and there is no state in which the
+// page wants this section against this file's own judgement.
+//
+// ITS OWN `usePasskeyList` RATHER THAN A PROP. Same query key, so react-query serves it from the
+// cache it already filled; a prop would make the page a courier for data the section can ask for
+// itself, and one more thing to keep in step when the payload changes.
+export function RemovePasswordSection() {
+  const qc = useQueryClient();
+  const list = usePasskeyList();
+  const hasPassword = list.data?.has_password ?? true;
 
-          IT SAYS NOTHING IN PLACE OF ITSELF, on purpose: the Passkeys card sits directly above this
-          one on Settings → Auth and carries the single explanation. A second copy here would be the
-          same sentence twice on one screen. */}
-      {/* AND NOT WITHOUT A PASSKEY THAT CAN CONFIRM IT — quince#1077, Operator 2026-08-19. This was
-          the issue's own report: pressing "Yes, remove my password" on an install with no passkeys
-          answered *"Confirm it is you before changing how you sign in"*, and nothing on that screen
-          could confirm anything. `auth.Accepts` excludes the password for `OpRemovePassword` (rule
-          2), so with no usable passkey the wire body carries `accepts: []` beside a request the
-          reader cannot act on.
-          THE RULING CHOSE REMOVAL OVER EXPLANATION, and superseded its own earlier answer to say so:
-          *"a control that cannot be used is not offered at all"*. Saying the precondition after the
-          click is the wrong moment when it is knowable at render — and this component already holds
-          the passkey list, so it needs no `accepts`, no wire change and no server change.
-          IT DOES NOT CONTRADICT THE `ReauthChallenge` NO-GATING CARVE-OUT. That one forbids hiding
-          the passkey BUTTON on a refusal, which would leave a dialog asking you to confirm with
-          nothing to confirm by — a dead end created by hiding. This is an unsolicited OFFER, and the
-          remedy (Add a passkey) is on the same page above it, so removing it leaves nothing
-          dangling. Gating is wrong when it hides the only way forward; right when it withdraws an
-          option that cannot be taken. */}
-      {hasPassword && webauthnAvailable() && canRemoveHere(list.data) ? (
+  const [confirming, setConfirming] = useState(false);
+  const [removeBusy, setRemoveBusy] = useState(false);
+  const [removeErr, setRemoveErr] = useState<string | null>(null);
+
+  async function submitRemove() {
+    setRemoveBusy(true);
+    setRemoveErr(null);
+    try {
+      await removePassword();
+      // The passkey list is what decides whether this was allowed, and going passwordless changes
+      // what that surface should say about itself — so it is refetched rather than left stale.
+      await qc.invalidateQueries({ queryKey: passkeysKey });
+      setConfirming(false);
+    } catch (err) {
+      setRemoveErr(messageFor(err, "Could not remove the password."));
+    } finally {
+      setRemoveBusy(false);
+    }
+  }
+
+  // AND NOT WHERE A PASSKEY CANNOT BE CREATED AT ALL (quince#1076). This was the sharpest of the
+  // three surfaces offering a ceremony the browser cannot start: it is a DESTRUCTIVE change
+  // whose replacement credential is unobtainable on the connection the reader is using. Over
+  // plain http `navigator.credentials` does not exist, so *"remove the password and use Face ID
+  // or Touch ID"* is an offer to lock yourself out.
+  //
+  // IT DOES NOT CONTRADICT THE `NOT DISABLED WHEN IT CANNOT WORK` PARAGRAPH BELOW, which is
+  // about the server's rpId rule and stands unchanged. That rule is the server's to enforce and
+  // to name addresses for; whether THIS BROWSER exposes WebAuthn is a client fact the server
+  // cannot see, so nothing here re-derives a server decision.
+  //
+  // IT SAYS NOTHING IN PLACE OF ITSELF, on purpose: the Passkeys card sits directly above this
+  // one on Settings → Auth and carries the single explanation. A second copy here would be the
+  // same sentence twice on one screen.
+  // AND NOT WITHOUT A PASSKEY THAT CAN CONFIRM IT — quince#1077, Operator 2026-08-19. This was
+  // the issue's own report: pressing "Yes, remove my password" on an install with no passkeys
+  // answered *"Confirm it is you before changing how you sign in"*, and nothing on that screen
+  // could confirm anything. `auth.Accepts` excludes the password for `OpRemovePassword` (rule
+  // 2), so with no usable passkey the wire body carries `accepts: []` beside a request the
+  // reader cannot act on.
+  // THE RULING CHOSE REMOVAL OVER EXPLANATION, and superseded its own earlier answer to say so:
+  // *"a control that cannot be used is not offered at all"*. Saying the precondition after the
+  // click is the wrong moment when it is knowable at render — and this component already holds
+  // the passkey list, so it needs no `accepts`, no wire change and no server change.
+  // IT DOES NOT CONTRADICT THE `ReauthChallenge` NO-GATING CARVE-OUT. That one forbids hiding
+  // the passkey BUTTON on a refusal, which would leave a dialog asking you to confirm with
+  // nothing to confirm by — a dead end created by hiding. This is an unsolicited OFFER, and the
+  // remedy (Add a passkey) is on the same page above it, so removing it leaves nothing
+  // dangling. Gating is wrong when it hides the only way forward; right when it withdraws an
+  // option that cannot be taken.
+  if (!(hasPassword && webauthnAvailable() && canRemoveHere(list.data))) return null;
+
+  return (
+    <div className="mt-8">
       <section>
         <SectionHeading>Sign in with a passkey only</SectionHeading>
         <p className="mt-1 max-w-xl text-sm text-muted">
@@ -484,7 +512,6 @@ export function PasswordControls() {
           </Button>
         )}
       </section>
-      ) : null}
     </div>
   );
 }

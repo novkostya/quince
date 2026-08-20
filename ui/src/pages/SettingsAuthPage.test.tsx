@@ -126,3 +126,112 @@ describe("Settings links to it", () => {
     expect(paths).not.toContain("/api/auth/passkeys");
   });
 });
+
+// THE ORDER IS THE CLAIM — quince#1316, Operator 2026-08-19: *"In passwordless setup Passkeys
+// section must be the first — going passwordless is your choice and we should respect that."*
+//
+// ASSERTED AS A SEQUENCE, NOT AS PRESENCE, and that distinction is the whole point of these tests.
+// Every section below was already on the page before this change; a `getByRole` per section would
+// have passed against the FIXED order it replaces. `toEqual` on the list of headings is the only
+// form that can fail when the order is wrong and everything is present, which is exactly the
+// regression this rung is about.
+describe("the auth page orders its sections by credential state", () => {
+  const HERE = "quince.example.com";
+  const ELSEWHERE = "quince.example.net";
+
+  function passkeyAt(rpID: string) {
+    return { id: rpID, name: "phone", rp_id: rpID, created_at: "2026-08-01T00:00:00Z", last_used_at: null };
+  }
+
+  function renderAt(hasPassword: boolean, passkeys: ReturnType<typeof passkeyAt>[]) {
+    mockAPI(FULL_CONFIG, { rp_id: HERE, supported: true, has_password: hasPassword, passkeys });
+    return renderPage(<SettingsAuthPage />);
+  }
+
+  // The `<h2>` of every section, in document order. `SectionHeading` is the one heading primitive on
+  // this page (quince#1155), so this reads the page's structure rather than a list of test ids.
+  function sections() {
+    return screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+  }
+
+  it("leads with the password when that is what signs you in", async () => {
+    renderAt(true, [passkeyAt(HERE)]);
+    // WAITED ON A DATA-DEPENDENT ELEMENT. The Add row renders before the list answers, so awaiting
+    // it asserts the order of a LOADING page — which passed for the wrong reason. This sentence is
+    // rendered from `supported`, which only the payload carries.
+    await screen.findByText(/a passkey is tied to the address/i);
+
+    expect(sections()).toEqual([
+      "Change your password",
+      "Passkeys",
+      "Sign in with a passkey only",
+      "Signing in over plain HTTP",
+    ]);
+  });
+
+  // THE RULED CASE. A passwordless install chose to have no password, and leading with a password
+  // form asks it to undo that choice before showing what it actually uses.
+  it("leads with Passkeys on a passwordless install", async () => {
+    renderAt(false, [passkeyAt(HERE)]);
+    // WAITED ON A DATA-DEPENDENT ELEMENT. The Add row renders before the list answers, so awaiting
+    // it asserts the order of a LOADING page — which passed for the wrong reason. This sentence is
+    // rendered from `supported`, which only the payload carries.
+    await screen.findByText(/a passkey is tied to the address/i);
+
+    const order = sections();
+    expect(order[0]).toBe("Passkeys");
+    expect(order.indexOf("Passkeys")).toBeLessThan(order.indexOf("Set a password"));
+  });
+
+  // NO OFFER TO REMOVE A PASSWORD THAT IS NOT THERE, and none where no passkey could confirm it.
+  // Same section list as the row above minus row 4, which is what makes the two rows different.
+  it("offers no removal when there is no password", async () => {
+    renderAt(false, [passkeyAt(HERE)]);
+    // WAITED ON A DATA-DEPENDENT ELEMENT. The Add row renders before the list answers, so awaiting
+    // it asserts the order of a LOADING page — which passed for the wrong reason. This sentence is
+    // rendered from `supported`, which only the payload carries.
+    await screen.findByText(/a passkey is tied to the address/i);
+
+    expect(sections()).not.toContain("Sign in with a passkey only");
+  });
+
+  it("offers no removal when every passkey is bound elsewhere", async () => {
+    renderAt(true, [passkeyAt(ELSEWHERE)]);
+    // WAITED ON A DATA-DEPENDENT ELEMENT. The Add row renders before the list answers, so awaiting
+    // it asserts the order of a LOADING page — which passed for the wrong reason. This sentence is
+    // rendered from `supported`, which only the payload carries.
+    await screen.findByText(/a passkey is tied to the address/i);
+
+    expect(sections()).toEqual(["Change your password", "Passkeys", "Signing in over plain HTTP"]);
+  });
+
+  // PASSKEYS STILL LEAD, EVEN THOUGH NONE OF THEM WORKS HERE. They are what this install signs in
+  // with everywhere else, and the section that explains the address problem is the password half
+  // below — putting a password form first would bury the explanation under a form that cannot help.
+  it("leads with Passkeys when they exist but none is bound here", async () => {
+    renderAt(false, [passkeyAt(ELSEWHERE)]);
+    // WAITED ON A DATA-DEPENDENT ELEMENT. The Add row renders before the list answers, so awaiting
+    // it asserts the order of a LOADING page — which passed for the wrong reason. This sentence is
+    // rendered from `supported`, which only the payload carries.
+    await screen.findByText(/a passkey is tied to the address/i);
+
+    const order = sections();
+    expect(order[0]).toBe("Passkeys");
+    expect(order).toContain("No passkey of yours works at this address");
+  });
+
+  // AN INSTALL WITH NOTHING TO SIGN IN WITH LEADS WITH THE PANEL THAT SAYS SO. This is the one
+  // no-password state where passkeys do NOT lead, because there are none — leading with an empty
+  // list would open the page on the section with the least to say.
+  it("leads with the honest panel when there are no credentials at all", async () => {
+    renderAt(false, []);
+    // WAITED ON A DATA-DEPENDENT ELEMENT. The Add row renders before the list answers, so awaiting
+    // it asserts the order of a LOADING page — which passed for the wrong reason. This sentence is
+    // rendered from `supported`, which only the payload carries.
+    await screen.findByText(/a passkey is tied to the address/i);
+
+    const order = sections();
+    expect(order[0]).toBe("Set a password");
+    expect(order.indexOf("This quince has no way to sign in")).toBeLessThan(order.indexOf("Passkeys"));
+  });
+});

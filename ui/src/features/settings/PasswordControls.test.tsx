@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import { PasswordControls } from "./PasswordControls";
+import { PasswordControls, RemovePasswordSection } from "./PasswordControls";
 import { Passkeys } from "./Passkeys";
 import { api, APIError, UnauthorizedError } from "@/lib/api";
 import * as reauth from "@/lib/reauth";
@@ -33,6 +33,12 @@ function passkeyAt(rpID: string, id = "pk-1") {
 // so `renderControls(true, [passkeyAt(ELSEWHERE)])` would silently have received `[]`. Harmless today —
 // `credentialState` short-circuits on `hasPassword` — but a fixture that quietly means something
 // other than what it says is the exact thing that hid the bug this PR fixes, so it is not left in.
+// BOTH EXPORTS, BECAUSE THE SUBJECT IS THE PASSWORD SURFACE AND IT IS NOW TWO COMPONENTS —
+// quince#1316. `RemovePasswordSection` left `PasswordControls` so the page can put `Passkeys`
+// between them, and the tests below are about what the surface OFFERS rather than about which
+// component holds it. Rendering one would have silently dropped eleven assertions about the
+// destructive action; rendering both keeps them, and WHERE the two sit relative to `Passkeys` is
+// asserted by `pages/SettingsAuthPage.test.tsx`, which is the only place that can see the order.
 function renderControls(
   hasPassword = true,
   passkeys: ReturnType<typeof passkeyAt>[] = [passkeyAt(HERE)],
@@ -49,6 +55,7 @@ function renderControls(
   return render(
     <QueryClientProvider client={qc}>
       <PasswordControls />
+      <RemovePasswordSection />
     </QueryClientProvider>,
   );
 }
