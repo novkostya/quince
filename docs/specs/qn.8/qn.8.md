@@ -354,7 +354,8 @@ curve runnable on a session box at all.
 quince#270 §6 offers *"comfortable"* and *"near the ceiling"*; neither is a bar, and an undefined bar
 means the number arrives and each reader supplies their own.
 
-> **In-process stands if ALL THREE hold: (a) peak RSS attributable to the vault stays under 256 MB
+> **In-process stands if ALL THREE hold — and (c) is a RECOMMENDATION with a live alternative
+> (quince#1344): (a) peak RSS attributable to the vault stays under 256 MB
 > across all three curves; (b) none of the three curves grows with input size beyond a flat streaming
 > constant; and (c) RSS returns to within 32 MB of the pre-unlock baseline within 60 s of `lock`.**
 >
@@ -411,11 +412,24 @@ unlock, peak during, and RSS at `lock + 60 s`. **The ordering the ruling require
 that code is then written to meet. What must not happen is (c) being *chosen* after its measurement,
 which is why its numbers are fixed here with the other two.
 
-**Rejected: accepting retention with a stated reason.** It was the other honest way out — perhaps
-`lock` is rare enough that a high-water mark is tolerable. It is refused because the daemon this is
-added to must survive a multi-hour transfer on a weak NAS, and a permanent high-water mark set by a
-browse session is paid by the backup that runs afterwards. A remedy that costs one call at a rare
-event is cheaper than the acceptance.
+**D10.3c — the alternative is LIVE, and this clause is a RECOMMENDATION, not a ruling.** Open
+question: **quince#1344**, labelled `needs-operator`.
+
+The other honest answer is to **accept retention and record why** — perhaps `lock` is rare enough, or
+the daemon restarts often enough, that a high-water mark is tolerable. **That is defensible and it is
+not the lesser option**; the architect filed quince#1344 declining to rule between the two, and
+clause (c) has exactly the status (a) and (b) already have — proposed here, the Operator's to confirm.
+
+The argument for recommending (c) rather than acceptance, so it can be weighed against the argument
+for the other: the daemon this is added to must survive a multi-hour transfer on a weak NAS, so a
+permanent high-water mark set by a browse session is **paid by the backup that runs afterwards** —
+and the remedy costs one call at a rare event. **What is not defensible is neither**: an absence
+decides the question by default, at slice 2, after the number has been taken.
+
+**If the Operator takes acceptance instead, what changes is small and is named here so the swap is
+mechanical:** clause (c) and G7 come out, D9 keeps or drops `debug.FreeOSMemory()` as a cheap
+courtesy rather than as a bar, and the acceptance is written into this section with its reason. The
+threshold stays a two-clause bar and nothing else in the rung moves.
 
 **D10.4 — if the sidecar wins, this rung does not build it.** The interface is unchanged (D1), the
 suite is unchanged (D5), and the RPC becomes a second implementation with its own rung. The number
