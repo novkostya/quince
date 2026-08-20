@@ -29,7 +29,7 @@ services:
     restart: unless-stopped
 
     # Wi-Fi devices announce themselves over mDNS, which does not cross a container bridge. This
-    # is why the muxer gets the host network and quince does not. A macvlan network works too,
+    # is why the muxer gets the host network and quince does not. A macvlan network should work too,
     # if you would rather not share the host's — it gives this container its own address on your LAN.
     network_mode: host
 
