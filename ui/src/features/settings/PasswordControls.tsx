@@ -139,7 +139,7 @@ export function PasswordControls() {
         ok: true,
         text:
           credentials === "has-password"
-            ? "Password changed. Your other devices stay signed in."
+            ? "Password changed. Devices signed in with the old password have been signed out."
             : credentials === "passwordless"
               ? "Password set. You can now sign in with it as well as your passkey."
               : "Password set. This is now the only way to sign in at this address.",
