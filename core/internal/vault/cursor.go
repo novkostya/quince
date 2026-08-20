@@ -53,3 +53,12 @@ func decodeCursor(s string) (cursor, error) {
 	}
 	return c, nil
 }
+
+// before reports whether the cursor's position precedes (domain, path) in the library's
+// stable (domain, relativePath) order — i.e. whether that entry belongs on a LATER page.
+func (c cursor) before(domain, path string) bool {
+	if c.Domain != domain {
+		return c.Domain < domain
+	}
+	return c.Path < path
+}
