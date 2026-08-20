@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -180,7 +180,7 @@ describe("the auth page orders its sections by credential state", () => {
 
     const order = sections();
     expect(order[0]).toBe("Passkeys");
-    expect(order.indexOf("Passkeys")).toBeLessThan(order.indexOf("Set a password"));
+    expect(order).toEqual(["Passkeys", "You sign in with a passkey only", "Signing in over plain HTTP"]);
   });
 
   // NO OFFER TO REMOVE A PASSWORD THAT IS NOT THERE, and none where no passkey could confirm it.
@@ -231,7 +231,71 @@ describe("the auth page orders its sections by credential state", () => {
     await screen.findByText(/a passkey is tied to the address/i);
 
     const order = sections();
-    expect(order[0]).toBe("Set a password");
+    expect(order[0]).toBe("This quince has no way to sign in");
     expect(order.indexOf("This quince has no way to sign in")).toBeLessThan(order.indexOf("Passkeys"));
+  });
+});
+
+// EACH SECTION CARRIES ITS OWN REMEDY — quince#1316's second acceptance bullet: no section points
+// at a form that is not adjacent to it.
+//
+// ASSERTED AS CONTAINMENT, NOT ADJACENCY ON SCREEN. `within(section)` is what "inline" means
+// structurally, and it is the form that survives a layout change: a test that measured pixel order
+// would pass on a page whose sections had been re-nested wrongly.
+describe("the section that describes a state carries the form that ends it", () => {
+  const HERE = "quince.example.com";
+  const ELSEWHERE = "quince.example.net";
+
+  function passkeyAt(rpID: string) {
+    return { id: rpID, name: "phone", rp_id: rpID, created_at: "2026-08-01T00:00:00Z", last_used_at: null };
+  }
+
+  function renderAt(hasPassword: boolean, passkeys: ReturnType<typeof passkeyAt>[]) {
+    mockAPI(FULL_CONFIG, { rp_id: HERE, supported: true, has_password: hasPassword, passkeys });
+    return renderPage(<SettingsAuthPage />);
+  }
+
+  async function sectionNamed(name: string) {
+    const heading = await screen.findByRole("heading", { name, level: 2 });
+    const section = heading.closest("section");
+    if (!section) throw new Error(`heading "${name}" is not inside a section`);
+    return within(section);
+  }
+
+  it("puts the set-password form inside the passwordless section", async () => {
+    renderAt(false, [passkeyAt(HERE)]);
+
+    const section = await sectionNamed("You sign in with a passkey only");
+    expect(section.getByLabelText("New password")).toBeInTheDocument();
+    expect(section.getByRole("button", { name: "Set password" })).toBeInTheDocument();
+  });
+
+  it("puts the set-password form inside the no-credentials section", async () => {
+    renderAt(false, []);
+
+    const section = await sectionNamed("This quince has no way to sign in");
+    expect(section.getByLabelText("New password")).toBeInTheDocument();
+  });
+
+  // AND THE ONE STATE THAT OFFERS NO FORM SAYS WHY, rather than merely omitting it — the third
+  // acceptance bullet. Rule 1 refuses a credential change from a caller that cannot prove a present
+  // credential, so a form here would 4xx every time it was submitted.
+  it("offers no form where one cannot succeed, and says so", async () => {
+    renderAt(false, [passkeyAt(ELSEWHERE)]);
+
+    const section = await sectionNamed("No passkey of yours works at this address");
+    expect(section.queryByLabelText("New password")).not.toBeInTheDocument();
+    expect(section.getByText(/there is no password form here/i)).toBeInTheDocument();
+    // The remedy is still named — both of them, the cheaper one first.
+    expect(section.getByText(ELSEWHERE)).toBeInTheDocument();
+    expect(section.getByText(/quince auth reset/)).toBeInTheDocument();
+  });
+
+  it("keeps the change form in the has-password section", async () => {
+    renderAt(true, [passkeyAt(HERE)]);
+
+    const section = await sectionNamed("Change your password");
+    expect(section.getByLabelText("Current password")).toBeInTheDocument();
+    expect(section.getByRole("button", { name: "Change password" })).toBeInTheDocument();
   });
 });
