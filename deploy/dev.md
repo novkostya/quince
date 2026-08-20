@@ -40,7 +40,7 @@ failed differently and cost more than the original.
 | distro | **Alpine** |
 | shell | **BusyBox `ash`** — *not* bash |
 | Python | **absent.** `command -v python3` and `command -v python` are both empty on all three boxes |
-| present | `jq`, `awk`, `sed`, `grep`, `git`, `gh`, `openssl`, `make`, a container runtime |
+| present | `jq`, `awk`, `sed`, `grep` — **which is `ugrep`, see below** — `git`, `gh`, `openssl`, `make`, a container runtime |
 
 **Prefer `jq` for JSON, and do not assume GNU flags.** BusyBox bites well beyond Python. Measured on
 a box, Alpine 3.24.1 — each of these works in CI and fails here:
@@ -61,6 +61,34 @@ to avoid. (`bin/gh-coder` uses `openssl base64 -A` anyway, which is portable and
 **The lesson generalises past the one wrong row: verify the trap on the box before writing it down.**
 Three of four held; the fourth would have taught the next reader to work around a problem that does
 not exist.
+
+**`grep` IS `ugrep`, WHICH IS NEITHER ENVIRONMENT THIS PROJECT'S GATES RUN IN.** The row above lists
+`grep` as present; it does not say which one, and it is not the BusyBox this section otherwise warns
+about. `grep --version` on a session box reads `ugrep 7.5.0 x86_64-pc-linux-musl`. That makes this
+box a **worse** oracle than either target for the one class of check this project runs constantly —
+a pattern proved portable here has been proved against a third implementation with its own
+extensions.
+
+The divergence that has already reached committed prose is a **mid-pattern `^`**: ugrep treats it as
+a zero-width assertion that succeeds anywhere, where BusyBox and GNU both anchor it. So an
+alternation like `(^|[^A-Za-z0-9_-])` silently matches the empty string here and does not there.
+Measured three ways, `printf 'abc\n' | grep -cE 'a(^|x)bc'`, with `^abc` as the control proving a
+leading anchor behaves identically in all three:
+
+```
+ugrep 7.5.0 (this box)           1     control 1
+BusyBox 1.37.0 (alpine:3.24)     0     control 1
+GNU grep 3.11 (debian:trixie)    0     control 1
+```
+
+**The failure direction is the expensive one.** A guard written with the alternation goes quiet when
+you test it by hand, which reads as "the guard is too broad, I have fixed it" — and it is the guard
+that has stopped working, in the environment where you can see it and not in the two where it runs.
+`bin/closing-refs-check` carries the live instance and its comment records the same table.
+
+**So prove a pattern where it will run**, which for a shell gate means `gates-sh` (BusyBox, in
+`alpine:3.24`) or CI (GNU). A one-off container is enough:
+`nerdctl run --rm alpine:3.24 sh -c '…'`.
 
 **Python is absent from the box AND from the image, and nothing in quince is written in it.** The
 reason not to install it on a session box is **host surface**, not scarcity: a session box is a
