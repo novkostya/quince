@@ -116,6 +116,35 @@ run_role() {
 }
 
 # (1) IMPLEMENTER — unchanged, and measured correct on the live box before this change.
+# THE DEGRADED SENTENCE MUST NOT NAME THE ROLE IT CLAIMS IT CANNOT DETERMINE (quince#1312).
+#
+# ROSTER-FREE, WHICH IS THE POINT. Every other assertion in part (5) names a role, so each one covers
+# exactly the seat kind it mentions and the NEXT seat kind is uncovered — which is how this defect
+# reached a third instance. This one is a property of the SENTENCE: *"could not determine its role
+# (owed_role=X)"* is legitimate only when X is genuinely unnamed. If `owed_role` names a role and the
+# report still says it could not be determined, the report is false, whatever that role is called.
+#
+# IT WOULD HAVE CAUGHT quince#1290 (the analyst falling past a `= architect` test into the degraded
+# arm, with `owed_role=analyst` printed inside the sentence denying it) WITHOUT KNOWING THE WORD
+# `analyst` — and it catches the fourth seat kind the same way, on the day it is added rather than
+# on the day somebody reads the output and notices.
+role_claim_consistent() { # <label> <note>
+	_lbl=$1 _n=$2
+	case "$_n" in
+	*'could not determine its role (owed_role=none)'* | *'could not determine its role (owed_role=empty)'*)
+		ok "$_lbl — the degraded sentence names an unnamed role, which is the only case it is true in"
+		;;
+	*'could not determine its role'*)
+		bad "$_lbl — status says it could not determine a role and then prints that role" \
+			"the reporting arm is deciding 'is the role known' by naming roles; ask owed_role's 'none' sentinel instead."
+		printf '    | %s\n' "$_n"
+		;;
+	*)
+		ok "$_lbl — no degraded claim, so nothing to contradict"
+		;;
+	esac
+}
+
 _out=$(run_role "$CODER")
 if printf '%s\n' "$_out" | grep -q 'watch-idle'; then
 	ok "implementer: another runner's PR does NOT wake (quince#174, unchanged)"
@@ -230,6 +259,7 @@ agree() { # <label> <watch-output> <note>
 _out=$(run_role "$CODER")
 _note=$(status_note)
 agree "implementer" "$_out" "$_note"
+role_claim_consistent "implementer" "$_note"
 case "$_note" in
 *'(role implementer)'*) ok "...and names the role it decided on, so the claim is checkable" ;;
 *) bad "...and names the role it decided on, so the claim is checkable" ;;
@@ -238,6 +268,7 @@ esac
 _out=$(run_role "$REVIEW")
 _note=$(status_note)
 agree "architect" "$_out" "$_note"
+role_claim_consistent "architect" "$_note"
 case "$_note" in
 *'suppression is OFF for role architect'*) ok "...and says WHY, rather than dropping the note and leaving a reader with no answer" ;;
 *) bad "...and says WHY, rather than dropping the note and leaving a reader with no answer" ;;
@@ -249,6 +280,7 @@ esac
 _out=$(run_role none)
 _note=$(status_note)
 agree "unidentifiable role" "$_out" "$_note"
+role_claim_consistent "unidentifiable role" "$_note"
 case "$_note" in
 *'could not determine its role'*) ok "...and status surfaces the degraded mode, not only the arm" ;;
 *) bad "...and status surfaces the degraded mode, not only the arm" ;;
@@ -293,6 +325,7 @@ fi
 _out=$(run_role "$ANALYST")
 _note=$(status_note)
 agree "analyst" "$_out" "$_note"
+role_claim_consistent "analyst" "$_note"
 case "$_note" in
 *'suppression is OFF for role analyst'*) ok "status names the analyst role and says suppression is OFF (quince#1290)" ;;
 *'could not determine its role'*) bad "status reports the analyst role as undeterminable — the informative arm still tests '= architect' literally" ;;

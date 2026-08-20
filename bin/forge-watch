@@ -4662,17 +4662,27 @@ status)
 				elif [ "$(suppress_for_role "$_rrole")" = yes ]; then
 					printf 'note: %s PR(s) on this record belong to another runner declared on this box (%s). Their events are printed but do NOT wake this watch (role %s).\n' \
 						"$_rcnt" "$_rnames" "$_rrole"
-				elif [ "$_rrole" = architect ] || [ "$_rrole" = analyst ]; then
+				elif [ -n "$_rrole" ] && [ "$_rrole" != none ]; then
 					# NAMED, NOT MERELY OMITTED. Dropping the note here would leave a reader with no
 					# answer at the one moment they are reasoning about wakes, and the answer is the
 					# interesting one: reading other runners' branches is the job (quince#292).
 					#
-					# THE ANALYST IS HERE TOO, AND THE ROLE IS NO LONGER HARDCODED (quince#1290). This
-					# arm tested `= architect` literally, so the supervisor seat — suppression OFF, role
-					# perfectly well determined — fell through to the DEGRADED arm below and `status`
-					# reported *"could not determine its role (owed_role=analyst)"*. quince#1282 exists
-					# to make `status` say what `watch` does about suppression; on this seat it said
-					# something false instead, which is the same defect one surface over.
+					# ASK THE SENTINEL, NEVER THE ROSTER. The question this arm asks is *"is the role
+					# known"*, and `owed_role` already answers it: it prints `none` when no credential
+					# on the box names a seat. Testing against that is total, where naming the roles
+					# that are not the implementer is correct only until the next seat kind — and
+					# `CLAUDE.md` says adding a kind is a one-line PR, with `analyst<N>` as the
+					# precedent that it happens. The one line it predicts is `SEAT_PATTERN`, not this.
+					#
+					# THE FAILURE IS A WRONG MESSAGE, WHICH IS WHY THIS IS WORTH DOING BEFORE IT BITES
+					# AGAIN. A role that falls past this arm reaches the degraded one below and
+					# `status` announces *"could not determine its role (owed_role=<the role>)"* — a
+					# sentence naming the role in the act of claiming it cannot. Nothing wakes wrongly;
+					# a session reasoning about an unexpected quiet is simply told something false.
+					#
+					# `suppress_for_role` decides the FIRST question — whether suppression is on — and
+					# is the one place that decides it. This is the SECOND question, and it now has one
+					# place too.
 					printf 'note: %s PR(s) on this record belong to another runner declared on this box (%s). Branch-ownership suppression is OFF for role %s, so their events DO wake this watch (quince#292).\n' \
 						"$_rcnt" "$_rnames" "$_rrole"
 				else
