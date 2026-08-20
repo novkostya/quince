@@ -58,7 +58,11 @@ type Config struct {
 	// row false. The debt is discharged and the section is live; the reasoning against sharing it
 	// is unchanged, because a reconciliation interval is still not a notification policy.
 	Reconcile ReconcileConfig `yaml:"reconcile" json:"reconcile"`
-	UI        UIConfig        `yaml:"ui" json:"ui"`
+	// Vault is the `vault:` section (qn.8). A SECTION OF ITS OWN rather than a key under
+	// `sessions:`, which is the LOGIN session's namespace — two different objects under one
+	// word is a file a person cannot hand-edit, and D12 makes hand-editability the point.
+	Vault VaultConfig `yaml:"vault" json:"vault"`
+	UI    UIConfig    `yaml:"ui" json:"ui"`
 }
 
 // BackupConfig is the `backup:` section.
@@ -557,6 +561,9 @@ func Default() Config {
 		Reconcile: ReconcileConfig{
 			IntervalMinutes: 360,
 		},
+		Vault: VaultConfig{
+			SessionTTLMinutes: 15,
+		},
 		Notifications: NotificationsConfig{
 			StalenessDays:         3,
 			ReminderCooldownHours: 24,
@@ -599,4 +606,32 @@ type ReconcileConfig struct {
 	// IT IS LIVE (contracts §6): the runner reads it when it schedules the NEXT pass, so an edit takes
 	// effect from the following tick rather than at a restart.
 	IntervalMinutes int `yaml:"interval_minutes" json:"interval_minutes"`
+}
+
+// VaultConfig is the `vault:` section (qn.8) — the unlocked-session lifetime, and nothing
+// else. No secret lives here: the backup password is never persisted at all (contracts §1),
+// which is what keeps the whole vault surface clear of D12's no-secrets rule rather than
+// working around it.
+type VaultConfig struct {
+	// SessionTTLMinutes is how long an unlocked version stays unlocked. Default 15.
+	//
+	// MINTED WITH ITS CONSUMER, which is the point SessionsConfig's own comment makes about
+	// the `ttl_minutes` key that was removed for being read by nothing (quince#656): "a
+	// vault unlock TTL gets minted when something reads it, with the right name and a
+	// consumer on the day." This is that day, and vault.Registry is that consumer.
+	//
+	// INTEGER MINUTES WITH THE UNIT IN THE NAME, following `reconcile.interval_minutes` and
+	// the three `notifications.*` keys rather than expressiveness. The qn.8 spec wrote this
+	// as `vault.session_ttl`; the file's convention won, and the spec moves with this diff.
+	//
+	// IT IS LIVE, and what that means here is narrower than usual: the Registry stamps
+	// ExpiresAt at unlock, so an edit governs the NEXT session and never moves one already
+	// running. A countdown a user is watching must not jump because somebody saved the file
+	// in another window.
+	//
+	// `0` MEANS THE DEFAULT, NOT "NEVER EXPIRES". A session holds live keys for a decrypted
+	// backup, so an unbounded one is not a setting anybody should be able to reach by
+	// typing a zero — and there is no other value that would express it, which is
+	// deliberate.
+	SessionTTLMinutes int `yaml:"session_ttl_minutes" json:"session_ttl_minutes"`
 }

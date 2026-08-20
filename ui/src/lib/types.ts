@@ -261,6 +261,11 @@ export interface Config {
   // disables the SCHEDULE only — startup, storage-added and job-end still fire. Here for the same
   // full-document-replace reason as everything else in this interface.
   reconcile: { interval_minutes: number };
+  // vault.session_ttl_minutes (qn.8): how long an unlocked version stays unlocked; 0 means the
+  // default (15), never "no expiry" — a session holds live decryption keys. Spelled out here for
+  // the same full-document-replace reason as everything else in this interface: a PUT sends the
+  // whole config back, so a field missing HERE is a field zeroed on the server (quince#493).
+  vault: { session_ttl_minutes: number };
   // `notifications:` — was `automation:` until qn.12, when these keys stopped being inert. Every
   // field is spelled out for the same full-document-replace reason as the rest of this interface:
   // a PUT sends the whole config back, so a field missing HERE is a field zeroed on the server.
