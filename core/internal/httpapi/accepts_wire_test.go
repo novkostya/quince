@@ -76,7 +76,7 @@ func TestRegisterBeginListsBothWhenBothExist(t *testing.T) {
 	if err := st.InsertPasskey(store.Passkey{
 		CredentialID: "cre1", PublicKey: []byte("cose"), RPID: "example.com",
 		Name: "phone", CreatedAt: time.Now().UTC(),
-	}); err != nil {
+	}, store.AdminScope()); err != nil {
 		t.Fatalf("seed passkey: %v", err)
 	}
 
@@ -98,7 +98,7 @@ func TestRemovePasswordNeverOffersThePasswordOnTheWire(t *testing.T) {
 	if err := st.InsertPasskey(store.Passkey{
 		CredentialID: "cre1", PublicKey: []byte("cose"), RPID: "example.com",
 		Name: "phone", CreatedAt: time.Now().UTC(),
-	}); err != nil {
+	}, store.AdminScope()); err != nil {
 		t.Fatalf("seed passkey: %v", err)
 	}
 
@@ -130,7 +130,7 @@ func TestADeadEndOmitsAcceptsFromTheJSON(t *testing.T) {
 	if err := d.Store.InsertPasskey(store.Passkey{
 		CredentialID: "cre1", PublicKey: []byte("cose"), RPID: "example.com",
 		Name: "phone", CreatedAt: time.Now().UTC(),
-	}); err != nil {
+	}, store.AdminScope()); err != nil {
 		t.Fatalf("seed passkey: %v", err)
 	}
 	h := NewRouter(d)

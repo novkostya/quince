@@ -48,7 +48,7 @@ func seedReset(t *testing.T) *store.Store {
 		RPID:         "example.com",
 		Name:         "phone",
 		CreatedAt:    now,
-	}); err != nil {
+	}, store.AdminScope()); err != nil {
 		t.Fatalf("seed passkey: %v", err)
 	}
 	return st

@@ -32,7 +32,7 @@ func removalRouter(t *testing.T) (http.Handler, *store.Store, *auth.Proofs) {
 	if err := d.Store.InsertPasskey(store.Passkey{
 		CredentialID: "cred-1", PublicKey: []byte("cose"), RPID: "example.com",
 		Name: "phone", CreatedAt: time.Now().UTC(),
-	}); err != nil {
+	}, store.AdminScope()); err != nil {
 		t.Fatalf("seed passkey: %v", err)
 	}
 	return NewRouter(d), d.Store, d.Proofs

@@ -47,14 +47,23 @@ type Passkey struct {
 // in the shipped binary — no endpoint and no CLI reaches it — so the ruled order holds: nothing can
 // issue a credential before `quince auth reset` exists to clear one. Slice 3's registration
 // endpoint is its first real caller.
-func (s *Store) InsertPasskey(p Passkey) error {
+func (s *Store) InsertPasskey(p Passkey, scope Scope) error {
+	// THE REFUSALS THE MIGRATION'S ACCEPTANCE RESTS ON. 0015 accepts a NULL default meaning
+	// admin only because this layer will not guess; these two lines are that promise, and
+	// without them the comment in the migration is an assertion nothing implements.
+	if !scope.set {
+		return ErrScopeUnset
+	}
+	if p.ScopeUDID != nil {
+		return ErrScopeConflict
+	}
 	_, err := s.db.Exec(
 		`INSERT INTO passkeys
 		   (credential_id, public_key, rp_id, sign_count, aaguid, transports, name, created_at,
 		    backup_eligible, backup_state, scope_udid)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.CredentialID, p.PublicKey, p.RPID, p.SignCount, p.AAGUID, p.Transports, p.Name,
-		fmtTime(p.CreatedAt), p.BackupEligible, p.BackupState, p.ScopeUDID)
+		fmtTime(p.CreatedAt), p.BackupEligible, p.BackupState, scope.value())
 	return err
 }
 
