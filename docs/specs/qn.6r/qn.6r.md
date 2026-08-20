@@ -24,9 +24,6 @@ ruling D left to a spec.
   C, because qn.6p D7 is an Operator ruling and retiring half of it is user-visible; the issue
   carries `needs-operator`. **Nothing else here waits on it** — D3's *mechanism* is graded on being
   correct, not on whether a post-check is the right shape.
-- **Reviewed once and revised** (quince#1315): the post-check was presence-only, which a **stale**
-  record defeats. D3 now compares before and after. Three smaller findings from the same review are
-  fixed in D4, D5 and the `stack.md` row of the Rule check.
 
 ---
 
@@ -142,7 +139,7 @@ trust was revoked — still has a **file** in the store. `contracts.md:1109` is 
 record presence, so quince offers Pair for exactly that device. If the store is then unwritable,
 M7 makes `idevicepair` print `SUCCESS` anyway, and a presence check finds the **stale** record and
 reports the pairing recorded. That is story 2 failing by the mechanism story 2 is written against,
-in the more likely of the two cases rather than the rarer one. (Found in review, quince#1315.)
+in the more likely of the two cases rather than the rarer one.
 
 So quince asks **twice**:
 
@@ -197,8 +194,7 @@ secret.
 
 **"The body", not "the message" — D5 needs the envelope read.** Telling a `PairRecord` reply from a
 `Result` reply means reading the message type, which is a parse of the framing. The security
-property is about the record's contents and is intact; the wider wording contradicted D5 two
-sections down (found in review, quince#1315).
+property is about the record's contents, and it is what this section binds.
 
 ### D5 — three answers, one of which is a closed connection
 
@@ -216,13 +212,12 @@ The third is not the second. *"The pairing was not recorded"* and *"quince could
 muxer to ask"* are different sentences with different remedies, and *Troubleshooting is ACTIONABLE*
 is what forbids merging them.
 
-**THE RE-DIAL IS WHAT MAKES THE EOF ARM HONEST, and without it this section breaks its own rule**
-(found in review, quince#1315). M3 says netmuxd answers *no record* by closing with no reply — but a
-muxer that **dies** mid-request closes exactly the same way, and so does one restarted underneath
-the exchange. Read naively, an EOF is *the record is not there* wearing *quince cannot tell*'s
-clothes, which is the collapse the paragraph above forbids. So on EOF quince dials again: reachable
-means the muxer is alive and its silence was its answer; unreachable means the muxer went away and
-quince does not know. One extra dial, on the failure path only.
+**THE RE-DIAL IS WHAT MAKES THE EOF ARM HONEST.** M3 says netmuxd answers *no record* by closing
+with no reply — but a muxer that **dies** mid-request closes exactly the same way, and so does one
+restarted underneath the exchange. Read naively, an EOF is *the record is not there* wearing
+*quince cannot tell*'s clothes, which is the collapse the paragraph above forbids. So on EOF quince
+dials again: reachable means the muxer is alive and its silence was its answer; unreachable means
+the muxer went away and quince does not know. One extra dial, on the failure path only.
 
 The exchange is a **short-lived connection of its own**, dialled from the existing endpoint and
 bounded by a deadline. It is not multiplexed onto the Listen stream, which is a long-lived
@@ -253,11 +248,10 @@ is pre-release, which is what makes this affordable, and it will not be later.
 directory whose name asserts an ownership the model denies, and the next reader has to re-derive
 this whole issue to know that.
 
-**IT AFFECTS ONE EXAMPLE, NOT TWO, and this section implied two.** `compose.host-muxer.yml` mounts
-no pairing-record store at all: its muxer is the **host's** usbmuxd, whose store is the host's own
-`/var/lib/lockdown` and was never a compose volume. So D6 moves `compose.yml`'s sidecar store and
-leaves the other file with nothing to move — which is the same conclusion, reached because that
-profile already had the shape D6 argues for. Found while building the slice.
+**IT AFFECTS ONE EXAMPLE.** `compose.host-muxer.yml` mounts no pairing-record store at all: its
+muxer is the **host's** usbmuxd, whose store is the host's own `/var/lib/lockdown` and is not a
+compose volume. So D6 moves `compose.yml`'s sidecar store, and the other file already has the shape
+D6 argues for.
 
 ### D7 — the wire loses a field rather than gaining a lie
 
@@ -293,8 +287,7 @@ is only knowable after the pair has run.
 5. **Pairing is refused before the walk when the muxer is unreachable**, and only then. (D3, D5)
 6. **The muxer's store is its own directory**, and quince mounts no store in either example.
    **Only `compose.yml` has a store to move** — `compose.host-muxer.yml` mounts none at all,
-   because its muxer is the host's usbmuxd and the host's `/var/lib/lockdown` is already its own.
-   This spec said *"in both examples"* until the work found otherwise. (D6)
+   because its muxer is the host's usbmuxd and the host's `/var/lib/lockdown` is already its own. (D6)
 7. **The wire and the screen carry no precondition that no longer exists.** (D7)
 8. **Canon follows in the same diffs** — stack D2's netmuxd bullet, the contracts payload, the UI
    copy.
@@ -308,8 +301,8 @@ is only knowable after the pair has run.
 | # | story | gate |
 | --- | --- | --- |
 | G1 | 1, 2 | `grep` proves no source file outside tests names `/var/lib/lockdown` or `LockdownStore`; the deleted file's tests are gone with it, and `go build` proves no caller survives |
-| G2 | 2 | **Two fakes, and naming both is the point** — `idevicepair` faked to print `SUCCESS: Paired` and exit `0` (M7's shape, which is tool stdout), and the muxer socket scripted to **close with no reply** (M3's shape, which is the usbmuxd framing). The op must end `failed`. Written out because *"a fake muxer that answers `SUCCESS: Paired`"* names one component doing both jobs, and sends the implementer to build the wrong fake |
-| G2b | 2 | **the stale-record case, which presence alone gets wrong** — the muxer serves the SAME record body before and after, the tool reports success, and the op ends `failed`. The gate that would have caught quince#1315's finding |
+| G2 | 2 | **Two fakes** — `idevicepair` faked to print `SUCCESS: Paired` and exit `0` (M7's shape, which is tool stdout), and the muxer socket scripted to **close with no reply** (M3's shape, which is the usbmuxd framing). Two components, two jobs; one fake cannot do both. The op must end `failed` |
+| G2b | 2 | **the stale-record case, which presence alone gets wrong** — the muxer serves the SAME record body before and after, the tool reports success, and the op ends `failed` |
 | G2c | 2 | the negative control — the muxer serves a **different** body after, and the op ends `succeeded`. A `failed` that is right for the wrong reason passes G2 and G2b alone |
 | G3 | 3 | table test over D5's three meanings; each produces a **distinct** message, and the unreachable one is not the not-recorded one. **The EOF arm is exercised both ways** — EOF with the re-dial succeeding is *not recorded*, EOF with the re-dial failing is *quince cannot tell*. The assertion is on distinctness, not on wording — the rule's negative half is that a true message which collapses two causes is still a defect |
 | G4 | 4 | the fake muxer serves a record whose bytes are a known sentinel; the test asserts that sentinel appears in **no** log line, response body or file written during the op |
@@ -350,7 +343,7 @@ a phone trusted anything, and the whole rung is source-read plus mount measureme
 | **Config tidiness** | Not touched. No new key, no new default. The muxer's store is a compose mount, not quince configuration — which is the point of D1. |
 | **Subprocesses** | Unchanged. `idevicepair` still runs as an argv array in its own process group with a Go-side deadline; this rung adds a socket exchange around it, not a process. |
 | **Every bug found on hardware becomes a replay fixture** | Nothing in this rung was found on hardware — it came from source and mounts. Stated in *Fixtures* so the empty list is a declaration and not an omission. If G8 finds a bug, the fixture comes first. |
-| **Docs are part of the diff** | `docs/quince.stack.md:128` is wrong in **both** its halves and PR 2 rewrites the bullet rather than amending a clause. *"netmuxd **reads** …"* is incomplete — M2 says it writes too. *"**No `--plist-storage`**"* is contradicted by `deploy/compose.yml:44`, which passes exactly that flag; the bullet describes what quince passed when it **supervised** netmuxd, and qn.6p retired the supervision without retiring the sentence. Its *"(qn.3 amendment 1)"* points at the amendment D1/D2 retire. Flagged in review (quince#1315) because a canon line with one clause fixed reads as a line that was checked. `contracts.md` rides the wire PR. Coverage summary plus a known-untested list on each PR. |
+| **Docs are part of the diff** | `docs/quince.stack.md`'s D2 pair-record bullet and `contracts.md`'s devices payload both describe the model this rung changes, so each rides the PR that changes it — the bullet with `LockdownStore`'s retirement, the payload with the wire slice. Coverage summary plus a known-untested list on each PR. |
 | **Privacy is a commit-time gate** | `make privacy-check REF=origin/main...HEAD TEXT=<file under the runner's own scratch>` before every push. No host, address, path, UDID or serial from any stand appears in this spec; the upstream refs, message names and file paths are public facts about public projects. |
 | **Interface facts are looked up live** | Every claim in *What was measured* was fetched at the pinned ref on 2026-08-20. Two upstream projects were read; neither was recalled. The refs are named so the reviewer can repeat it rather than trust it. |
 | **Don't improvise architecture** | A, B, C are ruled and D is discharged; this spec implements them. The three things canon does **not** settle are marked as decisions here rather than made in code — D3 (which asks for a ruling because it loses half of an Operator ruling), D6 (which ruling D left to the spec), D7 (the wire shape). The adjacent finding that would have been an improvisation is filed instead: quince#1314. |

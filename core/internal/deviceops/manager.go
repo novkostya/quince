@@ -662,8 +662,7 @@ func encDoneMsg(action string) string {
 //
 // IT ASKS THE WRONG FILESYSTEM, and qn.6r D3 is where that is fixed. quince mounts no muxer store,
 // so the directory underneath this is container-local and the answer is effectively always `true`.
-// Left standing for one slice so this one carries a single claim; it is deleted rather than
-// repointed, because D3 measures that no safe pre-check for the muxer's store exists.
+// D3 deletes it rather than repointing it, because no safe pre-check for the muxer's store exists.
 //
 // NO LOCKDOWN STORE MEANS NO CLAIM, AND THAT ARM IS `true` DELIBERATELY. The store is optional —
 // SetLockdown's own doc says nil means quince makes no claim, which is how tests and the demo run —

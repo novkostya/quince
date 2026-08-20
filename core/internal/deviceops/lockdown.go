@@ -5,25 +5,18 @@ import (
 	"os"
 )
 
-// PAIRING RECORDS BELONG TO THE MUXER, NOT TO QUINCE (qn.6r D1, ruling A on quince#1309).
+// PAIRING RECORDS BELONG TO THE MUXER, NOT TO QUINCE (qn.6r D1).
 //
 // libimobiledevice stores no pairing records: `userpref_read/save/delete_pair_record` are each a
 // message to the muxer, with no filesystem fallback (measured at 1.4.0, `common/userpref.c`).
-// `/var/lib/lockdown` is the DAEMON's store — usbmuxd's, or netmuxd's `--plist-storage`. Before
-// qn.6p quince supervised the muxer in its own container, so the daemon's store WAS quince's, and
-// the distinction cost nothing; the split moved it and this file did not follow.
+// `/var/lib/lockdown` is the DAEMON's store — usbmuxd's, or netmuxd's `--plist-storage`. quince
+// neither persists nor restores a record and mounts that path nowhere: do not add a copy here,
+// and do not mount the muxer's store into this container.
 //
-// So quince neither persists nor restores records. What stood here — a whole-dir copy between
-// /var/lib/lockdown and a persistent dir under $QUINCE_DATA, plus the same-file guard quince#1310
-// added to it — implemented quince as the custodian of records it does not own, and retires with
-// the role (qn.6r D2). The guard is not being reverted: after this change there is no copy for it
-// to defend.
-//
-// WHAT SURVIVES IS ONE PROBE, AND ONLY UNTIL qn.6r's NEXT SLICE. `Writable` asks whether quince
+// WHAT IS LEFT IS ONE PROBE, AND IT GOES IN qn.6r's NEXT SLICE. `Writable` asks whether quince
 // can write to its own container-local /var/lib/lockdown, which is not the question that decides
-// whether a pairing can be recorded — that is the muxer's store, and quince mounts it nowhere.
-// D3 rules that no safe pre-check for it exists, so this is deleted rather than repointed once
-// the muxer-side check lands. Kept here for one slice so this one carries a single claim.
+// whether a pairing can be recorded — that is the muxer's store. D3 rules that no safe pre-check
+// for it exists, so it is deleted rather than repointed once the muxer-side check lands.
 
 // LockdownStore answers whether quince could write into the libimobiledevice system dir.
 type LockdownStore struct {
