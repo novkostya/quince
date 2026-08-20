@@ -125,11 +125,16 @@ export function OnboardingCertificatePage() {
         </p>
 
         {/* THE PLACEHOLDERS ARE THE PATHS THE SHIPPED EXAMPLES PRODUCE, and that is the whole
-            requirement they have to meet. `deploy/compose.yml`
-            carries `./quince/certs:/certs:ro`, and `deploy/tls.md` names `/certs/quince.pem` and
-            `/certs/quince.key` in the `tls:` block a user copies. A placeholder from a different
-            convention teaches a path that does not exist on any install this project describes —
-            worse than an empty box, because it reads as instruction. */}
+            requirement they have to meet. `deploy/compose.yml` and
+            `deploy/compose.host-muxer.yml` both carry `./quince/certs:/certs:ro`, so a certificate
+            dropped in beside them lands under `/certs/`. A placeholder from a different convention
+            teaches a path that does not exist on any install this project describes — worse than an
+            empty box, because it reads as instruction.
+
+            `deploy/tls.md` NO LONGER CARRIES A `tls:` BLOCK TO COPY, and this comment cited one
+            until quince#1307: the documented route is now mount-then-onboard, which is this screen.
+            So these placeholders are the only place those paths are stated to a user, which raises
+            rather than lowers the bar they have to meet. */}
         {/* A FORM, SO RETURN SUBMITS IT. Three text fields and one action is a form whatever the
             markup says, and a keyboard user pressing Return on the last field expects the button —
             on a phone the key is literally labelled "go". Without this the page silently does

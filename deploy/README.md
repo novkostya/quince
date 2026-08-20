@@ -10,6 +10,7 @@ Plain English, with none of this project's internal vocabulary, and no block cap
 | | |
 | --- | --- |
 | [`compose.yml`](compose.yml) | The example stack. Start here. |
+| [`compose.host-muxer.yml`](compose.host-muxer.yml) | The same, for a machine already running usbmuxd |
 | [`storage.md`](storage.md) | Where backups go, and what each kind of disk gives you |
 | [`zfs-helper.md`](zfs-helper.md) | Setting up the ZFS helper script, if you use ZFS |
 | [`tls.md`](tls.md) | Getting HTTPS in front of quince |

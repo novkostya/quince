@@ -45,19 +45,17 @@ Comma-separated, and empty by default — which means trust nothing, so this ste
 
 ## Or let quince do it
 
-Point it at a certificate and key:
-
-```yaml
-tls:
-  cert_file: /certs/quince.pem
-  key_file:  /certs/quince.key
-```
+Mount your certificate and key where quince can read them:
 
 ```yaml
 # in compose.yml
     volumes:
       - /path/to/certs:/certs:ro
 ```
+
+Then open the web UI. quince asks for the two paths on first run, checks the files, and saves
+nothing until the certificate has actually worked over https — so a typo or a wrong key leaves you
+where you were rather than locked out. There is no config file to edit by hand.
 
 Mount it read-only. quince never writes there, and `:ro` turns that from a promise into a guarantee.
 
@@ -74,7 +72,7 @@ through a renewal it keeps serving the old certificate and logs it, rather than 
 not quietly fall back to plain HTTP — that would put your session cookie in the clear on a system
 you had configured for TLS, and your browser would not tell you either.
 
-To go back to plain HTTP, remove both keys.
+To go back to plain HTTP, clear the certificate in Settings.
 
 ## Plain HTTP, if you really mean it
 
@@ -90,11 +88,10 @@ nothing. That is a reasonable choice, not a lazy one.
 network can sign in as you — to something holding everything on your phone. On a VPN that is the
 tunnel. On a LAN it is everyone on the LAN. quince keeps saying so and will not let you dismiss it.
 
-**It also rules out notifications, permanently.** Browsers only allow web push on a secure origin,
-and plain HTTP to a LAN address is not one. quince does not send push yet — which is exactly why
-this is worth knowing now: the *"your backup is waiting for your passcode"* notification is the
-answer to Wi-Fi backups needing you to confirm on the phone, and a plain-HTTP setup will find that
-feature arrives and does nothing.
+**It also rules out notifications.** Browsers only allow web push on a secure origin, and plain
+HTTP to a LAN address is not one. This is not a future cost: quince sends the *"your backup is
+waiting for your passcode"* reminder today, and that reminder is the answer to Wi-Fi backups needing
+you to confirm on the phone. Choose plain HTTP and you will never get one.
 
 **Self-signed certificates have the same problem.** Chromium will not register a service worker on
 an origin with a certificate error, and clicking through the warning does not help. You can mount

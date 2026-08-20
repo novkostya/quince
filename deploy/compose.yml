@@ -1,14 +1,23 @@
 # quince — self-hosted iPhone & iPad backups.
 #
+# Check one thing first: does this machine already run usbmuxd?
+#
+#   ss -lx | grep usbmux
+#
+#   nothing      →  this is the right file, carry on
+#   something    →  use compose.host-muxer.yml instead. Two muxers fight over the USB bus.
+#
+# Then:
+#
 #   1. Save this file as compose.yml
 #   2. docker compose up -d
 #   3. Open http://<this-host>:8968
 #
-# The only line you are likely to change is the backups path, marked below.
+# Change the backups path, marked below. You will also need HTTPS before you can sign in from
+# your phone — the commented-out certificate line below is one way to get it.
 #
-# Two containers. quince does not talk to iPhones itself — netmuxd does that, over USB and over
-# Wi-Fi, and quince connects to it. If you already run usbmuxd on this machine, see the last
-# section of this file instead.
+# Two containers. quince does not talk to iPhones itself; netmuxd does, over USB and over Wi-Fi,
+# and quince connects to it.
 
 services:
   # ── netmuxd: finds devices and carries their traffic ────────────────────────────────────────
@@ -20,7 +29,8 @@ services:
     restart: unless-stopped
 
     # Wi-Fi devices announce themselves over mDNS, which does not cross a container bridge. This
-    # is why the muxer gets the host network and quince does not.
+    # is why the muxer gets the host network and quince does not. A macvlan network works too,
+    # if you would rather not share the host's — it gives this container its own address on your LAN.
     network_mode: host
 
     # Permission to open USB devices. Full `privileged: true` is the usual advice and is not
@@ -58,7 +68,7 @@ services:
     restart: unless-stopped
     depends_on: [muxer]
     ports:
-      - "8968:8968"
+      - "8968:8968" # change the left side if something else already uses this port
     volumes:
       - ./quince/data:/data # config, database, pairing records — keep this
       - ./quince/cache:/cache # scratch, safe to delete
@@ -70,25 +80,12 @@ services:
       - ./quince/data/lockdown:/var/lib/lockdown # pairing records, written here
       - /run/netmuxd:/run/mux:ro # the muxer's socket; quince only reads it
 
-      # HTTPS. Your phone is not localhost, so it cannot log in over plain http — quince refuses
-      # rather than failing in a confusing way. Put a reverse proxy with a certificate in front of it,
-      # or mount a certificate here and point `tls:` at it in config.yml. Options: deploy/tls.md.
+      # HTTPS — you will need it. Browsers drop the login cookie over plain http, so you would be
+      # able to sign in from this machine and from nowhere else. Either put a reverse proxy with a
+      # certificate in front of quince, or drop a certificate into ./quince/certs and uncomment the
+      # line below — quince finds it and walks you through the rest. More in deploy/tls.md.
       # - ./quince/certs:/certs:ro
 
-# ── Already running usbmuxd on this host? ─────────────────────────────────────────────────────
-# Two muxers fight over the USB bus, so check first:
-#
-#   ss -lx | grep usbmux
-#
-# If something answers, delete the whole `muxer:` service above, drop `depends_on` and the
-# `/run/netmuxd` line, and hand quince the socket you already have:
-#
-#   volumes:
-#     - /var/run/usbmuxd:/var/run/usbmuxd
-#
-# quince looks there by default, so there is still nothing to configure. Note this is USB only:
-# a plain usbmuxd does not do Wi-Fi, which is what the sidecar above is for.
-#
 # ── Configuration ─────────────────────────────────────────────────────────────────────────────
 # There is none to write. quince starts on defaults and asks for a storage location the first
 # time you open it; everything else is editable in the web UI, and lands in config.yml under
