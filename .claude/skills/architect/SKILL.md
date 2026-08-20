@@ -433,29 +433,24 @@ to it when the checks finish.** Check completion does not move `updatedAt` — w
 `event=mergeability status=CLEAN` had to be invented (quince#65), and why quince#63 sat landable for
 sixteen minutes.
 
-**TWO THINGS THAT WERE OPEN HERE ARE NOW MEASURED, and both answers are the permissive one.**
+**TWO THINGS TO GET RIGHT BEFORE USING IT, both measured rather than assumed.**
 
-- **`allow_auto_merge` is `true` on BOTH repositories.** This bullet read *"`false` on
-  `novkostya/quince-devlog` … until then the devlog's path is retry, then the Operator"*, which was
-  true until the Operator enabled it on 2026-08-07 (`CLAUDE.md` records this; this file did not
-  follow). **Measured on 2026-08-20**: `bin/gh-review pr merge <n> --repo novkostya/quince-devlog
-  --auto --rebase` armed quince-devlog#290 and read back `ARMED by app/quince-review method=REBASE`.
-  **There is no repository here where the path is retry-then-Operator.**
-- **The App CAN enable auto-merge, and it FIRES.** This bullet read *"UNMEASURED. Nobody has run
-  it."* It has been run many times since: quince#692 armed and merged unattended on 2026-08-07, and
-  on 2026-08-20 one architect session armed seven PRs on `novkostya/quince`, six of which merged
-  unattended on green, each reading `mergedBy: app/quince-review` (the seventh waits on a
-  code-owner approval). **Read the arm back through the API rather than inferring it from an exit
-  code** — `autoMergeRequest` appears in none of `state`, `reviewDecision` or `mergeStateStatus`, so
-  a seat checking those three has not checked the arm.
+- **`allow_auto_merge` is `true` on BOTH repositories**, so every PR here can be armed and nothing
+  falls back to the Operator for want of the setting. Measured 2026-08-20 on
+  `novkostya/quince-devlog`, which is the one worth checking: the arm read back
+  `ARMED by app/quince-review method=REBASE`.
+- **The App can enable it and it fires unattended** — quince#692 on 2026-08-07, and seven arms on
+  2026-08-20 of which six merged on green, each reading `mergedBy: app/quince-review`. **Read the
+  arm back through the API rather than inferring it from an exit code**: `autoMergeRequest` appears
+  in none of `state`, `reviewDecision` or `mergeStateStatus`, so a seat checking those three has not
+  checked the arm.
 
-**WHAT REPLACES THEM AS THE THING TO GET RIGHT: an arm does not survive the branch going `BEHIND`.**
-Auto-merge does not rebase, so under `strict: true` every *other* merge strands an armed PR
-silently — approved, green, armed, and unable to fire. Rebasing before arming (below) handles arm
-time and nothing else; a PR waiting on something slow is re-stranded by every merge that lands
-meanwhile. Measured four times on one PR in 25 minutes, 2026-08-20 (quince#1325). **Re-check armed
-PRs after every merge**, and note that a rebase *preserves* the original arm —
-`autoMergeRequest.enabledAt` is unchanged across it, where a close-and-reopen drops it (quince#905).
+**AN ARM DOES NOT SURVIVE THE BRANCH GOING `BEHIND`.** Auto-merge does not rebase, so under
+`strict: true` every *other* merge silently strands an armed PR — approved, green, armed, and unable
+to fire. Rebasing before arming covers arm time and nothing else: a PR waiting on something slow is
+re-stranded by every merge that lands meanwhile, measured four times on one PR in 25 minutes
+(quince#1325). **Re-check armed PRs after every merge.** A rebase preserves the arm —
+`autoMergeRequest.enabledAt` is unchanged across it — where a close-and-reopen drops it (quince#905).
 
 **AND THE STACKED-PR CHECK MOVES WITH IT.** §6/`CLAUDE.md` §6 requires the merging seat to look for
 PRs stacked on this one *immediately before* merging, because deleting the head branch closes a
