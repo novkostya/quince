@@ -8,7 +8,7 @@ Rung issue: **quince#270**, whose §9-1 was ruled by the Operator on 2026-08-20:
 `vault.Vault` as the Go interface now, with an in-process implementation behind it; sidecar-vs-in-core
 deferred to a measurement.** This spec is written under that ruling. It owes two things the ruling
 asked for by name: it **specifies the spike** (D10) and it **proposes the threshold before the number
-exists** (D10.3), for the Operator to confirm at spec review.
+exists** (D10.3), for the Operator to confirm — tracked at quince#1344.
 
 **quince#184 is answered here** (D5, G1). It has been open since the conformance suite was first named
 as a shipping gate, and it is the one blocker this rung inherits rather than creates. D5 records why
@@ -350,9 +350,17 @@ Reported as peak RSS against input size for each, plus the same three on a real 
 is available (G4). Synthetic manifests come from the fixture generator (D5), which is what makes the
 curve runnable on a session box at all.
 
-**D10.3 — the threshold, PROPOSED here for Operator confirmation, before the number exists.**
-quince#270 §6 offers *"comfortable"* and *"near the ceiling"*; neither is a bar, and an undefined bar
-means the number arrives and each reader supplies their own.
+**D10.3 — the threshold, PROPOSED before the number exists. Confirmation is owed on ALL THREE clauses
+and is tracked at quince#1344.** quince#270 §6 offers *"comfortable"* and *"near the ceiling"*;
+neither is a bar, and an undefined bar means the number arrives and each reader supplies their own.
+
+**Where it is confirmed, named rather than left as a bare `PROPOSED`.** This said *"for Operator
+confirmation at spec review"* while the spec was the open PR; that moment passed when quince#1343
+merged, and deleting the clause without replacing it left a marker with no when and no where — the
+half-stale shape quince#408 exists for. **quince#1344 is the successor**, and it is the right home
+for all three clauses rather than only for (c): quince#1343 carried exactly one review, the
+architect's, and merged on it, so **the Operator has not confirmed (a) or (b) either.** The
+confirmation is outstanding for the whole threshold, which is what this marker now says.
 
 > **In-process stands if ALL THREE hold — and (c) is a RECOMMENDATION with a live alternative
 > (quince#1344): (a) peak RSS attributable to the vault stays under 256 MB
