@@ -150,10 +150,20 @@ func authExempt(r *http.Request) bool {
 func (d Deps) authGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !authExempt(r) {
-			if _, err := d.Auth.Authenticate(sessionCookieValue(r)); err != nil {
+			// THE SESSION IS NO LONGER DISCARDED. It was `if _, err := ...` until qn.13 slice 3,
+			// which quince#1342 read as a principal being thrown away — but the value had no
+			// identity in it until 0014_session_principal.sql gave it one. Now it does, and this
+			// is the single place it enters a request.
+			sess, err := d.Auth.Authenticate(sessionCookieValue(r))
+			if err != nil {
 				writeError(w, d.Log, http.StatusUnauthorized, "unauthorized", "authentication required")
 				return
 			}
+			// NOTHING READS THIS YET, and that is the slice boundary rather than an oversight:
+			// scope arrives in slice 4 and the routes that consult it in slice 9. Binding it here
+			// first means those slices add a capability check to a request that already knows who
+			// it is, instead of each one re-deriving a principal its own way.
+			r = r.WithContext(withPrincipal(r.Context(), auth.PrincipalOf(sess)))
 		}
 		// `CSRFSecure`, NOT `Secure` — the double-submit cookie's flag is a different decision from
 		// the session cookie's (Operator ruling 2026-08-17, quince#1156). The reasoning is at that

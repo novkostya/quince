@@ -86,7 +86,8 @@ func (s *Service) FinishSetupPasskey(cer *PasskeyCeremonies, key, name, rpID str
 		return store.Passkey{}, store.AuthSession{}, "", err
 	}
 
-	sess, csrf, err := s.mintSession(priorSessionID)
+	// The credential registered one line above is what this session is attributable to.
+	sess, csrf, err := s.mintSession(priorSessionID, &pk.CredentialID)
 	if err != nil {
 		// THE CREDENTIAL IS ALREADY STORED AND THAT IS THE RECOVERABLE SIDE OF THIS FAILURE. The
 		// install is now configured, the passkey works, and the user simply lands on the login
@@ -102,7 +103,7 @@ func (s *Service) FinishSetupPasskey(cer *PasskeyCeremonies, key, name, rpID str
 // no other device's (quince#373). Extracted from Login so the three paths that issue a session —
 // password login, passkey assertion, and first-run passkey setup — mint it identically rather than
 // growing three subtly different copies.
-func (s *Service) mintSession(priorSessionID string) (store.AuthSession, string, error) {
+func (s *Service) mintSession(priorSessionID string, credentialID *string) (store.AuthSession, string, error) {
 	now := s.now()
 	if priorSessionID != "" {
 		if err := s.store.DeleteAuthSession(priorSessionID); err != nil {
@@ -114,6 +115,10 @@ func (s *Service) mintSession(priorSessionID string) (store.AuthSession, string,
 		CreatedAt:  now,
 		LastSeenAt: now,
 		ExpiresAt:  now.Add(s.absoluteTimeout),
+		// PASSED IN RATHER THAN ASSUMED. This helper serves the first-run passkey path, which
+		// HAS a credential, and taking it as a parameter keeps the one call site honest instead
+		// of letting a second caller inherit a silent nil (spec D1, and 0014's hazard note).
+		CredentialID: credentialID,
 	}
 	if err := s.store.CreateAuthSession(sess); err != nil {
 		return store.AuthSession{}, "", err

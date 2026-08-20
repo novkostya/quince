@@ -669,6 +669,10 @@ func (s *Service) Login(password, clientIP, priorSessionID string) (store.AuthSe
 		CreatedAt:  now,
 		LastSeenAt: now,
 		ExpiresAt:  now.Add(s.absoluteTimeout),
+		// A PASSWORD LOGIN HAS NO CREDENTIAL, so this stays nil and means the admin
+		// (0014_session_principal.sql). Written explicitly rather than left to the zero value,
+		// because the zero value being correct is the thing a reader has to be able to check.
+		CredentialID: nil,
 	}
 	if err := s.store.CreateAuthSession(sess); err != nil {
 		return store.AuthSession{}, "", err
