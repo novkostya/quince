@@ -195,6 +195,9 @@ func NewRouter(deps Deps) http.Handler {
 	if deps.VersionAdmin == nil { // no storage subsystem wired → refuse honestly (503)
 		deps.VersionAdmin = UnavailableVersionAdmin{}
 	}
+	if deps.VaultBrowse == nil { // no vault subsystem wired → refuse honestly (503)
+		deps.VaultBrowse = UnavailableVaultBrowse{}
+	}
 	if deps.JobControl == nil { // no backup engine wired (--demo) → command surface 503
 		deps.JobControl = UnavailableJobControl{}
 	}
@@ -327,6 +330,11 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("POST /api/storages/zfs/hostkey/trust", deps.handleStorageZFSHostKeyTrust())
 	apiMux.HandleFunc("GET /api/versions", deps.handleVersions())
 	apiMux.HandleFunc("DELETE /api/versions/{id}", deps.handleVersionDelete())
+	// The unlocked-session surface (contracts §1, qn.8). All four behind authGuard.
+	apiMux.HandleFunc("POST /api/versions/{id}/unlock", deps.handleVersionUnlock())
+	apiMux.HandleFunc("POST /api/sessions/{id}/lock", deps.handleSessionLock())
+	apiMux.HandleFunc("GET /api/sessions/{id}/browse", deps.handleSessionBrowse())
+	apiMux.HandleFunc("GET /api/sessions/{id}/file/{file_id}", deps.handleSessionFile())
 	apiMux.HandleFunc("/api/", deps.handleAPINotFound())
 
 	// setupGuard runs AFTER authGuard and csrfGuard, not before, and the order is the point: an

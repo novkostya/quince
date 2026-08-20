@@ -163,6 +163,41 @@ type FileEntry struct {
 	Kind         string `json:"kind"` // file | dir | symlink
 	Size         int64  `json:"size"`
 	Mtime        string `json:"mtime"`
+
+	// Incomplete marks a file the BACKUP holds fewer bytes for than its own index records —
+	// captured while it was being written. It is NOT a read failure: every recovered byte is
+	// delivered, and a retry cannot change it (qn.8 spec D8.1).
+	//
+	// A NON-BREAKING FIELD ADDITION, following the qn.7 precedent for `wifi_sync`.
+	//
+	// IT CANNOT BE KNOWN BEFORE THE FILE IS READ, which is why it is a field and not a
+	// property of the manifest: the index records a size, and only decrypting the blob shows
+	// that fewer bytes are there. So it is false on first sight and true on any view AFTER a
+	// read that came up short — the session remembers.
+	//
+	// `omitempty` because absent means "not known to be incomplete", which is the honest
+	// reading of a file nobody has read yet. Safe here where quince#493 would forbid it on a
+	// config round trip: this is a read-only surface and no client PUTs it back.
+	Incomplete bool `json:"incomplete,omitempty"`
+}
+
+// BrowseQuery is GET /api/sessions/{id}/browse (contracts §1).
+type BrowseQuery struct {
+	Domain string
+	Prefix string
+	Cursor string
+	Limit  int
+}
+
+// BrowsePage is what that route returns.
+type BrowsePage struct {
+	Entries    []FileEntry `json:"entries"`
+	NextCursor string      `json:"next_cursor,omitempty"`
+
+	// EffectiveLimit is set ONLY when the server clamped the requested limit, so a caller
+	// that asked for more than the maximum can tell a clamp from a short last page. "No
+	// silent caps or fallbacks" as a wire field.
+	EffectiveLimit int `json:"effective_limit,omitempty"`
 }
 
 // DevicesResponse is GET /api/devices.

@@ -2135,9 +2135,32 @@ DELETE /api/versions/{id}              → 202 | 404 | 503   // confirmed destru
      // deletes fixtures). Error codes recorded qn.5 (implemented the frozen shape).
 POST   /api/versions/{id}/unlock {password} → Session
 POST   /api/sessions/{id}/lock         → 204
-GET    /api/sessions/{id}/browse?domain&prefix&cursor   → {entries: FileEntry[], next_cursor}
+GET    /api/sessions/{id}/browse?domain&prefix&cursor&limit
+                                       → {entries: FileEntry[], next_cursor?, effective_limit?}
 GET    /api/sessions/{id}/file/{file_id}                → streamed decrypted content
 ```
+
+**Implemented at qn.8. The status mapping, because two of these are not the obvious code:**
+
+| §4 code | HTTP | why |
+| --- | --- | --- |
+| `bad_password` | **403**, not 401 | the caller IS authenticated — every route here is behind `authGuard`. What failed is the **backup's** password, a different credential, and a 401 invites a client to re-run the login flow for the wrong reason |
+| `locked` | **409**, not 404 | the session id may be perfectly real and simply expired; that is a conflict with the current state rather than a missing thing |
+| `not_found`, `not_a_file` | 404 | the status cannot distinguish them, so **the body must** — see §4 |
+| `corrupt_manifest`, `unsupported_ios` | 422 | the request is well-formed and the artifact is not |
+| `unavailable` | 503 | no vault is wired (`--demo`, or no storage subsystem) |
+| `io` | 500 | something below failed and quince will not guess what |
+
+**`effective_limit` is present ONLY when the server clamped**, so a caller that asked for more than
+the maximum can tell a clamp from a short last page — *no silent caps or fallbacks* as a wire field.
+A `limit` that is not a number means the default rather than a `400`: the caller gets a page either
+way, and a refusal there would be strictness with no reader.
+
+**The file route declares `Content-Length` from the RECORDED size**, which is what makes a short read
+detectable rather than silently truncated: if the backup holds fewer bytes than its index says, the
+body ends early against a declared length and the client reports a broken transfer, which is true.
+It also sets `Cache-Control: no-store` — an intermediary holding a decrypted file is exactly the
+persistence design §7's lazy model exists to prevent.
 
 Domain endpoints (messages, photos, overview) are specified in their rungs (`qn.9+`) and
 appended here when built; they are session-scoped lazy reads (`/api/sessions/{id}/...`)
@@ -2385,7 +2408,18 @@ Session: { "id": "...", "version_id": "...", "expires_at": "..." }
 
 FileEntry: { "file_id": "ab12...", "domain": "CameraRollDomain",
              "relative_path": "Media/DCIM/100APPLE/IMG_0001.HEIC",
-             "kind": "file" | "dir" | "symlink", "size": 123, "mtime": "..." }
+             "kind": "file" | "dir" | "symlink", "size": 123, "mtime": "...",
+             "incomplete": true }
+  // `incomplete` added at qn.8, a non-breaking field addition following the qn.7 precedent for
+  // `wifi_sync`. It marks a file the BACKUP holds fewer bytes for than its own index records —
+  // captured while it was being written. NOT a read failure: every recovered byte is delivered
+  // and a retry cannot change it, which is why it is a field and not an error code (§4).
+  //
+  // ABSENT UNTIL SOMETHING READS THE FILE SHORT, and that is a fact about the format rather than
+  // a shortcut: the index records a size, and only decrypting the blob shows fewer bytes are
+  // there. So it is omitted on first sight — "not known to be incomplete" — and present on any
+  // view after a read came up short. The session remembers within its own lifetime; nothing about
+  // it is persisted, because nothing derived from backup content is (§5, design §7).
 ```
 
 **RULED (was `PROPOSED (gap)`): a `Storage` object, and how a job picks one — `qn.6c`, quince#378.**
@@ -2929,11 +2963,54 @@ verify_canary {}                               → {ok}   // decrypt one small k
 lock        {}                                 → {}     // then process exits 0
 ```
 
+**THE SEAM IS THE GO INTERFACE; `materialize` IS THIS PROTOCOL'S WIRE SHAPE FOR IT.** The paragraph
+above already says the core talks to a `vault.Vault` interface and that any implementation of it —
+*in-process or over this RPC* — must pass the conformance suite. qn.8 makes the consequence explicit,
+because reading it the other way costs real I/O.
+
+`materialize {file_id} → {handle, rel_path, size}` exists **because a process boundary cannot carry
+an open file**: the vault decrypts into scratch, the core resolves the path, streams it, unlinks.
+Put that on the **interface** and an in-process implementation pays decrypt → scratch → read →
+unlink for a boundary it does not have — double I/O on the slowest disks quince targets.
+
+So the interface method is **`Open(ctx, file_id) → io.ReadCloser`**, and this RPC's `materialize` is
+how the child implements it: it materializes into scratch and returns a reader whose `Close` unlinks.
+**The cost is paid by the implementation that needs it and by nothing else.** Measured on the
+in-process one: **7.9 MiB peak RSS streaming a 128 MiB file** (stack D4).
+
+**`handle` and `rel_path` are therefore RPC-local and appear on no interface**, which is what lets
+the same conformance suite gate both implementations without either being bent toward the other.
+
 Domain methods (`overview.*`, `messages.*`; `photos.*` if ever revived) are appended
 here with their rungs (`qn.9+`); all reads are lazy (domain DBs decrypted to scratch on
 first use) and paginated. Errors: JSON-RPC error with `data.code ∈ {bad_password, corrupt_manifest, io,
-not_found, unsupported_ios}`. The core treats malformed output or nonzero exit as a vault
-crash: session dies, `session.locked{reason: "vault_crash"}`, user sees it honestly.
+not_found, unsupported_ios, not_a_file, locked}`. The core treats malformed output or nonzero exit as a
+vault crash: session dies, `session.locked{reason: "vault_crash"}`, user sees it honestly.
+
+**`not_a_file` and `locked` were added at qn.8**, when the seam gained an implementation and the
+frozen five turned out not to cover what it can answer:
+
+- **`not_a_file`** — the entry EXISTS and has no content: a directory or a symlink. Answering
+  `not_found` for something the browse listing just showed collapses two causes with different
+  remedies, which the *troubleshooting is actionable* rule names as a defect **even when every word
+  of it is true**. Over HTTP both are `404`, so the status alone cannot carry the difference and the
+  body must.
+- **`locked`** — a method called before `initialize`/`Unlock` or after `lock`. In-process it is a
+  caller bug; over the RPC it is a real ordering condition on the wire, and a seam that cannot
+  express it would make the RPC implementation lie. Over HTTP it is **`409`, not `404`**: the session
+  id may be perfectly real and simply expired.
+
+**`unsupported_ios` is UNUSED and deliberately untouched.** The failure it was written for is a
+schema the adapter cannot read, and `ios-backup-parser` reports that as a schema **fingerprint**
+rather than an iOS version — the same iOS can ship a changed schema. Correcting it belongs to the
+rung that adds the first domain consumer (`qn.9`), not to one that adds no adapter.
+
+**AND AN INCOMPLETE FILE IS NOT AN ERROR CODE AT ALL.** A file the backup holds fewer bytes for than
+its own index records — captured mid-write — is a **successful read of an incomplete artifact**:
+every recovered byte is delivered and a retry cannot change it. It travels as a **field**
+(`FileEntry.incomplete`, §2), never as a code, and the reason is mechanical rather than aesthetic:
+an implementation that routed it through the code would answer `""`, which is what SUCCESS answers,
+so the condition would vanish with no trace and every test would still pass (qn.8 D8.1a).
 
 ## 5. Derived caches (`/cache`)
 
