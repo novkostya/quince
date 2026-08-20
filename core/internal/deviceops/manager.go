@@ -48,7 +48,7 @@ type Manager struct {
 	enrichWait      time.Duration
 	validateTimeout time.Duration // amendment A: bound the non-interactive validate read
 
-	lockdown *LockdownStore // optional: persists pairing records after a successful pair
+	lockdown *LockdownStore // optional: answers the D7 write probe. See lockdown.go.
 
 	mu  sync.Mutex
 	ops map[string]wire.Op
@@ -58,8 +58,8 @@ type Manager struct {
 	inflight map[string]string
 }
 
-// SetLockdown attaches a LockdownStore so a successful pair's records are backed up to
-// persistent storage (amendment 1). Optional — nil means no persistence (e.g. tests).
+// SetLockdown attaches a LockdownStore, which answers the qn.6p D7 write probe. Optional — nil
+// means quince makes no claim about whether a pairing can be recorded (e.g. tests, the demo).
 func (m *Manager) SetLockdown(l *LockdownStore) { m.lockdown = l }
 
 const opsSoftCap = 200 // prune terminal ops beyond this to bound the map
@@ -231,9 +231,6 @@ func (m *Manager) runPair(opID, udid string) {
 		switch outcome {
 		case pairPaired:
 			m.setOp(opID, "succeeded", msg, nil)
-			if m.lockdown != nil {
-				m.lockdown.Backup() // persist the new pairing record (amendment 1)
-			}
 			m.reEnrich(udid, TransportUSB)
 			m.auditEvent("device.pair", udid, "paired")
 			return
@@ -663,11 +660,16 @@ func encDoneMsg(action string) string {
 
 // PairingWritable reports whether a pairing record could be written right now (qn.6p D7).
 //
+// IT ASKS THE WRONG FILESYSTEM, and qn.6r D3 is where that is fixed. quince mounts no muxer store,
+// so the directory underneath this is container-local and the answer is effectively always `true`.
+// Left standing for one slice so this one carries a single claim; it is deleted rather than
+// repointed, because D3 measures that no safe pre-check for the muxer's store exists.
+//
 // NO LOCKDOWN STORE MEANS NO CLAIM, AND THAT ARM IS `true` DELIBERATELY. The store is optional —
-// SetLockdown's own doc says nil means no persistence, which is how tests and the demo run — so
-// refusing to pair when nobody attached one would break every caller that never wanted persistence
+// SetLockdown's own doc says nil means quince makes no claim, which is how tests and the demo run —
+// so refusing to pair when nobody attached one would break every caller that never wanted the probe
 // in order to guard a directory that does not exist. The honest reading of nil is "quince is not
-// recording pairings here", not "quince cannot".
+// answering this question", not "quince cannot pair".
 func (m *Manager) PairingWritable() (bool, string) {
 	if m.lockdown == nil {
 		return true, ""

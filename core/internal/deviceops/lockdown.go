@@ -1,132 +1,40 @@
 package deviceops
 
 import (
-	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
-	"strings"
 )
 
-// Pairing records under /var/lib/lockdown are PRIVATE-KEY-GRADE secrets (design §6): the host
-// identity (SystemConfiguration.plist) and per-device records together let any holder talk to
-// the iPhone as a trusted host. qn.3 is the rung that creates them (via the UI pair flow), so
-// it must also make them survive a container recreate — otherwise a fresh container gets a new
-// host identity and the device demands Trust again (amendment 1, decisions log).
+// PAIRING RECORDS BELONG TO THE MUXER, NOT TO QUINCE (qn.6r D1, ruling A on quince#1309).
 //
-// Mechanism (rung-ruled): a whole-dir copy between the system dir and a persistent dir under
-// $QUINCE_DATA — deliberately NOT a symlink/RemoveAll of /var/lib/lockdown, which would be
-// unsafe against a package-created dir or an operator's own bind mount. Records are 0600, the
-// dir 0700; nothing here is ever logged or served.
+// libimobiledevice stores no pairing records: `userpref_read/save/delete_pair_record` are each a
+// message to the muxer, with no filesystem fallback (measured at 1.4.0, `common/userpref.c`).
+// `/var/lib/lockdown` is the DAEMON's store — usbmuxd's, or netmuxd's `--plist-storage`. Before
+// qn.6p quince supervised the muxer in its own container, so the daemon's store WAS quince's, and
+// the distinction cost nothing; the split moved it and this file did not follow.
+//
+// So quince neither persists nor restores records. What stood here — a whole-dir copy between
+// /var/lib/lockdown and a persistent dir under $QUINCE_DATA, plus the same-file guard quince#1310
+// added to it — implemented quince as the custodian of records it does not own, and retires with
+// the role (qn.6r D2). The guard is not being reverted: after this change there is no copy for it
+// to defend.
+//
+// WHAT SURVIVES IS ONE PROBE, AND ONLY UNTIL qn.6r's NEXT SLICE. `Writable` asks whether quince
+// can write to its own container-local /var/lib/lockdown, which is not the question that decides
+// whether a pairing can be recorded — that is the muxer's store, and quince mounts it nowhere.
+// D3 rules that no safe pre-check for it exists, so this is deleted rather than repointed once
+// the muxer-side check lands. Kept here for one slice so this one carries a single claim.
 
-// LockdownStore syncs pairing records between the libimobiledevice system dir and persistent
-// storage under $QUINCE_DATA.
+// LockdownStore answers whether quince could write into the libimobiledevice system dir.
 type LockdownStore struct {
-	sysDir     string // e.g. /var/lib/lockdown
-	persistDir string // <dataDir>/lockdown
-	log        *slog.Logger
+	sysDir string // e.g. /var/lib/lockdown
+	log    *slog.Logger
 }
 
-// NewLockdownStore returns a store persisting under <dataDir>/lockdown. dataDir is $QUINCE_DATA
-// (a mounted volume); sysDir is where libimobiledevice reads/writes (/var/lib/lockdown).
-func NewLockdownStore(dataDir, sysDir string, log *slog.Logger) *LockdownStore {
-	return &LockdownStore{sysDir: sysDir, persistDir: filepath.Join(dataDir, "lockdown"), log: log}
-}
-
-// Restore copies persisted records into the system dir at startup so a fresh container keeps
-// its pairings without a re-Trust. It never overwrites a record already present in the system
-// dir (a live/bind-mounted record wins).
-func (l *LockdownStore) Restore() {
-	if err := os.MkdirAll(l.sysDir, 0o700); err != nil {
-		l.log.Warn("lockdown: could not ensure system dir; pairing may not restore", "error", err)
-		return
-	}
-	n, err := syncPlists(l.persistDir, l.sysDir, false)
-	if err != nil {
-		l.log.Warn("lockdown: restore failed; pairing may not survive a recreate", "error", err)
-		return
-	}
-	if n > 0 {
-		l.log.Info("lockdown: restored persisted pairing records", "count", n)
-	}
-}
-
-// Backup copies the current system records into persistent storage after a successful pair,
-// overwriting older copies (host identity may have changed).
-func (l *LockdownStore) Backup() {
-	if err := os.MkdirAll(l.persistDir, 0o700); err != nil {
-		l.log.Warn("lockdown: could not ensure persistent dir; pairing may not survive a recreate", "error", err)
-		return
-	}
-	if _, err := syncPlists(l.sysDir, l.persistDir, true); err != nil {
-		l.log.Warn("lockdown: backup failed; pairing may not survive a recreate", "error", err)
-	}
-}
-
-// syncPlists copies every *.plist from srcDir into dstDir (0600). When overwrite is false, an
-// existing destination file is left untouched. A missing srcDir is not an error (nothing yet).
-func syncPlists(srcDir, dstDir string, overwrite bool) (int, error) {
-	entries, err := os.ReadDir(srcDir)
-	if os.IsNotExist(err) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	n := 0
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".plist") {
-			continue
-		}
-		dst := filepath.Join(dstDir, e.Name())
-		if !overwrite {
-			if _, err := os.Stat(dst); err == nil {
-				continue
-			}
-		}
-		if err := copyFile(filepath.Join(srcDir, e.Name()), dst); err != nil {
-			return n, err
-		}
-		n++
-	}
-	return n, nil
-}
-
-// copyFile copies src over dst at 0600.
-//
-// A SAME-FILE COPY IS A NO-OP, AND PERFORMING IT DESTROYS THE FILE (quince#1309). `dst` is opened
-// with O_TRUNC before `src` is read, so when both paths resolve to one inode the source is emptied
-// and zero bytes are written back — a pairing record silently becomes 0 bytes.
-//
-// That is reachable from a deployment rather than from a bug in this package: bind the same host
-// directory at both `$QUINCE_DATA/lockdown` and the system dir and the two are one directory.
-// Measured on a running container, one inode through both paths. The guard is here rather than in
-// the caller because it is the caller's PATHS that differ while the FILE is the same — only an
-// inode comparison can tell, and only the code holding both can make it.
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = in.Close() }()
-
-	// Stat the OPEN handle, not the path: it is the file about to be read, so nothing can be
-	// swapped underneath between the check and the copy.
-	if si, serr := in.Stat(); serr == nil {
-		if di, derr := os.Stat(dst); derr == nil && os.SameFile(si, di) {
-			return nil
-		}
-	}
-
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		return err
-	}
-	return out.Close()
+// NewLockdownStore returns a store over sysDir, where libimobiledevice looks for the daemon's
+// records. It takes no data dir: nothing under $QUINCE_DATA holds pairing records any more.
+func NewLockdownStore(sysDir string, log *slog.Logger) *LockdownStore {
+	return &LockdownStore{sysDir: sysDir, log: log}
 }
 
 // Writable reports whether quince can write a pairing record, and why not when it cannot
@@ -140,11 +48,8 @@ func copyFile(src, dst string) error {
 // in a directory quince already owns. Nothing is read, so no record's content is touched (design
 // §6: these are private-key-grade secrets).
 //
-// SHARING THIS DIRECTORY READ-WRITE IS NOT RULED ON, here or anywhere (qn.6p D7). Per-device
-// records are whole-file writes, one file per device; the shared mutable thing is the host
-// identity, and whoever regenerates it invalidates every record that refers to it. That is a
-// property of the OTHER tool, not of quince, and the Operator ruled it out of scope: "we don't want
-// to mention it in readme at all and leave decision to users."
+// IT ASKS THE WRONG FILESYSTEM, AND THAT IS qn.6r D3's TO FIX, NOT THIS SLICE'S. The directory it
+// probes is container-local now, so it answers *writable* about a path no muxer reads.
 func (l *LockdownStore) Writable() (bool, string) {
 	if err := os.MkdirAll(l.sysDir, 0o700); err != nil {
 		return false, l.sysDir + " cannot be created: " + err.Error()

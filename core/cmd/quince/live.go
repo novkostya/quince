@@ -148,8 +148,7 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 
 	// Device ops (qn.3): pair/validate/info + encryption; enrichment overlays lockdown identity.
 	tools := deviceops.NewTools(muxerFor, log)
-	lockdown := deviceops.NewLockdownStore(bootstrap.Data, lockdownSystemDir, log)
-	lockdown.Restore()
+	lockdown := deviceops.NewLockdownStore(lockdownSystemDir, log)
 	opsMgr := deviceops.NewManager(ctx, tools, reg, eventBus, st, log)
 	opsMgr.SetLockdown(lockdown)
 	ls.ops = opsMgr

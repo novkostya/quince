@@ -27,7 +27,7 @@ func TestPairRefusesWhenPairingRecordsCannotBeWritten(t *testing.T) {
 	if err := os.WriteFile(sys, nil, 0o600); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
-	m.SetLockdown(NewLockdownStore(t.TempDir(), sys, discard()))
+	m.SetLockdown(NewLockdownStore(sys, discard()))
 
 	_, status, reason := m.Pair(context.Background(), fakeUDID)
 	if status != 409 {
