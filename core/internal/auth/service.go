@@ -424,6 +424,47 @@ func (e ErrSelfRemoval) Error() string { return e.Detail }
 // RATE-LIMITED THROUGH RequirePresent when a password is presented, which is new: this path verified
 // no credential before, and now it may verify one on its way to refusing it.
 func (s *Service) RemovePassword(proofs *Proofs, pres Presented, rpID, sessionID, clientIP string) error {
+	// A DEAD END IS ITS OWN REFUSAL, AND IT IS DECIDED BEFORE A PROOF IS DEMANDED (quince#1259).
+	// This is `RemovePasskey`'s ordering, applied to the path that was left behind when quince#1077
+	// fixed the other one — same defect, same shape, one endpoint apart.
+	//
+	// WHAT IT COST: `ErrLastCredential` was UNREACHABLE here. `RequirePresent` ran first, and on an
+	// install with no passkey that works at this address no proof can exist, so the call always died
+	// at `ErrNoProof` — *"authenticate again"* — for an operation nothing on the install could ever
+	// authorise. The refusal that CAN be satisfied was checked before the refusal that CANNOT: the
+	// user was asked to prove themselves, and only if they could would they have been told they were
+	// not allowed anyway.
+	//
+	// THE HANDLER WAS ALREADY CORRECT, which is what makes this narrow. `handlers_auth.go` orders
+	// its `errors.As(err, &lastCred)` arm BEFORE the `ErrNoProof` arm, so a `409 last_credential`
+	// has always been what it would return — the service simply never produced one on this path.
+	//
+	// IT ASKS `Accepts` RATHER THAN RE-DERIVING, for the reason `RemovePasskey` gives: that
+	// predicate decides what the WIRE says would work, so a second spelling here could disagree
+	// with the field the client reads, on exactly the case hardest to notice.
+	//
+	// ONLY ON A CONFIGURED INSTALL. Unclaimed is `RequirePresent`'s documented first-run exemption
+	// and holds no credentials to compare; refusing there would make `quince auth reset` recoverable
+	// only by a credential the reset just destroyed.
+	configured, err := s.Configured()
+	if err != nil {
+		return err
+	}
+	if configured {
+		accepts, err := s.Accepts(OpRemovePassword, rpID, "")
+		if err != nil {
+			return err
+		}
+		// `passwordRemovalRefusal` picks WHICH refusal this earns, and both of its answers are
+		// refusals — but it is guarded the same way `RemovePasskey` guards its sibling, so a nil
+		// arriving here falls through to the proof demand rather than becoming a silent success.
+		if len(accepts) == 0 {
+			if refusal := s.passwordRemovalRefusal(rpID); refusal != nil {
+				return refusal
+			}
+		}
+	}
+
 	subject, err := s.RequirePresent(proofs, pres, OpRemovePassword, "", sessionID, clientIP)
 	if err != nil {
 		return err
