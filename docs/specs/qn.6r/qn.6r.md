@@ -11,19 +11,12 @@ ruling D left to a spec.
 
 ## Status
 
-- **Rulings A, B, C are in force**; D is discharged by measurement. Rulings 3 and 4 of the original
-  issue shipped as [quince#1310](https://github.com/novkostya/quince/pull/1310) and
+- **Rulings A, B, C and D3 are all in force**; D is discharged by measurement. Rulings 3 and 4 of
+  the original issue shipped as [quince#1310](https://github.com/novkostya/quince/pull/1310) and
   [quince#1311](https://github.com/novkostya/quince/pull/1311) and are not re-opened here.
 - **The rung letter is not allocated.** `qn.6r` is the next free one and is used so the work can
   proceed; whether this is a rung of its own and whether it is inside v0.1 is the Operator's.
   Open question: [quince#1309](https://github.com/novkostya/quince/issues/1309).
-- **One design decision below asks for a ruling rather than assuming one** — D3, which loses half
-  of what qn.6p D7 was ruled to deliver. It is marked in place, not buried here.
-- **That question is WITH THE OPERATOR.** The architect stopped the thread on
-  [quince#1309](https://github.com/novkostya/quince/issues/1309) rather than ruling it under ruling
-  C, because qn.6p D7 is an Operator ruling and retiring half of it is user-visible; the issue
-  carries `needs-operator`. **Nothing else here waits on it** — D3's *mechanism* is graded on being
-  correct, not on whether a post-check is the right shape.
 
 ---
 
@@ -111,10 +104,19 @@ hazard was acceptable, and the regression tests go with the code they cover.
 
 ### D3 — the check that cannot lie is a POST-check, and the pre-check cannot be saved
 
-**This is the decision that asks for a ruling.** qn.6p D7 was an Operator ruling with a stated
-purpose: *"a pairing that cannot be recorded is not a pairing"* — refuse **before** somebody walks
-to the phone and taps Trust. Half of that is no longer reachable, and the spec says so rather than
-shipping something that looks like it.
+**RULED — Operator, 2026-08-20: `qn.6p` D7's refuse-before-the-walk half is retired.** *"Yes, of
+course can be retired"*, clarified as *"I mean, there's no other options."*
+
+**IT IS A FORECLOSURE, NOT A TRADE, and the distinction is the reason this paragraph is worded the
+way it is.** Nothing was chosen between: there is no safe pre-check, none can be built against this
+muxer, and no candidate survives contact with the protocol. The post-check is not the option that
+won — it is the only shape that can be honest. A reader who takes this for a decision will ask
+*why not just do the pre-check*, which is a question this spec forecloses rather than one it
+declines to re-open.
+
+**D7's INTENT survives and its PROMISE does not.** *A pairing that cannot be recorded is not
+reported as a pairing* — kept, and it is the point. *Refuse before somebody walks to the phone and
+taps Trust* — retired.
 
 **Why no pre-check works.** The only message that answers *can the muxer record a pairing* is
 `SavePairRecord`, and M2 says it overwrites unconditionally:
@@ -175,8 +177,8 @@ failed, so quince does too.
 
 **What is lost, stated plainly:** the user can still walk to the phone and tap Trust for a pairing
 that will not be recorded. quince finds out immediately afterwards and says so, but it cannot spend
-that walk on the user's behalf any more. **If the Operator reads D7 as requiring the refusal rather
-than the truthfulness, this rung stops here and the answer is a different one.**
+that walk on the user's behalf any more — not as a price that was accepted, but because no probe
+that could spend it exists.
 
 **One case is still refusable before the walk, and it is kept:** if the muxer is unreachable, the
 pairing certainly cannot happen. That answer already exists in the muxer health state (qn.6p D5) and
@@ -346,7 +348,7 @@ a phone trusted anything, and the whole rung is source-read plus mount measureme
 | **Docs are part of the diff** | `docs/quince.stack.md`'s D2 pair-record bullet and `contracts.md`'s devices payload both describe the model this rung changes, so each rides the PR that changes it — the bullet with `LockdownStore`'s retirement, the payload with the wire slice. Coverage summary plus a known-untested list on each PR. |
 | **Privacy is a commit-time gate** | `make privacy-check REF=origin/main...HEAD TEXT=<file under the runner's own scratch>` before every push. No host, address, path, UDID or serial from any stand appears in this spec; the upstream refs, message names and file paths are public facts about public projects. |
 | **Interface facts are looked up live** | Every claim in *What was measured* was fetched at the pinned ref on 2026-08-20. Two upstream projects were read; neither was recalled. The refs are named so the reviewer can repeat it rather than trust it. |
-| **Don't improvise architecture** | A, B, C are ruled and D is discharged; this spec implements them. The three things canon does **not** settle are marked as decisions here rather than made in code — D3 (which asks for a ruling because it loses half of an Operator ruling), D6 (which ruling D left to the spec), D7 (the wire shape). The adjacent finding that would have been an improvisation is filed instead: quince#1314. |
+| **Don't improvise architecture** | A, B, C are ruled and D is discharged; this spec implements them. The three things canon does **not** settle are marked as decisions here rather than made in code — D3 (ruled by the Operator once specified), D6 (which ruling D left to the spec), D7 (the wire shape). The adjacent finding that would have been an improvisation is filed instead: quince#1314. |
 | **Approver ≠ author** | The spec is PR 1 and is reviewed before any code exists, per the program doc. `quince.stack.md` is `CODEOWNERS`-owned, so the PR carrying its correction needs the Operator; that is named in the slicing rather than discovered at merge time. |
 
 ---
