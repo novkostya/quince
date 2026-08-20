@@ -314,11 +314,17 @@ the keys, wipe `/cache/scratch/<session_id>/`, then **`debug.FreeOSMemory()`**. 
 D10.3's clause (c) as code rather than as a hope about the scavenger's schedule; it is a
 stop-the-world cost paid at a rare event, never in a hot path, and never during a backup.
 
-- **The config key is `vault.session_ttl`, default 15m, live-editable, no restart.** Not under
+- **The config key is `vault.session_ttl_minutes`, default 15, live-editable, no restart.** Not under
   `sessions:` — fact 12: that namespace is the **login** session's, and two different objects under
   one word in one file is a config a person cannot read. Changing it does not extend a session already
   running; the expiry is stamped at unlock, which is what makes `expires_at` a fact rather than a
   recomputation.
+  **This spec said `vault.session_ttl` until the slice that built it.** The file's convention is
+  integer minutes with the unit in the name — `reconcile.interval_minutes` and all three
+  `notifications.*` keys — and a duration string would have been the first in `config.yml`. The
+  convention won; recorded here rather than silently renamed, because a spec and a config key that
+  disagree is what a reader trips over later. **And `0` means the default, never "no expiry"**: a
+  session holds live keys, so an unbounded one must not be reachable by typing a zero.
 - **A session belongs to the daemon, not to a browser session.** It is addressed by id, and every
   route is behind `authGuard` like the rest of `/api`. Scoped per-principal access is the
   delegated-access rung's (contracts §1), and this rung adds nothing that assumes one principal
@@ -484,7 +490,7 @@ only what it proves — which is the point of raising it before the gate runs ra
 8. **An unencrypted version browses without a password**, and the UI does not ask for one. (D7)
 9. **Lock wipes.** After `lock`, the scratch dir for that session is gone, the keys are gone, and the
    session id answers `404` on browse. (D9)
-10. **TTL locks it for you.** A session past `vault.session_ttl` is torn down by the same path as an
+10. **TTL locks it for you.** A session past `vault.session_ttl_minutes` is torn down by the same path as an
     explicit lock, with the same wipe. (D9)
 11. **A crash does not leave plaintext.** A daemon killed mid-session leaves no decrypted
     `Manifest.db` outside `/cache/scratch/`, and the next start wipes what is inside it. (D6, D9)
@@ -560,7 +566,7 @@ Every hard rule this rung touches *or comes near*, written before building.
 | **Never mutate a committed version** | **The rung's central near-miss.** The vault is a **reader** and opens `browse_root` **read-only**; it never opens a storage backend for write, creates no working copy, and takes no part in commit. On zfs `browse_root` goes through `.zfs/snapshot/…`, read-only by nature. Nothing here changes when quince#591's in-place ruling is built, because a reader of `latest/` reads the newest committed version either way. The one thing this rung writes to disk is the decrypted manifest, which D6 confines to `/cache/scratch/` — **never** into the version tree. |
 | **No silent caps or fallbacks** | D3 discloses the clamped limit. D8.1 refuses to pad a truncated file and names why a retry will not help. D8 refuses to collapse `not_a_file` into `not_found`. D7 refuses to accept an ignored password as if it had been checked. G1 names what the suite does not cover instead of implying totality. |
 | **Troubleshooting is ACTIONABLE** | D8's whole table is this rule: each code names a distinguishable cause with a different remedy. D2.1's canary failure names the absence rather than passing vacuously. D7's unencrypted path says what it is doing with the password field instead of removing it silently. |
-| **Config tidiness (D12)** | **One key added** — `vault.session_ttl` — with a default, UI-editable, live, no restart. It goes under a **new `vault:` section** rather than the existing `sessions:` (fact 12), because two different objects under one word is a file a person cannot hand-edit. No secret enters `config.yml`: the backup password is never stored anywhere, which is what makes the whole rung passwordless-at-rest. |
+| **Config tidiness (D12)** | **One key added** — `vault.session_ttl_minutes` — with a default, UI-editable, live, no restart. It goes under a **new `vault:` section** rather than the existing `sessions:` (fact 12), because two different objects under one word is a file a person cannot hand-edit. No secret enters `config.yml`: the backup password is never stored anywhere, which is what makes the whole rung passwordless-at-rest. |
 | **Secrets discipline** | The password arrives in a `POST` body over the authenticated API, reaches `Unlock` in memory, and reaches **no** argv, env, log or disk (G3). It is not persisted between sessions by construction — contracts §1 already says *"the password is never persisted — unlock is per-session, always."* Under D1 there is no subprocess to feed it to; if the sidecar ever wins (D10.4), the stdin-only rule in contracts §4 governs and is unchanged. |
 | **Subprocesses** | **None.** Option 3 spawns no process this rung. The rule binds again only if D10 sends the vault to a sidecar, whose rung inherits it whole. |
 | **Every hardware bug becomes a replay fixture** | No device tooling is touched. G4 is where hardware meets this rung, and anything it finds becomes a fixture through the generator (D5) rather than through a captured backup — which is what makes that possible at all here. |
@@ -580,9 +586,9 @@ Each is one PR carrying one reviewable claim, **sequenced from `main`, not stack
 | **2** | **the spike** — the standalone harness, the three curves on synthetic manifests, the number for clauses (a) and (b), and stack D4's open paragraph replaced by it (D10). Clause (c) is **not** measurable here (D10.3b) | **yes** (D5, for the generator) |
 | **3** | `vault.Vault` + the conformance suite and its negative control, against the in-process encrypted implementation — quince#184 (D1, D2, D5, G1, G2) | **yes** (D4, D5, D6) |
 | **4** | the unencrypted implementation and the selection on `IsEncrypted` (D7) | yes |
-| **5** | the session registry, `vault.session_ttl`, teardown and the scratch wipe, plus G3, G5 and **G7 — D10.3 clause (c), the one measurement the spike cannot take** (D6, D9, D10.3b) | no |
+| **5** | the session registry, `vault.session_ttl_minutes`, teardown and the scratch wipe, plus G3, G5 and **G7 — D10.3 clause (c), the one measurement the spike cannot take** (D6, D9, D10.3b) | no |
 | **6** | the four REST endpoints, the error taxonomy and contracts §4/§2's amendment (D3, D8) | no |
-| **7** | the UI — unlock dialog, browser, download, and the incomplete-file surface (D8.1) | no |
+| **7** | the UI — unlock dialog, browser, download, the incomplete-file surface (D8.1), **and the Settings control for `vault.session_ttl_minutes`** | no |
 | **8** | design §7 and §6 rewritten to the seam as built, including D11's gate wording, ruled with the number from slice 2 | no |
 
 **One `ios-backup-crypt` release gates slices 2–4**, and it is one release rather than three: `ios-backup-crypt`
@@ -593,3 +599,11 @@ assumed, because quince#270 §1 assumed the second of the three and it was not t
 
 **Slice 2 comes before any vault code exists**, which is the ruling's own condition: the measurement
 must not arrive as an implementation to bless.
+
+**The config key lands in slice 5 and its SCREEN lands in slice 7, and that gap is declared rather
+than discovered.** D12 requires every setting to be UI-editable, and a key shipped without a control
+is precisely what qn.12 was caught on (quince#1212 — *"the rung shipped the config keys with no
+screen"*). It is acceptable here only because the rung is mid-flight and the control has a named
+home; it stops being acceptable the moment this rung is called done with slice 7 unbuilt. The key is
+hand-editable and live from slice 5, so nothing is unreachable in the meantime — it is the screen
+that is owed, not the setting.
