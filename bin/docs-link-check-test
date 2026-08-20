@@ -26,34 +26,48 @@ bad() {
 }
 
 WORK=$(mktemp -d)
-trap 'rm -rf "$WORK"' EXIT INT TERM
+trap 'rm -rf "$WORK" 2>/dev/null || true' EXIT INT TERM
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
 # fresh_repo — a synthetic tree with this repository's shape. The tool reads `git ls-files`, so
 # everything must be ADDED or it does not exist as far as the check is concerned — which is itself
-# the property part 7 pins.
+# the property part 8 pins.
+#
+# A NEW DIRECTORY EACH TIME, NEVER A REUSED ONE. The obvious form is `rm -rf "$R"` at the top,
+# and it FAILS IN THE CONTAINER while passing on the host: `rm -rf` on a `.git` directory answered
+# `can't remove '…/r/.git': Directory not empty`, `set -e` took the non-zero, and the suite died
+# mid-run after its 18th assertion — reported as a suite failure with no failing assertion in the
+# output, which is the worst shape a test can have.
+#
+# Counting up costs nothing and removes the failure mode rather than tolerating it: no fixture ever
+# has to be deleted while the suite is running, and each one is left intact for the trap to take at
+# the end. Deleting only at exit also means a fixture is still on disk if an assertion fails, which
+# is what you want when reading a failure.
+FIXTURE_N=0
+R=''
 fresh_repo() {
-	rm -rf "$WORK/r"
-	mkdir -p "$WORK/r/bin" "$WORK/r/deploy" "$WORK/r/docs/specs/qn.1" "$WORK/r/ui/src/components"
-	git init -q "$WORK/r"
-	cp "$DLC" "$WORK/r/bin/docs-link-check"
-	printf 'x\n' >"$WORK/r/deploy/compose.yml"
-	printf 'x\n' >"$WORK/r/deploy/storage.md"
-	printf '# readme\n' >"$WORK/r/README.md"
-	printf '# deploy\n' >"$WORK/r/deploy/README.md"
+	FIXTURE_N=$((FIXTURE_N + 1))
+	R="$WORK/r$FIXTURE_N"
+	mkdir -p "$R/bin" "$R/deploy" "$R/docs/specs/qn.1" "$R/ui/src/components"
+	git init -q "$R"
+	cp "$DLC" "$R/bin/docs-link-check"
+	printf 'x\n' >"$R/deploy/compose.yml"
+	printf 'x\n' >"$R/deploy/storage.md"
+	printf '# readme\n' >"$R/README.md"
+	printf '# deploy\n' >"$R/deploy/README.md"
 }
 
-commit_all() { git -C "$WORK/r" add -A && git -C "$WORK/r" commit -qm t; }
+commit_all() { git -C "$R" add -A && git -C "$R" commit -qm t; }
 
 # `set +e` inside the subshell: these helpers exist to CAPTURE a non-zero exit, and under `set -e`
 # the subshell dies before `echo $?` runs. Same shape as bin/gate-scope-test's note.
-run() { (set +e; cd "$WORK/r" && ./bin/docs-link-check >"$WORK/out" 2>&1; echo $?); }
+run() { (set +e; cd "$R" && ./bin/docs-link-check >"$WORK/out" 2>&1; echo $?); }
 out() { cat "$WORK/out"; }
 
 # --- 1. A CLEAN TREE IS CLEAN (the positive control) -------------------------------------------
 # Without this, a tool that reported everything broken would pass every negative test below.
 fresh_repo
-printf 'see [compose](deploy/compose.yml)\n' >>"$WORK/r/README.md"
+printf 'see [compose](deploy/compose.yml)\n' >>"$R/README.md"
 commit_all
 rc=$(run)
 if [ "$rc" = 0 ]; then ok "a tree whose links all resolve exits 0"; else
@@ -67,7 +81,7 @@ esac
 
 # --- 2. quince#1313 INSTANCE 1: A RELATIVE LINK TO A FILE THAT DOES NOT EXIST -------------------
 fresh_repo
-printf 'see [compose](deploy/not-yet.yml)\n' >>"$WORK/r/README.md"
+printf 'see [compose](deploy/not-yet.yml)\n' >>"$R/README.md"
 commit_all
 rc=$(run)
 if [ "$rc" = 1 ]; then ok "a relative link to a missing file is a finding (exit 1)"; else
@@ -83,7 +97,7 @@ esac
 # The install block was `wget https://raw.githubusercontent.com/…/main/deploy/compose.yml`. There is
 # no `](…)` anywhere near it, so a relative-link scanner alone would have said nothing.
 fresh_repo
-printf 'wget https://raw.githubusercontent.com/novkostya/quince/main/deploy/absent.yml\n' >>"$WORK/r/README.md"
+printf 'wget https://raw.githubusercontent.com/novkostya/quince/main/deploy/absent.yml\n' >>"$R/README.md"
 commit_all
 rc=$(run)
 if [ "$rc" = 1 ]; then ok "a raw.githubusercontent URL into our own main is checked (exit 1)"; else
@@ -91,7 +105,7 @@ if [ "$rc" = 1 ]; then ok "a raw.githubusercontent URL into our own main is chec
 	out | sed 's/^/    | /'
 fi
 fresh_repo
-printf 'see https://github.com/novkostya/quince/blob/main/deploy/absent.md\n' >>"$WORK/r/README.md"
+printf 'see https://github.com/novkostya/quince/blob/main/deploy/absent.md\n' >>"$R/README.md"
 commit_all
 if [ "$(run)" = 1 ]; then ok "...and so is the blob/main form, which is what DocLink builds"; else
 	bad "the blob/main URL form was not caught"
@@ -101,7 +115,7 @@ fi
 # It is a claim about a different tree, which this working copy cannot settle. Judging it here would
 # produce a permanent false finding on every release link.
 fresh_repo
-printf 'see https://github.com/novkostya/quince/blob/v0.1.0/deploy/absent.md\n' >>"$WORK/r/README.md"
+printf 'see https://github.com/novkostya/quince/blob/v0.1.0/deploy/absent.md\n' >>"$R/README.md"
 commit_all
 if [ "$(run)" = 0 ]; then ok "a URL pinned to a tag is left alone — it is not a claim about this tree"; else
 	bad "a tag-pinned URL was judged against the working tree"
@@ -112,7 +126,7 @@ fi
 # The sharper half: DocLink builds a blob/main URL with no validation, so a stale path is a silent
 # 404 for a reader who followed a link THE PRODUCT gave them.
 fresh_repo
-printf 'export const X = () => <DocLink path="deploy/gone.md" />;\n' >"$WORK/r/ui/src/components/D.tsx"
+printf 'export const X = () => <DocLink path="deploy/gone.md" />;\n' >"$R/ui/src/components/D.tsx"
 commit_all
 rc=$(run)
 if [ "$rc" = 1 ]; then ok "a UI doc path that does not resolve is a finding (exit 1)"; else
@@ -128,7 +142,7 @@ esac
 # OnboardingHTTPSPage passes a `docs` prop assigned three lines from the DocLink that renders it, so
 # a matcher looking for `DocLink path=` would miss exactly the case a stale path hides behind.
 fresh_repo
-printf 'const docs = "deploy/gone.md";\nexport const X = () => <Row docs={docs} />;\n' >"$WORK/r/ui/src/components/D.tsx"
+printf 'const docs = "deploy/gone.md";\nexport const X = () => <Row docs={docs} />;\n' >"$R/ui/src/components/D.tsx"
 commit_all
 if [ "$(run)" = 1 ]; then ok "a doc path reached through a variable is caught — the matcher is by shape"; else
 	bad "an indirected doc path was missed; the matcher has become component-name-keyed"
@@ -137,7 +151,7 @@ fi
 # --- 6. THE THINGS THAT MUST NOT FIRE -----------------------------------------------------------
 # Each of these is a correct construct. A gate that fires on them is one people learn to skim.
 fresh_repo
-cat >>"$WORK/r/README.md" <<'MD'
+cat >>"$R/README.md" <<'MD'
 [external](https://example.com/nope.md)
 [mail](mailto:someone@example.com)
 [anchor](#a-heading)
@@ -153,7 +167,7 @@ fi
 
 # THE ANCHOR CONTROL. `file.md#section` must resolve the FILE — asserted by breaking the file.
 fresh_repo
-printf '[with anchor](deploy/absent.md#section)\n' >>"$WORK/r/README.md"
+printf '[with anchor](deploy/absent.md#section)\n' >>"$R/README.md"
 commit_all
 if [ "$(run)" = 1 ]; then ok "...and file#anchor still checks the FILE (the control for the line above)"; else
 	bad "a fragment made a broken link invisible"
@@ -163,21 +177,21 @@ fi
 # The one piece of arithmetic that, if wrong, makes every link in a subdirectory look broken — or
 # worse, makes a broken one look fine.
 fresh_repo
-printf '[sibling](storage.md)\n' >>"$WORK/r/deploy/README.md"
+printf '[sibling](storage.md)\n' >>"$R/deploy/README.md"
 commit_all
 if [ "$(run)" = 0 ]; then ok "a sibling link in a subdirectory resolves against its own directory"; else
 	bad "a valid sibling link was reported broken — resolution is against the root, not the file"
 	out | sed 's/^/    | /'
 fi
 fresh_repo
-printf '[up and over](../README.md)\n' >>"$WORK/r/deploy/README.md"
+printf '[up and over](../README.md)\n' >>"$R/deploy/README.md"
 commit_all
 if [ "$(run)" = 0 ]; then ok "a ../ link resolves without realpath (which would follow symlinks)"; else
 	bad "a ../ link was reported broken"
 	out | sed 's/^/    | /'
 fi
 fresh_repo
-printf '[sibling](absent.md)\n' >>"$WORK/r/deploy/README.md"
+printf '[sibling](absent.md)\n' >>"$R/deploy/README.md"
 commit_all
 if [ "$(run)" = 1 ]; then ok "...and a BROKEN sibling link is still caught (the control)"; else
 	bad "subdirectory resolution passes everything — it is not checking"
@@ -187,9 +201,9 @@ fi
 # The question a link asks is "what does a reader who clones this get". A file present only in
 # somebody's working copy must not satisfy it.
 fresh_repo
-printf '[untracked](deploy/local-only.md)\n' >>"$WORK/r/README.md"
+printf '[untracked](deploy/local-only.md)\n' >>"$R/README.md"
 commit_all
-printf 'x\n' >"$WORK/r/deploy/local-only.md" # exists on disk, never added
+printf 'x\n' >"$R/deploy/local-only.md" # exists on disk, never added
 if [ "$(run)" = 1 ]; then ok "an UNTRACKED target does not satisfy a link — a reader would not get it"; else
 	bad "an untracked file satisfied a link; the check reads the disk rather than the tree"
 	out | sed 's/^/    | /'
@@ -199,7 +213,7 @@ fi
 # Specs routinely cite paths the rung is about to create. That is correct, and would otherwise be a
 # permanent finding. Excluded deliberately — and COUNTED, so the exclusion is visible rather than silent.
 fresh_repo
-printf '[future](../../deploy/not-built-yet.md)\n' >"$WORK/r/docs/specs/qn.1/qn.1.md"
+printf '[future](../../deploy/not-built-yet.md)\n' >"$R/docs/specs/qn.1/qn.1.md"
 commit_all
 rc=$(run)
 if [ "$rc" = 0 ]; then ok "a spec citing a path its rung will create is not a finding"; else
@@ -216,9 +230,9 @@ esac
 # awk/sed errors about them — a diagnostic that is really an internal error teaches a reader to
 # ignore the output.
 fresh_repo
-printf '[ok](deploy/compose.yml)\n' >>"$WORK/r/README.md"
+printf '[ok](deploy/compose.yml)\n' >>"$R/README.md"
 commit_all
-rm "$WORK/r/deploy/storage.md"
+rm "$R/deploy/storage.md"
 run >/dev/null
 case "$(out)" in
 *"awk:"* | *"sed:"* | *"No such file or directory"*)
