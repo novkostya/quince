@@ -502,11 +502,6 @@ slice most likely to be got wrong, because D4's subject field is the whole of ru
 **6 COMES AFTER 5 BECAUSE IT REMOVES A GUARD.** Rule 2 makes the lockout checks redundant *given rule
 1*; taking them out first would leave a window in which nothing prevents the quince#888 takeover.
 
-**This paragraph said *"5 COMES AFTER 4"* until slice 6a, and both numbers were one behind** — it was
-written when rule 1 was slice 4 and rule 2 was slice 5, and survived the renumbering that moved the
-UI prompt ahead of the rules. It named the right ORDER against the wrong rows, which is the failure
-mode a reader cannot spot: the sentence is coherent, and only the table disagrees.
-
 **7 IS A SEPARATE SLICE RATHER THAN PART OF 4** so that the copy can be reviewed against the shipped
 behaviour rather than against a promise, and so a wording objection does not hold up a security fix.
 

@@ -5,12 +5,6 @@
 > with it** — `/etc/quince-devct-stamp` on each reads `alpine=3.24 versions=8c32bf735761
 > built=2026-07-25T20:24:50Z`, written by `devct-template`.
 >
-> **This line read "No code exists" until 2026-07-29**, long after the code did. Together with an
-> equally stale header in `deploy/devct/devct` and the 2026-07-28 ruling that retired the
-> *disposable* dev container, it nearly authorised deleting the only reproducible rebuild path
-> either box has. Corrected here rather than quietly, because the failure was not one wrong line —
-> it was three sources agreeing, all of them written before the same change.
->
 > **What the ruling retired** is the disposable per-unit-of-work container (`create <n>`'s numbered
 > series, routine `destroy`, `deploy`) — not `devct-template`, `onboard`, `doctor`, `list`, or
 > `create --name <host> --role <implementer|arch>`, which are how the two persistent boxes exist.

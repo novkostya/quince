@@ -498,9 +498,7 @@ Written before building. Every rule this rung touches **or comes near**, includi
 Rung-local: inside this rung's boundary, changing no contract surface, no storage lifecycle and no
 behaviour beyond this rung. Recorded here per the gap protocol.
 
-1. **The details page route is `storage/:name`.** This read *"`storage/:id`, and `:id` is whatever
-   gap B rules the identity to be"* until quince#570 was ruled — **gap B no longer decides the
-   identity, so a decision that keeps deferring to it points at nothing.** The API addresses a
+1. **The details page route is `storage/:name`.** The API addresses a
    storage by its config `name`, so a route keyed on anything else would have to translate, and for
    a storage that never came up there is nothing to translate *from*. Written here so PR 5 does not
    re-derive it. Open question 3 is a different question — whether `Storage.id` is still *emitted* —
@@ -519,8 +517,6 @@ behaviour beyond this rung. Recorded here per the gap protocol.
    distinction, and do not file it as a bug.** The wire names stay prefixed regardless, so the
    contract remains honest for API clients even where the card renders no caveat.
 
-   Kept struck rather than deleted, because G1b and the card copy were specified against the retired
-   version and a reader comparing them needs to see what changed.
 3. **Counts INCLUDE `missing` versions, and the card does not distinguish them.** Fact 3 shows the
    tree already splits on this. `UDIDsWithVersions`' reasoning wins — a version whose artifact is
    gone is still history the user should see — and the card is a glance surface, so a second number
@@ -543,10 +539,9 @@ behaviour beyond this rung. Recorded here per the gap protocol.
    quince#443. The `contracts.md` blocks are flipped to decided text in the same PR as this line,
    and the devlog dashboard's open questions 2 and 3 are cleared alongside it. **The park is lifted
    by that PR landing** — not by the ruling comment, and not by quince#573 having merged.
-2. **quince#569 is OPEN. quince#570's ADDRESSING half is RULED and the dependency runs the OTHER
-   way from what this section first said.** An earlier draft had gap B's ruling answering quince#570;
-   it is the reverse — quince#570 was ruled on 2026-08-02 at `20:02:51`, six minutes before this
-   spec's PR opened, and **it constrains gap B** rather than waiting on it. Both candidates in gap B
+2. **quince#569 is OPEN. quince#570's ADDRESSING half is RULED, and it CONSTRAINS gap B rather than
+   waiting on it** — quince#570 was ruled on 2026-08-02 at `20:02:51`, six minutes before this
+   spec's PR opened. Both candidates in gap B
    are now `{name}`-addressed and the question narrows to *resource-delete versus config mutation*.
    Neither issue is fixed here (see Boundary). What remains open on quince#570 is the
    `ResolutionMissingMedium` field-carrying half and the `Storage.id` question below.
@@ -581,15 +576,12 @@ behaviour beyond this rung. Recorded here per the gap protocol.
 
 ## PR slicing
 
-**The flip clause changed, and the change is recorded rather than silent.** This read *"each code PR
-flips its `PROPOSED (gap)` block in canon to decided text"* — the `qn.6c` sequence, where the
-rulings arrived after the spec merged. **That is not what happened here.** quince#573 merged on
-2026-08-03 carrying both blocks live, the Operator ruled both hours later, and **one PR flips both
-blocks before any code opens.** So PRs 3 and 6 implement against decided canon with nothing to flip.
+**One PR flips both `PROPOSED (gap)` blocks before any code opens.** quince#573 merged on
+2026-08-03 carrying both blocks live and the Operator ruled both hours later, so PRs 3 and 6
+implement against decided canon with nothing to flip.
 
 A slicing table is a **status table** (quince#409) — a second part describing the whole, with the
-same staleness property and no defence but somebody reading it. That is why this clause is corrected
-in the same diff as the flip rather than in a follow-up.
+same staleness property and no defence but somebody reading it.
 
 | PR | claim | approval |
 | --- | --- | --- |

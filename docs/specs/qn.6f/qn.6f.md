@@ -185,11 +185,9 @@ address in `QUINCE_TRUSTED_PROXIES`** — an unset list believes anyone, which i
 old behaviour. This reuses `auth.SecureOrigin` rather than re-deriving it, which is the point: the
 gating arrived in one place and every consumer got it.
 
-*This paragraph said the header could be trusted unconditionally and that `auth.secureCookie`
-"already trusts it on exactly that reasoning". Both stopped being true when quince#567 landed. The
-justification was sound for the COOKIE and wrong for the two consumers that invert the predicate —
-the `426` refusal and this very check — which both fail toward "everything is fine" on an injected
-header.*
+*The header must NOT be trusted unconditionally here. `auth.secureCookie` can trust it; the two
+consumers that INVERT the predicate — the `426` refusal and this very check — cannot, because both
+fail toward "everything is fine" on an injected header.*
 
 **Consequence worth stating: the one configuration already in production use meets zero friction.**
 The Operator terminates TLS in a reverse proxy, so the running deployment never sees this page. That
@@ -241,8 +239,8 @@ self-signed does not cost push sometimes; it forecloses it structurally.** Again
 bring-your-own-cert — same listener, same two config keys, a real certificate and a genuine secure
 context — the tier is dominated.
 
-**The design below is kept rather than deleted**, because it is what a future self-signed path would
-have to satisfy and it was reviewed: never beside a supplied certificate (that path is `:ro` in the
+**The design below is what a future self-signed path would have to satisfy**, and it was reviewed:
+never beside a supplied certificate (that path is `:ro` in the
 deployment the option exists for, and a generator assuming a writable output directory fails on
 exactly it — G4); output under `Bootstrap.Data` alongside `config.yml` and `quince.db`; `0600` on
 the key.
@@ -340,7 +338,7 @@ Each is independently checkable. Slice membership in *PR slicing*, below.
 8. **The supplied certificate directory is never written to**, asserted with it mounted read-only.
 9. ~~**Self-signed generation** writes to quince's own state directory, `0600` on the key.~~
    **DROPPED — ruled 2026-08-02** (quince#462); check 1 came back confirming that a click-through
-   certificate forecloses service workers. Struck rather than deleted: the story list is cited.
+   certificate forecloses service workers. This list is cited by number — do not renumber it.
 10. **`deploy/` prose** for the reverse-proxy and `tailscale serve` setups the top tier links to,
     distinguishing `tailscale serve` (tier 1, zero build) from `tailscale cert` (tier 2, needs the
     listener).
@@ -424,10 +422,8 @@ Every hard rule this rung touches *or comes near*, one line each. Near-misses in
   *listener*, which reads that directory on every handshake for rotation, not the generator that is
   no longer built. No storage tree is touched by this rung at all.
 - **Subprocesses.** None. **Test** certificates are minted in-process with `crypto/x509`; nothing
-  shells out to `openssl`. This line used to be about the generator slice 7 would have shipped; it
-  still binds, because the fixtures need certificates whether or not the product mints any. Named
-  because reaching for `openssl` is the obvious wrong turn and it would put a key
-  path in argv.
+  shells out to `openssl`. The fixtures need certificates whether or not the product mints any, and
+  reaching for `openssl` is the obvious wrong turn — it would put a key path in argv.
 - **Every bug found on hardware becomes a replay fixture.** None found yet; G7 is where one would
   come from.
 
@@ -536,8 +532,7 @@ place the login form is not where that audience ends up anyway.
    ruling removes the pair problem entirely**: one port means `8443` never enters the picture.
 3. ~~**The `secureCookie` gap** (design §6, quince#487). Blocks slice 4 entirely.~~ **RULED
    2026-08-02** (quince#446) — option (b). Slice 4 is unblocked; see *Contract and design changes*
-   for what its PR owes. Struck rather than deleted: this list is cited, and a reader arriving from
-   a citation needs to see that it moved rather than find it missing.
+   for what its PR owes. This list is cited by number — do not renumber it.
 
 **Three live checks**, per *interface facts are looked up live*. Reported separately on quince#462
 rather than asserted here.

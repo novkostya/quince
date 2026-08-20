@@ -252,7 +252,7 @@ owns the privileged FICLONE — it just clones **into `working/`** now instead o
 | **zfs, exec / hookless** | in-container `clonetree` ladder **reflink → copy** (the hardlink tier is gated to copy for the seed until 12c — amendment A; surfaced) | in-container | exec/host |
 | **reflink / hardlink / copy** | in-container `clonetree.Clone(working/<udid>, latest, <the backend's own strategy>)` — amendment A's hardlink→copy downgrade is **retired**, quince#518 | in-container | n/a |
 
-> **Amendment A ((co)) — RETIRED 2026-08-10 by gate 12c, quince#518.** It read: *the seed clone is
+> **Amendment A ((co)) — RETIRED 2026-08-10 by gate 12c, quince#518.** It required that *the seed clone is
 > NEVER hardlink until 12c*, because seeding the hardlink backend makes `working/<udid>` share
 > inodes with the committed `latest/`, so an in-place write by `idevicebackup2` — any file class not
 > yet on `clonetree.MutatesInPlace` — would corrupt the committed version through the alias. A
@@ -520,8 +520,7 @@ result under the new lifecycle).
   storage-touching rung to re-prove its model's invariant — G-snapshot/G-rclone/G-resume do).
 - **No silent caps or fallbacks.** Seed **reflink → copy** degradations are surfaced (log + health),
   same as today's ladder. The hardlink tier is gated to copy for the seed (amendment A, 12c
-  deferred) — qn.5b does **not** rely on unproven hardlink correctness (the earlier draft's
-  "reflink seed" prose did, which is exactly what amendment A caught). **Compliant.**
+  deferred) — qn.5b does **not** rely on unproven hardlink correctness. **Compliant.**
 - **Config tidiness (D12).** The one config touch (`storage.zfs.mirror` → `seed`, iff approved) keeps
   a generated doc-comment, a sane default (`auto`), UI-editability, no restart requirement, no secret.
   No new UI-only or env-only state. **Compliant (pending gate decision 6).**
@@ -560,7 +559,7 @@ result under the new lifecycle).
 Architectural forks resolved by the (co) ruling (recorded in the decisions log); rung-local calls
 settled here as they land:
 
-- **(co-A) Seed strategy is safe, never hardlink — RETIRED 2026-08-10, quince#518.** It read: `seedStrategy(clonetree.Strategy)` maps
+- **(co-A) Seed strategy is safe, never hardlink — RETIRED 2026-08-10, quince#518.** It required that `seedStrategy(clonetree.Strategy)` map
   `Hardlink → Copy` (surfaced), `Reflink`/`Copy` pass through; used by every seed path (namespace
   `WorkDir`, zfs exec/hookless in-container seed). The zfs-hook `seed` verb reflinks host-side
   (safe). *rung-ruled detail:* the zfs in-container seed ladder is **reflink → copy** (no hardlink

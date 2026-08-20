@@ -705,10 +705,8 @@ name=gates`, `event=mergeability pr=19 status=BEHIND`, `event=merged pr=19`, `ev
 loop's own two exits, §4e). `event=stalled` is specified by story 6 and not yet implemented — see the
 declared debt in §4b.
 
-*(The earlier draft of this block listed a `forge-watch arm --watch pr:19` verb. Nothing of the sort
-was ever built — the watch enumerates the queue every tick precisely so that nothing is bound at arm
-time — and a design doc advertising a verb that does not exist is the claim rule pointed at ourselves.
-Corrected here rather than left for a reader to try.)*
+*(The watch enumerates the queue every tick precisely so that nothing is bound at arm time. There is
+no `forge-watch arm --watch pr:19` verb and there never was one — do not document one.)*
 
 On the runner, an OpenRC-supervised timer runs `tick` and pipes events to a dispatcher that starts **one fresh
 session per event** — `/kickoff <pr>` for the implementer side, `/review-pr <n>` for the reviewer
@@ -841,9 +839,8 @@ allowance faster for no benefit.
 ## Gates
 
 - **G1 (fixtures, no network)** — **`make forge-watch-test`, which `make gates-sh` invokes, so CI
-  runs it on every PR** (quince#64). Until 2026-07-27 this gate was run by nothing: every round of
-  this work proved it by hand and pasted the output into the PR, which is honest only while somebody
-  keeps doing it. It runs **host-side**, beside the containerised shellcheck rather than inside it,
+  runs it on every PR** (quince#64). It runs **host-side**, beside the containerised shellcheck
+  rather than inside it,
   because the loop fixtures below need a subprocess and a clock — that was quince#64's open question
   and this is its answer. Measured at ~23 s for all 38 fixtures — and the count is **asserted, not
   just documented**: `replay` prints `forge-watch: N fixtures pass`, so a suite that has silently

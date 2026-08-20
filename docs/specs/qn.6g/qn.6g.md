@@ -291,13 +291,7 @@ they never differ.**
 
 ---
 
-### The question as it was asked, kept because the reasoning that lost is what makes a ruling checkable later
-
-**This paragraph asserted the wrong thing, and PR 4 measured it.** It read:
-
-> **An in-flight job keeps the storage it started on, and that is correct.** It holds a copied
-> `Slot`, so it completes against the disk it began writing to … the storage leaves the list
-> immediately, and the job that is using it finishes. Story 6 and G5.
+### Forgetting a storage mid-backup is a gap
 
 **The engine does not hold a copied `Slot`.** Every phase — `Seed`, `PrepareWork`, `SeedWork`,
 `CommitJob`, `Discard`, `VerifyWork` — re-resolves through `Manager.jobSlot(jobID)`, which looks the
@@ -345,15 +339,9 @@ is ruled, and under (a) or (b) its G5 becomes assertable rather than aspirationa
 
 ---
 
-**The paragraph this block replaced does NOT come back.** It survived here for one draft as *"once
-ruled, it becomes true again — forgotten and no-longer-in-use differ for the duration of a job"*, and
-that sentence was written expecting (a). **(b) was ruled**, and under (b) the two never differ: a
-forget either happens, in which case no job was running on it, or it is refused, in which case
-nothing left the list. There is no interval to describe.
-
-Kept as a correction rather than deleted, because *"it becomes true again"* is exactly the shape a
-later reader would restore in good faith — a sentence the spec once asserted, marked as merely
-pending. It is not pending; it lost.
+**Under (b), *forgotten* and *no-longer-in-use* never differ.** A forget either happens, in which
+case no job was running on that storage, or it is refused, in which case nothing left the list.
+There is no interval to describe, and a sentence describing one would be wrong.
 
 ### The per-setting answer — the actual deliverable
 
@@ -362,7 +350,7 @@ bins impossible to fill honestly.
 
 | key | verdict | why |
 | --- | --- | --- |
-| ~~`backup.transport`~~ | **THE KEY NO LONGER EXISTS** | This read *"nothing reads it — quince#654"*, true the day it was written. quince#654 **renamed** it `preferred_transport` and gave it a consumer four days later, and PR 5 wired it live. **The canonical table is contracts §6**, which is where PR 6 put it; this row stays struck rather than deleted because PR 5's own note points at it. |
+| ~~`backup.transport`~~ | **RENAMED `preferred_transport`** | quince#654 renamed it and gave it a consumer; PR 5 wired it live. **The canonical table is contracts §6.** |
 | `backup.require_encryption` | **live** | Read per job (fact 8); the applier swaps one synchronized field. A running job keeps its answer. |
 | `storage[]` (membership) | **live** | The ruled first consumer. |
 | `storage[].path` / `.backend` / `.zfs.*` | **live** | Re-resolved by the same `resolveSlot` a restart uses (fact 4). What happens to an in-flight job is the `PROPOSED (gap)` above. |
