@@ -660,7 +660,7 @@ export function AddStorageForm({
             <div className="text-sm">
               quince can&apos;t run <code>zfs</code> from inside its container — that&apos;s normal.
               It calls a helper on the host over SSH instead, which you install first: see{" "}
-              <DocLink path="deploy/storage.md" />.
+              <DocLink path="deploy/zfs-helper.md" />.
             </div>
 
             <label className="mt-3 block text-sm font-medium" htmlFor="zfs-parent">
