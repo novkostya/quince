@@ -318,7 +318,10 @@ func FinishPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, key, nam
 		Name:           name,
 		CreatedAt:      now,
 	}
-	if err := st.InsertPasskey(pk); err != nil {
+	// THE ADMIN CEREMONY STATES ITS SCOPE, rather than being correct by falling through a
+	// default. This is the only registration path today; the scoped one arrives with
+	// enrolment, and when it does the compiler will require it to answer this same question.
+	if err := st.InsertPasskey(pk, store.AdminScope()); err != nil {
 		return store.Passkey{}, err
 	}
 	return pk, nil

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -16,8 +17,7 @@ func seedScoped(t *testing.T, st *store.Store, id string, scopeUDID *string) {
 		RPID:         rpHome,
 		Name:         id,
 		CreatedAt:    time.Now().UTC(),
-		ScopeUDID:    scopeUDID,
-	}); err != nil {
+	}, scopeArg(scopeUDID)); err != nil {
 		t.Fatalf("seed %s: %v", id, err)
 	}
 }
@@ -162,4 +162,73 @@ func TestPreScopeCredentialReadsAsAdmin(t *testing.T) {
 	if got.ScopeUDID != nil {
 		t.Fatalf("a pre-scope credential gained a scope: %q", *got.ScopeUDID)
 	}
+}
+
+// THE REFUSAL THE MIGRATION'S ACCEPTANCE RESTS ON (quince#1361 review).
+//
+// 0015 accepts "NULL means admin" only because the Go layer will not guess for a new credential.
+// Before this, `InsertPasskey` took a struct, a struct field is not a required argument, and a
+// ceremony that omitted it wrote an ADMIN credential silently — the lockout from the write path
+// instead of a predicate. Omission is now a compile error; these cover what a compile error cannot.
+func TestInsertPasskeyRefusesAnUnstatedScope(t *testing.T) {
+	svc, _ := newTestAuth(t)
+	err := svc.store.InsertPasskey(store.Passkey{
+		CredentialID: "no-scope",
+		PublicKey:    []byte("k"),
+		RPID:         rpHome,
+		Name:         "x",
+		CreatedAt:    time.Now().UTC(),
+	}, store.Scope{}) // the zero value — what a forgetful caller would reach for
+	if !errors.Is(err, store.ErrScopeUnset) {
+		t.Fatalf("a zero Scope was accepted: err=%v", err)
+	}
+	// AND NOTHING WAS WRITTEN. A refusal that still inserted would be worse than no refusal.
+	if _, ok, _ := svc.store.GetPasskey("no-scope"); ok {
+		t.Fatal("the refused credential was written anyway")
+	}
+}
+
+func TestInsertPasskeyRefusesScopeSetOnTheStruct(t *testing.T) {
+	svc, _ := newTestAuth(t)
+	udid := "DEVICE-A"
+	err := svc.store.InsertPasskey(store.Passkey{
+		CredentialID: "conflict",
+		PublicKey:    []byte("k"),
+		RPID:         rpHome,
+		Name:         "x",
+		CreatedAt:    time.Now().UTC(),
+		ScopeUDID:    &udid, // the reasonable mistake: the field exists, for reads
+	}, store.AdminScope())
+	if !errors.Is(err, store.ErrScopeConflict) {
+		t.Fatalf("a struct-set scope was silently ignored: err=%v", err)
+	}
+	// Silently ignoring it would have written an ADMIN credential where a scoped one was meant —
+	// this rung's worst failure wearing the shape of a no-op.
+	if _, ok, _ := svc.store.GetPasskey("conflict"); ok {
+		t.Fatal("the refused credential was written anyway")
+	}
+}
+
+// The constructors say what they mean, and the zero value says nothing.
+func TestScopeConstructors(t *testing.T) {
+	if !store.AdminScope().IsAdmin() {
+		t.Fatal("AdminScope is not admin")
+	}
+	if store.DeviceScope("DEVICE-A").IsAdmin() {
+		t.Fatal("a device scope reported as admin")
+	}
+	if (store.Scope{}).IsAdmin() {
+		t.Fatal("the ZERO VALUE reported as admin — the default grants, which is the whole defect")
+	}
+}
+
+// scopeArg turns this file's nil-means-admin test convention into a STATED Scope.
+//
+// The convention is the tests' own shorthand, not the store's — `InsertPasskey` will not accept a
+// nil-means-admin argument, which is the point of the refusals above.
+func scopeArg(scopeUDID *string) store.Scope {
+	if scopeUDID == nil {
+		return store.AdminScope()
+	}
+	return store.DeviceScope(*scopeUDID)
 }

@@ -116,7 +116,7 @@ func TestAPasskeyOnlyInstallIsClaimedToo(t *testing.T) {
 		RPID:      "somewhere.else",
 		Name:      "phone",
 		CreatedAt: time.Now().UTC(),
-	}); err != nil {
+	}, store.AdminScope()); err != nil {
 		t.Fatalf("seed passkey: %v", err)
 	}
 	if rec := postTransport(t, NewRouter(deps), `{"allow":true}`); rec.Code != http.StatusConflict {

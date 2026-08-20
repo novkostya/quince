@@ -20,7 +20,7 @@ func seed(t *testing.T, s *Store, id, name, rpID string, created time.Time) {
 	t.Helper()
 	if err := s.InsertPasskey(Passkey{
 		CredentialID: id, PublicKey: []byte("cose"), RPID: rpID, Name: name, CreatedAt: created,
-	}); err != nil {
+	}, AdminScope()); err != nil {
 		t.Fatalf("seed %s: %v", id, err)
 	}
 }
@@ -144,7 +144,7 @@ func TestPasskeyFlagsSurviveARoundTrip(t *testing.T) {
 	if err := s.InsertPasskey(Passkey{
 		CredentialID: "c-1", PublicKey: []byte("cose"), RPID: "quince.example.com", Name: "phone",
 		CreatedAt: now, BackupEligible: &yes, BackupState: &no,
-	}); err != nil {
+	}, AdminScope()); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
 

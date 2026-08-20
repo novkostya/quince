@@ -15,8 +15,17 @@
 -- NULL MEANS ADMIN, AND THAT IS TRUE OF EVERY ROW THAT EXISTS TODAY — which is what makes this
 -- additive with no backfill statement. It is also, deliberately, the same shape as 0014's hazard:
 -- a default that GRANTS. It is accepted for existing rows because they genuinely are admin
--- credentials; it is NOT accepted for new ones, and the Go layer refuses to guess — `InsertPasskey`
--- takes the scope as a required field and the two ceremonies each state theirs.
+-- credentials; it is NOT accepted for new ones, and the Go layer is what refuses to guess:
+-- `InsertPasskey` takes the scope as a POSITIONAL ARGUMENT of a type whose ZERO VALUE IS
+-- INVALID, so omitting it is a compile error and passing an unstated one is refused at
+-- runtime (`store.Scope`, `ErrScopeUnset`). The single ceremony that exists today states
+-- `AdminScope()` explicitly rather than being correct by falling through the default.
+--
+-- THAT PARAGRAPH DESCRIBED A PROTECTION THAT DID NOT EXIST when this migration was first
+-- written, and the review of quince#1361 caught it: `InsertPasskey` took a struct, a struct
+-- field is not a required argument, and omitting it wrote an ADMIN credential silently. The
+-- fix is above; the note stays because a migration comment asserting a guarantee is exactly
+-- how the next one gets believed without being checked.
 --
 -- THE DANGER THIS COLUMN CREATES IS THE POINT OF THE SLICE. Adding scoped rows to this table makes
 -- every existing `SELECT ... FROM passkeys` count a set it did not mean: `accepts.go` asked "is

@@ -26,7 +26,7 @@ func seedCredential(t *testing.T, st *store.Store, credID, rpID string) {
 		RPID:         rpID,
 		Name:         "phone",
 		CreatedAt:    time.Now().UTC(),
-	}); err != nil {
+	}, store.AdminScope()); err != nil {
 		t.Fatalf("seed credential: %v", err)
 	}
 }
