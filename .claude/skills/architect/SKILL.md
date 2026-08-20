@@ -492,7 +492,8 @@ before merging.
 
 **AND THIS REBASE IS THE ONE §4's CHECK CANNOT SEE UNAIDED** (quince#110). Doing it rewrites the
 review's recorded `commit_id`, so `reviews[].commit.oid` comes back equal to the new head and the
-comparison is against itself. **Note the head oid BEFORE you approve** — §4's `OLD` — or the check
+comparison is against itself. **Note the head oid BEFORE you approve, in full** — §4's `OLD`, and §4
+says why an abbreviation cannot be fetched once the head has moved — or the check
 you run after rebasing is vacuous exactly when you most need it. Never ask for a *push* to clear a red check: that moves the head off the tree you
 reviewed for no gain the rebase does not already give you.
 

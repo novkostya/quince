@@ -186,7 +186,15 @@ defect in a docs PR exactly as a failing test is in a code PR.
 ## 6. Submit the verdict
 
 **Note the head oid BEFORE you read the diff**, and pass it as `--commit-id`. It is the same value
-`/architect` §4 calls `OLD` — one oid, noted once, used for both the verdict and the staleness check:
+`/architect` §4 calls `OLD` — one oid, noted once, used for both the verdict and the staleness check.
+
+**KEEP IT IN FULL — ALL 40 CHARACTERS — WHEREVER YOU WRITE IT DOWN.** The command below hands you
+the full oid, so the only way to lose it is to shorten it by hand for a status line or a note, which
+reads as harmless because it is the same value. **It fails only in the case this rule is for.** While
+the head still exists an abbreviation resolves locally and nothing is wrong; once the head has been
+rebased away, no branch names that commit and `git fetch origin <abbreviation>` cannot reach it —
+GitHub serves an arbitrary FULL object id and refuses an abbreviation (`/architect` §4, quince#243).
+The staleness check then cannot be run at all, having been recorded correctly and written down short.
 
 ```sh
 OID=$(bin/gh-review pr view <n> --repo novkostya/quince --json headRefOid -q .headRefOid)   # BEFORE reading
