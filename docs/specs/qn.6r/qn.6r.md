@@ -253,6 +253,12 @@ is pre-release, which is what makes this affordable, and it will not be later.
 directory whose name asserts an ownership the model denies, and the next reader has to re-derive
 this whole issue to know that.
 
+**IT AFFECTS ONE EXAMPLE, NOT TWO, and this section implied two.** `compose.host-muxer.yml` mounts
+no pairing-record store at all: its muxer is the **host's** usbmuxd, whose store is the host's own
+`/var/lib/lockdown` and was never a compose volume. So D6 moves `compose.yml`'s sidecar store and
+leaves the other file with nothing to move — which is the same conclusion, reached because that
+profile already had the shape D6 argues for. Found while building the slice.
+
 ### D7 — the wire loses a field rather than gaining a lie
 
 `GET /api/devices` carries `pairing: {writable, reason?}` (`contracts.md:1085`), described there as
@@ -285,7 +291,10 @@ is only knowable after the pair has run.
 4. **A record that CHANGED confirms silently.** A successful pair is not made slower or noisier by
    the two reads, and no record's content appears in a log, a response or a file. (D4)
 5. **Pairing is refused before the walk when the muxer is unreachable**, and only then. (D3, D5)
-6. **The muxer's store is its own directory** in both examples, and quince mounts neither. (D6)
+6. **The muxer's store is its own directory**, and quince mounts no store in either example.
+   **Only `compose.yml` has a store to move** — `compose.host-muxer.yml` mounts none at all,
+   because its muxer is the host's usbmuxd and the host's `/var/lib/lockdown` is already its own.
+   This spec said *"in both examples"* until the work found otherwise. (D6)
 7. **The wire and the screen carry no precondition that no longer exists.** (D7)
 8. **Canon follows in the same diffs** — stack D2's netmuxd bullet, the contracts payload, the UI
    copy.
@@ -305,7 +314,7 @@ is only knowable after the pair has run.
 | G3 | 3 | table test over D5's three meanings; each produces a **distinct** message, and the unreachable one is not the not-recorded one. **The EOF arm is exercised both ways** — EOF with the re-dial succeeding is *not recorded*, EOF with the re-dial failing is *quince cannot tell*. The assertion is on distinctness, not on wording — the rule's negative half is that a true message which collapses two causes is still a defect |
 | G4 | 4 | the fake muxer serves a record whose bytes are a known sentinel; the test asserts that sentinel appears in **no** log line, response body or file written during the op |
 | G5 | 5 | with the muxer endpoint unreachable, `POST …/pair` returns `409` naming the muxer and no `idevicepair` process is started |
-| G6 | 6 | both compose files parse, quince's service mounts no lockdown path, and the muxer's store is outside `./quince/data` |
+| G6 | 6 | both compose files parse; quince's service mounts no lockdown path in either; `compose.yml`'s muxer store is outside `./quince/data`, and `compose.host-muxer.yml` mounts no store — asserted rather than skipped, so "no store" cannot pass by absence of a check |
 | G7 | 7 | `make gates-ui-e2e`; the devices payload carries no `pairing` object and the Pair control renders without a disabled branch |
 | G8 | 2, 3 | **OWED TO HARDWARE, owner the Operator.** A real device paired through the shipped stack, once with the store writable and once with it not, showing `succeeded` and the actionable failure respectively. This is `qn.6p` G8's territory and also closes the two caveats above: the live round trip, and the image digest's provenance |
 
