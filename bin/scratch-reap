@@ -144,6 +144,29 @@ for d in "$ROOT"/*; do
 		continue
 	fi
 
+	# THE DEFAULT BRANCH IS READ ONCE, HERE, AND EVERY RULE BELOW USES IT (quince#1297).
+	#
+	# It used to be read inside rule 3 only, while the ahead-comparison below hardcoded `origin/main`
+	# — so on a repository whose default is `master` that comparison failed, the clone was reported
+	# UNKNOWN, and rule 3's careful read was unreachable in exactly the case it existed for. The
+	# reaper did nothing at all on such a repository while reporting honestly that it could not look.
+	#
+	# THE REFUSAL IS NOW EXPLICIT RATHER THAN INCIDENTAL, and that is the substance of this change
+	# rather than the plumbing. The old behaviour reached UNKNOWN by letting `git cherry` fail on a
+	# ref that did not exist — the right outcome for the wrong reason, and a reason a reader could not
+	# check. A keep whose reason is not the true one is what quince#1248 was filed about, one rule
+	# over. This names the actual cause.
+	#
+	# THE TOOL TAKES `--root`, NOT `--repo`, so it cannot know which repository it is looking at and
+	# must never assume. `origin/HEAD` is what `git clone` records, and it is restored by
+	# `git fetch --prune`, which ran above — so on any clone this tool has fetched it is present.
+	default_branch=$(git -C "$d" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+	if [ -z "$default_branch" ]; then
+		unjudged=$((unjudged + 1))
+		say "  ?      $name — could not establish this repository's default branch from origin/HEAD, so whether $branch's work landed is UNKNOWN"
+		continue
+	fi
+
 	if [ -n "$(git -C "$d" status --porcelain 2>/dev/null)" ]; then
 		kept=$((kept + 1))
 		say "  KEEP   $name — uncommitted changes on $branch"
@@ -158,16 +181,16 @@ for d in "$ROOT"/*; do
 	# A FAILED COMPARISON IS A KEEP, never a zero. `grep -c` prints 0 and exits 1 when nothing
 	# matches, which is the answer we want for a fully-landed branch — so the two cases have to be
 	# told apart by whether `cherry` itself succeeded, not by the count.
-	if ! cherry=$(git -C "$d" cherry origin/main "$branch" 2>/dev/null); then
+	if ! cherry=$(git -C "$d" cherry "origin/$default_branch" "$branch" 2>/dev/null); then
 		unjudged=$((unjudged + 1))
-		say "  ?      $name — could not compare $branch against origin/main, so whether its work landed is UNKNOWN"
+		say "  ?      $name — could not compare $branch against origin/$default_branch, so whether its work landed is UNKNOWN"
 		continue
 	fi
 	ahead=$(printf '%s\n' "$cherry" | grep -c '^+' || true)
 	case "$ahead" in '' | *[!0-9]*) ahead=1 ;; esac
 	if [ "$ahead" -ne 0 ]; then
 		kept=$((kept + 1))
-		say "  KEEP   $name — $ahead commit(s) on $branch whose patch is not in origin/main"
+		say "  KEEP   $name — $ahead commit(s) on $branch whose patch is not in origin/$default_branch"
 		continue
 	fi
 
@@ -185,23 +208,15 @@ for d in "$ROOT"/*; do
 	# That is the safety rule's own test: a clean clone on the default branch with nothing of its own
 	# is the freshest possible copy of the repository and holds no work that exists nowhere else.
 	#
-	# THE NAME IS READ HERE, NEVER ASSUMED — but the TOOL is `main`-only until quince#1297, and the
-	# distinction matters because the obvious reading of this paragraph is wrong. `origin/HEAD` is
-	# what `git clone` records, so this check is right on a repository whose default is `master`;
-	# the ahead-comparison ABOVE still hardcodes `origin/main`, fails there, and reports the clone
-	# UNKNOWN before control ever reaches this line. So the careful read is correct and unreachable
-	# in exactly the case it exists for. Measured: a `master`-default origin yields
-	# `? onmaster — could not compare master against origin/main`.
+	# THE NAME WAS READ ABOVE, ONCE, and every rule in this loop uses the same answer (quince#1297).
+	# This block used to read it again for itself and carry a note saying the TOOL was `main`-only
+	# because the ahead-comparison hardcoded `origin/main` — true when it was written, and resolved
+	# by moving the read to the top of the loop rather than by narrowing the sentence further.
 	#
-	# The behaviour is SAFE — UNKNOWN means kept, nothing is deleted wrongly — which is why that is
-	# a separate issue rather than a fix folded in here: it changes the rule that decides whether
-	# work is lost, and that deserves its own claim and its own review.
-	#
-	# A clone that somehow lacks `origin/HEAD` falls through to the old rule and is KEPT, which is
-	# the safe direction — and SAID, rather than silently taken, because a keep whose reason a
-	# reader cannot check is how this defect survived.
-	default_branch=$(git -C "$d" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
-	if [ -n "$default_branch" ] && [ "$branch" = "$default_branch" ]; then
+	# A clone that lacks `origin/HEAD` never reaches this line: it is refused as UNKNOWN where the
+	# name is read, which is the safe direction and now says so in its own words rather than by
+	# letting a later comparison fail on a ref that does not exist.
+	if [ "$branch" = "$default_branch" ]; then
 		why="$branch is the default branch and this clone is not ahead of origin/$default_branch"
 	elif git -C "$d" ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
 		kept=$((kept + 1))
