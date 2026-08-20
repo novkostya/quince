@@ -19,6 +19,14 @@ ruling D left to a spec.
   Open question: [quince#1309](https://github.com/novkostya/quince/issues/1309).
 - **One design decision below asks for a ruling rather than assuming one** — D3, which loses half
   of what qn.6p D7 was ruled to deliver. It is marked in place, not buried here.
+- **That question is WITH THE OPERATOR.** The architect stopped the thread on
+  [quince#1309](https://github.com/novkostya/quince/issues/1309) rather than ruling it under ruling
+  C, because qn.6p D7 is an Operator ruling and retiring half of it is user-visible; the issue
+  carries `needs-operator`. **Nothing else here waits on it** — D3's *mechanism* is graded on being
+  correct, not on whether a post-check is the right shape.
+- **Reviewed once and revised** (quince#1315): the post-check was presence-only, which a **stale**
+  record defeats. D3 now compares before and after. Three smaller findings from the same review are
+  fixed in D4, D5 and the `stack.md` row of the Rule check.
 
 ---
 
@@ -124,11 +132,44 @@ is not reported. `ReadPairRecord` is read-only and answers a different question.
 
 **So `Writable()` is deleted and nothing takes its position.** It probes a directory quince no
 longer owns; there is no directory to repoint it to.
+**What replaces it is a BEFORE-AND-AFTER comparison against the muxer's store.** Presence alone is
+not enough, and the reason is the case the whole rung exists for.
 
-**What replaces it is a post-check on the right store.** After `SUCCESS: Paired`, quince asks the
-muxer `ReadPairRecord(udid)` over the socket it already holds. Present → the pairing is real.
-Absent → the record was not recorded, the op **fails** with an actionable message, and quince does
-not claim a pairing that does not exist.
+**Presence answers *is there a record*; the rung needs *was one just written*.** Those come apart on
+any stand that has been running a while: a device whose record is stale — the phone was reset, or
+trust was revoked — still has a **file** in the store. `contracts.md:1109` is explicit that
+`paired` means *"a pairing is CONFIRMED valid right now"*, which is a lockdown validation and not
+record presence, so quince offers Pair for exactly that device. If the store is then unwritable,
+M7 makes `idevicepair` print `SUCCESS` anyway, and a presence check finds the **stale** record and
+reports the pairing recorded. That is story 2 failing by the mechanism story 2 is written against,
+in the more likely of the two cases rather than the rarer one. (Found in review, quince#1315.)
+
+So quince asks **twice**:
+
+1. **Before** running `idevicepair`, `ReadPairRecord(udid)` — and keeps a **hash** of the reply body,
+   or the fact that there was no record.
+2. **After** `SUCCESS: Paired`, the same request again.
+
+| before → after | verdict |
+| --- | --- |
+| absent → present | recorded |
+| present → **different** hash | recorded (a fresh pair mints new keys and a new `HostID`, so the bytes cannot be the old ones) |
+| present → **same** hash | **not recorded** — this is the stale-record case, and the one presence alone gets wrong |
+| absent → absent | not recorded |
+
+**A hash, not the bytes, and that is D4's constraint doing work rather than being recited.** The
+pre-read body is reduced immediately and dropped, so quince holds 32 bytes across the pair instead
+of a private-key-grade record for the length of a user's walk to the phone.
+
+**Two residuals, named rather than left to be found.** A save that reproduced the previous record
+byte-for-byte would read as *not recorded* — unreachable in practice, since `lockdown.c:867`
+generates a fresh `HostID` per pair and the certificates are new, and the error is in the
+conservative direction (quince under-claims). And another writer changing the record between the
+two reads would read as *recorded*; there is no lock over the muxer's store and this rung does not
+invent one.
+
+Absent-after, or unchanged-after, means the op **fails** with an actionable message naming the
+muxer and its store. quince does not claim a pairing that does not exist.
 
 That is the same shape as the rest of the product: *a backup is `succeeded` only after
 verify+commit*. And it is the only thing that catches M7, which is a live **state honesty**
@@ -144,30 +185,44 @@ than the truthfulness, this rung stops here and the answer is a different one.**
 pairing certainly cannot happen. That answer already exists in the muxer health state (qn.6p D5) and
 costs no new probe. It is a narrower guarantee than D7's and is not offered as a substitute for it.
 
-### D4 — the probe reads presence and nothing else
+### D4 — the probe reduces the record to a hash and keeps nothing else
 
 `ReadPairRecord` returns the record itself, which is private-key-grade (design §6): the host identity
 and a device record together let the holder talk to the phone as a trusted host. There is no lighter
 message in the protocol, so this is a constraint rather than a choice.
 
-**The payload is never logged, never served, never persisted, and never parsed.** quince checks that
-a reply arrived and drops the bytes. The length is not reported either — a size is a fact about a
+**The record BODY is never logged, served, persisted or parsed.** quince reduces it to a hash for
+D3's comparison and drops it; the length is not reported either, since a size is a fact about a
 secret.
+
+**"The body", not "the message" — D5 needs the envelope read.** Telling a `PairRecord` reply from a
+`Result` reply means reading the message type, which is a parse of the framing. The security
+property is about the record's contents and is intact; the wider wording contradicted D5 two
+sections down (found in review, quince#1315).
 
 ### D5 — three answers, one of which is a closed connection
 
 M3 makes this a real design point rather than error handling. Asking the muxer for a record has
-**three** outcomes and quince must not collapse them:
+**three meanings and four shapes on the wire**, and quince must not collapse the meanings:
 
 | what happens | what it means |
 | --- | --- |
 | a `PairRecord` reply | the record is there |
-| a `Result` with a non-zero number, **or a clean EOF with no reply** | the record is not there — netmuxd closes, usbmuxd answers with a code |
-| the dial fails, or the deadline expires | quince does not know, and says that |
+| a `Result` with a non-zero number | the record is not there — this is usbmuxd's answer |
+| a clean EOF with no reply, **and a re-dial succeeds** | the record is not there — this is netmuxd's answer (M3) |
+| the dial fails, the re-dial fails, or the deadline expires | quince does not know, and says that |
 
 The third is not the second. *"The pairing was not recorded"* and *"quince could not reach the
 muxer to ask"* are different sentences with different remedies, and *Troubleshooting is ACTIONABLE*
 is what forbids merging them.
+
+**THE RE-DIAL IS WHAT MAKES THE EOF ARM HONEST, and without it this section breaks its own rule**
+(found in review, quince#1315). M3 says netmuxd answers *no record* by closing with no reply — but a
+muxer that **dies** mid-request closes exactly the same way, and so does one restarted underneath
+the exchange. Read naively, an EOF is *the record is not there* wearing *quince cannot tell*'s
+clothes, which is the collapse the paragraph above forbids. So on EOF quince dials again: reachable
+means the muxer is alive and its silence was its answer; unreachable means the muxer went away and
+quince does not know. One extra dial, on the failure path only.
 
 The exchange is a **short-lived connection of its own**, dialled from the existing endpoint and
 bounded by a deadline. It is not multiplexed onto the Listen stream, which is a long-lived
@@ -222,11 +277,13 @@ is only knowable after the pair has run.
 
 1. **quince's container touches no pairing-record path.** No mount, no read, no write, and no code
    that would use one. (D1, D2)
-2. **A pairing the muxer did not record is not reported as succeeded.** The op fails. (D3, M7)
+2. **A pairing the muxer did not record is not reported as succeeded** — including when a **stale**
+   record for that device is already in the store, which is the case presence alone gets wrong.
+   The op fails. (D3, M7)
 3. **The failure says what to fix.** It names the muxer, its store, and the remedy — and does not
    say the same thing when quince could not reach the muxer to ask. (D3, D5)
-4. **A record that IS there confirms silently.** A successful pair is not made slower or noisier by
-   the check, and the record's content never appears in a log, a response or a file. (D4)
+4. **A record that CHANGED confirms silently.** A successful pair is not made slower or noisier by
+   the two reads, and no record's content appears in a log, a response or a file. (D4)
 5. **Pairing is refused before the walk when the muxer is unreachable**, and only then. (D3, D5)
 6. **The muxer's store is its own directory** in both examples, and quince mounts neither. (D6)
 7. **The wire and the screen carry no precondition that no longer exists.** (D7)
@@ -242,8 +299,10 @@ is only knowable after the pair has run.
 | # | story | gate |
 | --- | --- | --- |
 | G1 | 1, 2 | `grep` proves no source file outside tests names `/var/lib/lockdown` or `LockdownStore`; the deleted file's tests are gone with it, and `go build` proves no caller survives |
-| G2 | 2 | against a fake muxer that answers `SUCCESS: Paired` and then **closes with no reply**, the op ends `failed`. This is M3's shape and is the case a naive client reports as success |
-| G3 | 3 | table test over D5's three outcomes; each produces a **distinct** message, and the unreachable one is not the not-recorded one. The assertion is on distinctness, not on wording — the rule's negative half is that a true message which collapses two causes is still a defect |
+| G2 | 2 | **Two fakes, and naming both is the point** — `idevicepair` faked to print `SUCCESS: Paired` and exit `0` (M7's shape, which is tool stdout), and the muxer socket scripted to **close with no reply** (M3's shape, which is the usbmuxd framing). The op must end `failed`. Written out because *"a fake muxer that answers `SUCCESS: Paired`"* names one component doing both jobs, and sends the implementer to build the wrong fake |
+| G2b | 2 | **the stale-record case, which presence alone gets wrong** — the muxer serves the SAME record body before and after, the tool reports success, and the op ends `failed`. The gate that would have caught quince#1315's finding |
+| G2c | 2 | the negative control — the muxer serves a **different** body after, and the op ends `succeeded`. A `failed` that is right for the wrong reason passes G2 and G2b alone |
+| G3 | 3 | table test over D5's three meanings; each produces a **distinct** message, and the unreachable one is not the not-recorded one. **The EOF arm is exercised both ways** — EOF with the re-dial succeeding is *not recorded*, EOF with the re-dial failing is *quince cannot tell*. The assertion is on distinctness, not on wording — the rule's negative half is that a true message which collapses two causes is still a defect |
 | G4 | 4 | the fake muxer serves a record whose bytes are a known sentinel; the test asserts that sentinel appears in **no** log line, response body or file written during the op |
 | G5 | 5 | with the muxer endpoint unreachable, `POST …/pair` returns `409` naming the muxer and no `idevicepair` process is started |
 | G6 | 6 | both compose files parse, quince's service mounts no lockdown path, and the muxer's store is outside `./quince/data` |
@@ -258,9 +317,11 @@ a phone trusted anything, and the whole rung is source-read plus mount measureme
 ## Fixtures
 
 - **A fake muxer socket** in `core/internal/muxd/testdata` — a unix listener that speaks the framing
-  in `protocol.go` and can be scripted to: reply `PairRecord` with a sentinel body; reply `Result`
-  with a non-zero number; **accept the request and close without replying** (M3); accept and never
-  reply until the deadline; refuse the dial.
+  in `protocol.go` and can be scripted to: reply `PairRecord` with a sentinel body; reply
+  `PairRecord` with **the same** body on both reads (the stale-record case) or a **different** one
+  (the recorded case); reply `Result` with a non-zero number; **accept the request and close without
+  replying** (M3), with the re-dial then either accepted or refused; accept and never reply until
+  the deadline; refuse the dial.
 - **No device transcript is added.** The pair path is `idevicepair` plus a muxer exchange, and the
   existing `deviceops` fakes already cover the tool half. The replay-fixture rule
   (*every bug found on hardware becomes a replay fixture*) has nothing to bind to yet: no bug in
@@ -275,12 +336,12 @@ a phone trusted anything, and the whole rung is source-read plus mount measureme
 | **State honesty** | The rung's whole point. M7 is a live violation — quince reports `succeeded` for a pairing the muxer refused to record — and story 2 is what makes the claim true. Everything in this spec that is source-read rather than run is labelled, including the two caveats G8 owns. |
 | **Troubleshooting is ACTIONABLE** | D5 is written against the rule's negative half: three causes must not arrive as one sentence. G3 grades distinctness rather than wording, because a true message that collapses causes is the defect the rule names. The message carries the muxer, its store path and the remedy. |
 | **No silent caps or fallbacks** | Removing the pre-check removes a guard, and the rung does not let that go quiet: the post-check reports the failure the pre-check used to predict, and D3 states in the spec what is no longer prevented. The one remaining pre-refusal (unreachable muxer) is narrower than D7's and is not offered as a substitute. |
-| **Secrets discipline** | The sharpest near-miss here, and D4 exists for it. `ReadPairRecord` puts private-key-grade material in quince's memory. Presence only — never logged, served, persisted or parsed, and not even its length reported. G4 is the gate, using a sentinel body so the assertion is mechanical rather than a reviewer's reading. |
+| **Secrets discipline** | The sharpest near-miss here, and D4 exists for it. `ReadPairRecord` puts private-key-grade material in quince's memory, **twice per pair** under D3's before-and-after. The body is reduced to a hash immediately and dropped, so what survives across the user's walk to the phone is 32 bytes rather than a record; it is never logged, served, persisted or parsed, and its length is not reported. G4 is the gate, using a sentinel body so the assertion is mechanical rather than a reviewer's reading. |
 | **Never mutate a committed version** | Not touched — this rung has no storage path. Named because *pairing records are immutable once written* and *versions are immutable once committed* use the same language, and a reader could think the storage invariants are in play. They are not. |
 | **Config tidiness** | Not touched. No new key, no new default. The muxer's store is a compose mount, not quince configuration — which is the point of D1. |
 | **Subprocesses** | Unchanged. `idevicepair` still runs as an argv array in its own process group with a Go-side deadline; this rung adds a socket exchange around it, not a process. |
 | **Every bug found on hardware becomes a replay fixture** | Nothing in this rung was found on hardware — it came from source and mounts. Stated in *Fixtures* so the empty list is a declaration and not an omission. If G8 finds a bug, the fixture comes first. |
-| **Docs are part of the diff** | `docs/quince.stack.md:128` still reads *"netmuxd reads `/var/lib/lockdown/<UDID>.plist`, the same pairing records quince already persists and restores"*, which D1 and D2 both contradict; it rides the PR that deletes `LockdownStore`. `contracts.md` rides the wire PR. Coverage summary plus a known-untested list on each PR. |
+| **Docs are part of the diff** | `docs/quince.stack.md:128` is wrong in **both** its halves and PR 2 rewrites the bullet rather than amending a clause. *"netmuxd **reads** …"* is incomplete — M2 says it writes too. *"**No `--plist-storage`**"* is contradicted by `deploy/compose.yml:44`, which passes exactly that flag; the bullet describes what quince passed when it **supervised** netmuxd, and qn.6p retired the supervision without retiring the sentence. Its *"(qn.3 amendment 1)"* points at the amendment D1/D2 retire. Flagged in review (quince#1315) because a canon line with one clause fixed reads as a line that was checked. `contracts.md` rides the wire PR. Coverage summary plus a known-untested list on each PR. |
 | **Privacy is a commit-time gate** | `make privacy-check REF=origin/main...HEAD TEXT=<file under the runner's own scratch>` before every push. No host, address, path, UDID or serial from any stand appears in this spec; the upstream refs, message names and file paths are public facts about public projects. |
 | **Interface facts are looked up live** | Every claim in *What was measured* was fetched at the pinned ref on 2026-08-20. Two upstream projects were read; neither was recalled. The refs are named so the reviewer can repeat it rather than trust it. |
 | **Don't improvise architecture** | A, B, C are ruled and D is discharged; this spec implements them. The three things canon does **not** settle are marked as decisions here rather than made in code — D3 (which asks for a ruling because it loses half of an Operator ruling), D6 (which ruling D left to the spec), D7 (the wire shape). The adjacent finding that would have been an improvisation is filed instead: quince#1314. |
