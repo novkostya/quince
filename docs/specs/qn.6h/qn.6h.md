@@ -110,9 +110,8 @@ is not built, quince keeps working exactly as it does today.
 
 5. **`isDirty` stats the directory, deliberately** — `reset.go:101-104`, *"IT INCLUDES THE
    KILLED-SEED CASE deliberately … That is why this stats the directory rather than reading the
-   sentinel."* **The fact stands; the inference this entry used to draw from it does not.** It read
-   *"whatever replaces the working copy must therefore still be a directory … or `RepairWorking`'s
-   whole resolver changes"* — the 2026-08-08 ruling leaves **no** such directory on zfs, so `isDirty`
+   sentinel."* **The fact stands, and the inference does not follow on zfs.** The
+   2026-08-08 ruling leaves **no** working directory there, so `isDirty`
    becomes a backend method and the killed-seed case it protects has no zfs analogue (D3). Kept as a
    fact because the *namespace* behaviour it describes is unchanged and still load-bearing there.
 
@@ -270,11 +269,8 @@ breaking and does not.
 
 ### D3 — Sub-question 1: `reset.go`, `worksentinel.go`, `WorkingReset` with **no** working directory
 
-**The previous answer is WITHDRAWN.** It read *"the surface does not change at all, and the shim is
-why — `working/` still exists during a job, so facts 5 and 6 hold verbatim."* That answered the
-ruling's sub-question by **arranging for there to still be a working directory**. Under the
-2026-08-08 ruling there is none on zfs, so the sub-question is live again and is answered here
-properly rather than dissolved.
+**There is no working directory on zfs under the 2026-08-08 ruling**, so this sub-question cannot be
+dissolved by arranging for one to exist. It is answered here properly.
 
 **The HTTP surface genuinely is unchanged**, and that part survives: `POST
 /api/devices/{udid}/reset-working`, `WorkingReset`, `Engine.ResetWorking`'s `404`/`409`/`503`, and

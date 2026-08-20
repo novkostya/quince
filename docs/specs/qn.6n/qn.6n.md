@@ -417,12 +417,10 @@ what each slice touches, not what gates it.
 | **6b** | **rule 2, THE PASSKEY PATH** — `DELETE /api/auth/passkeys/{id}` demands a credential **other than the target**; `ErrLastPasskey` likewise, and `reauth/begin` excludes the target from `allowCredentials`. G2's subject half. | no — `contracts.md` only | *this PR* |
 | **7** | **D8's copy** — lands with or after rule 1, never before. Splits `elsewhere-only` from `unconfigured`, and names the cheaper remedy D8 missed. | no | *this PR* |
 
-**ROW 5b'S DESCRIPTION WAS STALE THE MOMENT IT MERGED, AND NOT ABOUT ITS STATUS.** It read *"a ceremony
-key is only ever produced by a guarded begin"* — the sentence quince#930's review found short by the
-**pre-auth** producer, `passkeys/login/begin`. The PR corrected `contracts.md` and the handler comment
-and left the row asserting the uncorrected claim. **A row is a third part describing the whole**,
-after quince#409's heading and this table's own status column, and it goes stale on CONTENT as
-readily as on state.
+**A ROW IS A THIRD PART DESCRIBING THE WHOLE**, after quince#409's heading and this table's own
+status column, and it goes stale on CONTENT as readily as on state. Row 5b is the worked example: a
+ceremony key is **not** only ever produced by a guarded begin — `passkeys/login/begin` is a
+**pre-auth** producer, found by quince#930's review.
 
 **ROW 6 SPLIT IN TWO, for 5a/5b's reason and not merely by analogy with it.** quince#927 claimed two
 paths and covered one, and the split that fixed it is the same shape here: two removal endpoints,
@@ -491,9 +489,8 @@ a gate spanning two slices is named in both rather than in the later one.
 **§6 GOES IN SLICE 5a BECAUSE THAT IS WHERE THE MODEL ACTUALLY MOVES.** Rule 1 is the point at which a
 session stops being sufficient to change the credential set; rule 2 completes the picture but changes
 no statement §6 makes. Naming the slice matters more than which one it is — an unassigned canon edit
-is the one that lands in whichever PR notices it last. **It read *"SLICE 4"* until slice 6a, one row
-behind the same renumbering, and against a table that already said 5a** — which is where quince#927
-actually landed it.
+is the one that lands in whichever PR notices it last. **quince#927 landed it in 5a**, which is what
+the table says.
 
 **2 IS SEPARATE AND HAS NO CALLER ON PURPOSE**, which is `qn.6m` slice 5a's ordering and `qn.6k`'s
 before it: the guard lands, alone and reviewable, before anything can depend on it. It is also the

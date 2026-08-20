@@ -659,10 +659,10 @@ Beyond `make gates`.
 | **G8** | 9 | The selector renders both storages, disables the unreachable one with its reason, and shows the full-transfer warning on the storage that has no prior version. | ui-e2e |
 | **G9** | 10 | **PASSED on hardware 2026-08-02 — placement. Retention leg OWED.** A real device backed up to two real storages, the second a genuine full transfer over the real transport, and the first left untouched. Ran on the staging stand: a 3.7 GB iPad over Wi-Fi to a zfs storage and an ext4 USB disk whose `hardlink` backend was **probed**, not declared — `shuttle` took 94,027 files from empty with the daemon's own marker reading `kind: "full"`, while `local` kept 94,027 files and the same five `@quince-*` snapshots. **STILL OWED: per-storage retention has never pruned** — the two storages carry different policies (10/30/12 and 3/7/4) and the second holds too few versions to fire, so `Prune`'s per-storage grouping is a deletion path that has only ever run in a unit test. Four backups to the second storage discharge it; no lab day. | lab |
 | **G10** | all | `make privacy-check REF=origin/main...HEAD TEXT=<body>` over diff, commit messages and PR text. Storage **paths** are this rung's sharpest privacy surface — see *Rule check*. | host |
-**G9's scale clause was STRUCK, not met.** It read *"a genuine full transfer **of tens of
-gigabytes**"*, and the run transferred **3.7 GB**. Architect ruling on quince#378, 2026-08-02,
-recorded here rather than edited silently, because a gate whose literal text went unmet must not be
-quietly reinterpreted by the seat that accepts it.
+**G9's scale clause was STRUCK, not met.** The clause required *"a genuine full transfer **of tens of
+gigabytes**"*, and the run transferred **3.7 GB**. Architect ruling on quince#378, 2026-08-02.
+**A gate whose literal text went unmet must not be read as passed**, which is why the strike is
+recorded against the gate rather than the gate's wording being adjusted to fit the run.
 
 **The clause was unmeetable on the stand that ran it** — the device holds 3.7 GB, so no run against
 that iPad could have satisfied it. That is a defect in the gate: it was written without pinning
