@@ -1,0 +1,60 @@
+#!/bin/sh
+# version — the one place quince decides what a build calls itself.
+#
+# WHY THIS EXISTS, because `VERSION ?= 0.0.0-dev` in the Makefile looks like it is already doing
+# this job. It is a DEFAULT, not a derivation: nothing supplied a value, so every build that was
+# not a tagged release reported `0.0.0-dev` — including the public demo, whose whole job is a
+# first impression (quince#615). The Operator's direction was to infer the version so that
+# EVERYTHING built is correctly attributed, rather than to fix the demo alone, which is why this
+# is a shared script and not a line in one caller.
+#
+# WHY NOT versions.env. `deploy/build-args` derives the entire build-arg list from that file, and
+# VERSION is correctly absent from it — versions.env holds TOOLCHAIN PINS, and a version is not a
+# pin. That absence is what left `deploy/fly-deploy` with no way to supply it. The fix is a second,
+# one-value source, not a value stuffed into a file where it does not belong.
+#
+# NO LEADING `v`. The git tag keeps it; the image tag and the binary's own version stamp do not.
+# That rule is `release.yml`'s, which strips it with `${GITHUB_REF_NAME#v}`, and `release-image`
+# REFUSES a leading v outright. A derivation that disagreed with the release path would produce two
+# spellings of the same version depending on how the image was built.
+#
+# THE CALLER MUST RUN THIS OUTSIDE THE BUILD. `.dockerignore` keeps `.git` out of the build
+# context, so a `RUN git describe` inside the Dockerfile cannot work — the value has to be derived
+# here and arrive as `--build-arg VERSION=`. Both callers do that.
+set -eu
+
+cd "$(dirname "$0")/.."
+
+fallback=0.0.0-dev
+
+# `--always` is deliberately NOT used, and that is the whole shape of this script.
+#
+# It would make `describe` succeed by emitting a bare sha whenever it cannot relate HEAD to a tag,
+# which is indistinguishable from success at the call site — the caller stamps `c78b8e0` as a
+# version and nothing says the derivation degraded. Asking for a tag-relative answer and handling
+# the refusal ourselves is what lets the announcement below exist at all.
+#
+# MEASURED, and it is the trap worth knowing (quince#615): in a `--depth 1` clone, `describe`
+# fails EVEN WITH THE TAGS FETCHED. `fetch-tags` is not the remedy; the tagged commits are outside
+# the shallow history, so nothing can compute a distance to them. The remedy is `fetch-depth: 0`
+# at the checkout, which `ci.yml` already does everywhere and `demo-deploy.yml` did not.
+if described=$(git describe --tags --dirty 2>/dev/null); then
+	printf '%s\n' "${described#v}"
+	exit 0
+fi
+
+# NOT SILENT. A wrong version is worse than an admitted one, and a fallback nobody is told about is
+# the failure this script was written to end. Every reason below is a real one somebody will hit:
+# a source tarball with no `.git`, a shallow CI checkout, a fork with no tags fetched.
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+	why="this is not a git checkout"
+elif [ -z "$(git tag 2>/dev/null)" ]; then
+	why="no tags are present — a shallow clone fetches none by default"
+else
+	why="HEAD cannot be related to any tag — a shallow clone has the tags but not the history between"
+fi
+
+printf 'version: %s (%s)\n' "$fallback" "$why" >&2
+printf 'version: builds will be stamped %s. For a real version, check out with full\n' "$fallback" >&2
+printf '         history and tags (fetch-depth: 0), or pass VERSION= explicitly.\n' >&2
+printf '%s\n' "$fallback"

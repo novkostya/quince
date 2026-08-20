@@ -117,7 +117,14 @@ expect "the finding names the doc path" 1 "drift.md" \
 # workflow would have picked the wrong side on quince#618, the only instance there has been.
 expect "the finding declares NEITHER side authoritative" 1 "NEITHER is authoritative" \
 	"$CHECK" "$WORK/drift.md" "$WF"
-expect "the finding says who must make the workflow-side edit" 1 "quince#113" \
+# WHO, and the answer INVERTED on 2026-08-17. This asserted `quince#113` — "no agent seat can push
+# a workflow", so route it to the Operator — until `quince-coder` was granted `workflows: write`
+# and pushed one (quince#1116). The assertion is kept rather than dropped because the message is a
+# ROUTING instruction: wrong, it sends a seat that can do the work to ask somebody who does not
+# need to be asked. What changed is which claim it pins.
+expect "the finding says who must make the workflow-side edit" 1 "quince#1116" \
+	"$CHECK" "$WORK/drift.md" "$WF"
+expect "and does NOT route a capable seat to the Operator" 1 "Do not route it to the Operator" \
 	"$CHECK" "$WORK/drift.md" "$WF"
 
 # A block that differs only in TRAILING WHITESPACE is still drift. Asserted because it is the

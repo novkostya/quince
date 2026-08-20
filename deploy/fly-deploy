@@ -34,5 +34,20 @@ done <<EOF
 $values
 EOF
 
-echo "fly-deploy: $# build-arg token(s) from versions.env" >&2
+# VERSION IS THE ONE ARG versions.env CANNOT SUPPLY, and that is correct rather than an oversight:
+# that file holds toolchain pins and a version is not one, so `build-args` has nothing to look up
+# and says so — `using the Dockerfile default for: VERSION`. Which is how quince#615 was found: the
+# demo reported `0.0.0-dev` while a hand-built image reported a real version, because the Makefile
+# has an override point the deploy did not.
+#
+# So it arrives from the second source, `deploy/version`, which the Makefile uses too. Derived HERE
+# and passed in, never inside the build: `.dockerignore` keeps `.git` out of the build context, and
+# this is a --remote-only build besides, so the daemon doing the work never sees a repository.
+#
+# NOT captured with the others above. `build-args` refusing must end the deploy, and this must not
+# be able to mask that by succeeding after it.
+version=$(deploy/version)
+set -- "$@" --build-arg "VERSION=$version"
+
+echo "fly-deploy: $# build-arg token(s) — versions.env, plus VERSION=$version" >&2
 exec flyctl deploy --remote-only "$@"
