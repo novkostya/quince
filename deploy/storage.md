@@ -1,393 +1,94 @@
-# quince storage — backends, the zfs hook, and offsite sync
+# Where backups go
 
-Storage semantics are specified in [`../docs/quince.stack.md`](../docs/quince.stack.md) and
-[`../docs/quince.design.md`](../docs/quince.design.md) (§5). This file is the operator-facing
-deploy reference: the backend probe, the constrained ZFS hook, and the exact rclone filter block.
+Point quince at a disk and it works out the rest. For most people that is the whole story —
+the rest of this page is for ZFS, and for copying backups offsite.
 
-## Backends (auto-selected)
+## What you get
 
-`storage.backend: auto` (the default) resolves at startup:
+quince looks at the filesystem behind `/backups` and picks how to keep old versions:
 
-- **zfs** — chosen when `storage.zfs.parent_dataset` (or an `ssh_user`/`ssh_host` pair) is set, or `backend: zfs`
-  is explicit. Snapshot-native: one child dataset per device, versions are `@quince-*` snapshots.
-  **The backup tree IS the child dataset root.** `idevicebackup2`'s target is the parent
-  dataset and it appends the device's UDID itself, so a backup lands at `<parent>/<udid>/Info.plist`
-  and friends — no `latest/`, no working copy, and no clone before the transfer can start. Commit is
-  verify → `zfs snapshot`, and the snapshot IS the version. Between backups the dataset holds only
-  the backup and quince's one marker file.
-- **reflink** — the smart default where `/backups` supports FICLONE (Btrfs/Synology, XFS,
-  hookless OpenZFS 2.2+). CoW clones, fully independent files, no host coupling.
-- **hardlink** — for filesystems with neither reflink nor snapshots (ext4 NAS).
-- **copy** — last resort (full copies, transient 2× space). A **degraded** mode: quince logs it
-  loudly and surfaces it — never a silent fallback.
+| your filesystem | how versions are kept | cost |
+| --- | --- | --- |
+| Btrfs, XFS, Synology, OpenZFS 2.2+ | copy-on-write clones | only what changed |
+| ZFS, set up as below | snapshots | only what changed |
+| ext4 | hardlinked trees | only what changed, files shared |
+| anything else | full copies | **2× space per version** |
 
-The chosen backend and *why* are logged at startup and shown in onboarding.
+The last row is a fallback, not a choice — quince says so loudly at startup and on screen
+rather than letting you find out from a full disk.
 
-## ZFS: REQUIRED SETUP — two settings on the parent dataset
+It tells you which one it picked and why, when you first set it up and in the log.
 
-Both are one command, both are on the **parent**, and both are silent to get wrong.
+## ZFS
 
-**1. Exclude quince's datasets from whatever snapshotter this host runs.**
+### Two settings on the parent dataset
+
+Both are one command, both are silent to get wrong, and both cost you something real.
+
+**1. Keep other snapshot tools off quince's datasets.**
 
 ```sh
 zfs set com.sun:auto-snapshot=false <parent-dataset>
 ```
 
-That property is `zfs-auto-snapshot`'s. **sanoid, zrepl and `pve-zsync` each need their own
-exclusion** — the instruction is *exclude quince's datasets from whatever snapshotter you run*, and
-the command above is the worked example. Setting it on the parent covers every per-device child, now
-and in future, because ZFS user properties inherit.
+That property is `zfs-auto-snapshot`'s — sanoid, zrepl and `pve-zsync` each need their own
+exclusion. Set it on the parent and every per-device child inherits it, now and later.
 
-**The reason is space, not tidiness.** A snapshot taken by another tool alongside a `@quince-*` one
-**pins the same blocks**. Destroy the quince snapshot and nothing is freed: quince's retention runs,
-reports versions removed, and reclaims no space. There is a second effect worth knowing — `zfs
-rollback` refuses while any newer snapshot exists, so an automatic snapshotter firing every few
-minutes makes *reset* refuse too. Reset says so and names this setting when it happens.
+**This is about space, not tidiness.** Another tool's snapshot pins the same blocks as
+quince's. Delete a quince version and nothing is freed: it reports the version removed and
+reclaims nothing. It also breaks *reset* — `zfs rollback` refuses while a newer snapshot
+exists, so a snapshotter firing every few minutes blocks it. quince names this setting when
+that happens.
 
-**2. Set the quota on the parent dataset, NOT per device.**
+**2. Put the quota on the parent, not on each device.**
 
-**A per-device quota is UNSUPPORTED and will cost you a backup.** `idevicebackup2` asks the
-filesystem how much space is free before it starts, and its target is the **parent**
-dataset — so a quota on the child is invisible to that question. Measured on a real pool,
-2026-08-08: with `quota=10G` on a child, the tool is told **1620 GiB** is available. It then starts a
-backup that cannot fit, and the failure arrives as **ENOSPC part-way through** rather than as a clean
-up-front refusal — which on Wi-Fi costs hours.
+A per-device quota **will cost you a backup**. The backup tool asks how much room is free
+before it starts, and it asks about the *parent* — so a quota on the child is invisible to
+it. Measured on a real pool: with `quota=10G` on a child, the tool was told **1620 GiB** was
+free. It then started a backup that could not fit and failed **part-way through** instead of
+refusing up front, which over Wi-Fi costs hours.
 
-## ZFS: the hook is the only transport
+### Reaching the pool
 
-`storage.zfs.mode: hook` is the only value and the default — quince reaches an SSH forced-command to
-a constrained helper on the ZFS host. This keeps the HTTP-facing container free of ZFS privileges.
+quince runs in a container; ZFS lives on the host. It connects over SSH to a small script
+that only does the handful of things quince needs, so the container never holds ZFS
+privileges. You give it four settings per storage — `ssh_user`, `ssh_host`, and optionally
+`ssh_port` (default 22) and `ssh_key` (default `/data/keys/zfs`).
 
-**QUINCE COMPOSES THE SSH COMMAND ITSELF** — from four
-per-storage keys: `ssh_user`, `ssh_host`, and optionally `ssh_port` (default 22) and `ssh_key`
-(default `/data/keys/zfs`). It builds an argv array, never a shell string.
+**Setting up that script is [`zfs-helper.md`](zfs-helper.md).**
 
-**SSH IS THE SHAPE, not one transport among several**, and the reason is the guarantee the design
-rests on: `command="/usr/local/sbin/quince-zfs-helper <dataset>"` in `authorized_keys` pins the helper
-regardless of what the client asks for. Under any other transport that constraint would live only
-inside the script, and a caller could reach the host without going through it.
+### On Proxmox
 
-**`hook_cmd` IS RETIRED and a file carrying it is REFUSED**, by path, naming its four successors —
-the same shape `mode: exec` uses and for the same reason: an unknown-key warning would say
-*"ignored"* about the one key every existing zfs install has set.
+A dataset created after the container starts shows up empty inside a plain bind mount. The
+`zfs create` has to propagate through both hops — into the container
+(`lxc.mount.entry: /pool-mount mnt/x none rbind,rslave,create=dir 0 0`) and onto the bind
+(`propagation: rslave`, or `-v src:dst:rslave`). quince checks whether it worked and prints
+the `pct set -mpN` command to fix it if not.
 
-The transport binary (`ssh`) must exist **where quince runs**: the
-runtime image ships `openssh-client` for exactly this — without it every
-hook call dies with `exec: "ssh": executable file not found` and no backup can seed.
+## Copying backups offsite
 
-**`mode: exec` is REMOVED** (quince#697). It ran `zfs …` in the
-container against delegated privileges, and **the shipped image has no `zfs` binary**, so the mode
-you got by default could not work in what we ship. Shipping the userland was rejected rather than
-merely declined: the `zfs` CLI talks to the host kernel module over a versioned ioctl interface, so
-the image would have to track a host version that is not ours to control.
-
-**If your `config.yml` still says `mode: exec`, quince refuses it and names the key** —
-`storage[N].zfs.mode: invalid value "exec"; must be one of [hook]`. Set up the helper below and
-change the line to `hook`, or just delete the line: an absent key already means `hook`.
-
-### The constrained `quince-zfs-helper` (forced-command reference)
-
-On the ZFS host, add a **dedicated** SSH key whose `authorized_keys` entry forces this helper —
-quince can then only snapshot/destroy/list `@quince-*` and create child datasets under the one
-configured parent. **Dataset destroy is deliberately impossible via this key** — quince prints
-the exact `zfs destroy <dataset>` command for a human instead.
-
-`authorized_keys` (one line):
-
-```
-command="/usr/local/sbin/quince-zfs-helper rpool/quince",no-port-forwarding,no-agent-forwarding,no-pty,no-X11-forwarding ssh-ed25519 AAAA... quince
-```
-
-`/usr/local/sbin/quince-zfs-helper` — **the parent dataset is the forced command's own argument**
-(quince#985), read as `$1` before the script looks at the client's request, which is what stops the
-client escaping it. The dataset and the path are inside **one** pair of quotes: sshd parses
-`command="…"` as a single option value, so closing the quote after the path leaves the dataset where
-sshd expects the next option name and the line is rejected.
-
-**IT USED TO BE BAKED INTO THE SCRIPT, AND THAT IS WHY ONE INSTALL PATH WAS A TRAP.** Each storage's
-helper was rendered with its own `PARENT=`, so a second zfs storage on the same host saved its copy
-over the first's and the first failed at its next commit — hours later, with nothing pointing back at
-the storage that was added. The script is now **identical on every install**, and what differs is one
-word per key in `authorized_keys`.
-
-**So two storages on one host need two keys, one line each — and quince makes both** (quince#989). A
-forced command is a property of a key: sshd uses the first `authorized_keys` line whose key matches
-and stops looking, so one public key on two lines with two different datasets confines both to
-whichever line comes first.
-
-**One key per PARENT DATASET, at a path quince derives from it** under `/data/keys/`, escaping `/` as
-`+` — `tank/quince` → `/data/keys/zfs-tank+quince`. Press the button once per storage and each answer
-carries its own line. Two storages under **one** parent correctly share one key, exactly as they
-share one helper: their confinement is identical, so a second key would buy nothing but a second line
-to paste. Setting `ssh_key` yourself still wins, which is the escape hatch for a key you already have
-deployed.
-
-**`+` is not decoration.** No ZFS dataset name can contain one, so no two datasets can derive one
-filename — and because the escape removes every separator, a name like `tank/../../etc`, which
-quince's own validator accepts, cannot reach a file outside `/data/keys/`.
-
-**And it is `+` rather than `%` because OpenSSH percent-expands `IdentityFile`.** Measured on a rig,
-2026-08-15: `ssh -i /data/keys/zfs-labpool%quince` never connects — it dies parsing its own argument
-with `vdollar_percent_expand: unknown key %q` — while the same key at a `+` path answers. If you
-hand-place a key, keep percent signs out of its path. Mirroring datasets into
-real directories was considered and rejected for that, and for a second reason: `tank/backups` and
-`tank/backups/cold` are both legal datasets, and a directory tree cannot hold a file and a directory
-under one name. Git chose that layout for loose refs and can only refuse — `cannot lock ref
-'refs/heads/foo/bar': 'refs/heads/foo' exists` — and under ZFS, where nesting **is** the model and
-quince puts one child dataset per device under the parent, that shape sits on the common path.
-
-**THE SCRIPT IS A FILE, NOT A FENCE IN THIS DOCUMENT** — `core/internal/storage/zfshelper/quince-zfs-helper`.
-
-It moved there (quince#818 piece C) because it is a **product artifact** rather than an excerpt: the
-*Add storage* screen serves the script back, so it hands you a finished file instead of asking you to
-edit one. That needs `go:embed`, which cannot reach outside its module, and the module root is
-`core/` — so the path is decided by the mechanism rather than by taste.
-
-**It is served, and since quince#985 it is served UNCHANGED** — the same bytes for every install of a
-version, because the only per-install value it ever carried now rides in the `authorized_keys` line.
-
-**How to install it, which the file itself deliberately does not say.** Copy it to the ZFS host as
-`/usr/local/sbin/quince-zfs-helper`, `chmod +x` it, and pin it as the forced command in the
-`authorized_keys` line above, **with your parent dataset after it**. Nothing inside the file needs
-editing. Those instructions live here rather than
-in the script's own header because **a file that says *"install as …"* is addressing somebody who has
-not installed it, and every reader of the installed copy has.** Once it is on disk at that path the
-line is noise at best and contradicts its own location at worst — and once quince serves the script
-(piece C) the screen carries the instruction beside the copy button, which is where somebody about to
-paste is actually looking.
-
-**Two things followed from the move, and both are the point rather than side effects.** The Go gate
-that runs the real helper against a stubbed `zfs` now reads the file instead of parsing this
-document for a fenced block, so a prose edit can no longer break a gate. And `shellcheck` opened the
-script **for the first time** — it had never been linted while it lived in a fence — which is what
-produced the `SC2086` question the next section answers.
-
-**THE FILE IS DELIBERATELY SPARE, AND THIS SECTION IS WHY IT CAN BE** — decided on
-quince#887. The script is displayed verbatim in the UI and then installed on somebody's storage host,
-so it is read there as an *artifact*, not as our notebook: a reader deciding whether to trust a file
-they are about to run as root should not have to page through this project's reasoning to find the
-code. It was **90 lines, 65 of them comment**; it is now 41, with the code byte-identical apart from
-what quince#984 and quince#985 changed. The comments that survive are the ones an operator needs *at
-that moment* — what the script allows, and why three lines that look wrong are not.
-
-**THE RULING BINDS EVERY LATER EDIT, AND quince#985 BROKE IT BEFORE THIS SENTENCE EXISTED.** That PR
-added ten lines of block-capital rationale to the header — *"ONE FILE PER HOST, IDENTICAL BYTES FOR
-EVERY INSTALL"*, *"$1 IS THE OPERATOR'S AND $SSH_ORIGINAL_COMMAND IS THE CLIENT'S"* — which is this
-this project writes for itself, and exactly what a file rendered on a screen must not carry
-(2026-08-14: *"EVERY BYTE IN THIS FILE HAS TO HAVE BULLET PROOF REASONING WHY IT'S HERE"*).
-The reasoning lives here and in `zfshelper.go`; **the test for a line in the script is whether a
-stranger about to run it as root needs it to decide.** Stated as a rule rather than left as a
-one-time cleanup, because the ruling was already in this section and got added to anyway.
-
-**What moved here, so nothing is lost:**
-
-- **`set -- $SSH_ORIGINAL_COMMAND` is unquoted on purpose.** A forced command receives the client's
-  request as one string, never as argv, so splitting it on whitespace is how the script gets its
-  arguments at all. Quoting it — what `SC2086` asks for — makes the whole request one word, no arm
-  matches, and every verb falls through to the refusal. **`set -f` would be a genuine narrowing** and
-  is deliberately not applied: no legal dataset or snapshot name contains a glob character, so
-  nothing valid would break, but it is a behaviour change to a security boundary that **no agent seat
-  can test** (quince#730 — the zfs branch has no live host outside the maintainer's). What holds
-  without it is that every arm guards `$target` against `"$PARENT"`/`"$PARENT"/*` before reaching
-  `zfs`.
-- **The `create` arm checks the parent exists BEFORE creating** — measured on a real pool, 2026-08-12
-  (quince#818). `zfs create -p` creates missing *parents* too, so a typo in the dataset the forced
-  command names did not fail: it silently built a whole new dataset tree and put backups in it. That tree has neither
-  of the two settings this document opens by requiring — no `com.sun:auto-snapshot=false`, no quota —
-  so the failure surfaces much later as retention reclaiming nothing, or as ENOSPC mid-backup.
-  Checking first turns that into a refusal naming the dataset, at a cost of one `zfs get` per create,
-  which is once per device rather than once per backup.
-- **The chown uid is inherited, not configured** (quince#818). There used to be a `CTUID=` constant an
-  operator had to know: `0` for privileged/native, the userns base (e.g. `100000`) for an
-  unprivileged LXC — a number that is invisible from inside the container, so quince could not fill
-  it in and a wrong one made the chown a silent no-op. The parent's mountpoint must already be
-  writable by quince, so its owner **is** the mapped root.
-- **`rollback` takes no `-r`, and none can reach it** — the parse drops every flag. Without `-r`,
-  `zfs rollback` refuses any snapshot but the most recent, and `-r`/`-R` are what destroy *newer*
-  snapshots, i.e. committed versions. So the verb structurally cannot lose one.
-- **`capacity` takes no caller argument at all, and REFUSES one rather than ignoring it**
-  (quince#984). That makes it *tighter* than the pattern-guarded arms, and it is why the helper check
-  fires it first: a failure there is unambiguously about reachability. The refusal is what makes
-  *every verb is confined* true by inspection — until it landed, this arm read `$PARENT` and dropped
-  whatever the caller sent, so a client asking about someone else's dataset got the right answer for
-  the wrong reason, and a later edit teaching it to honour an argument would have inherited no guard.
-- **Verbs that changed, for an operator upgrading an existing helper:** `seed)` was **deleted**
-  (the old clone of `latest/` → `working/<udid>`; quince no longer seeds on this backend) and
-  `rollback)` was **added** (what Reset uses). Backups keep working across that gap — only reset
-  needs the new verb.
-
-**⚠️ MIGRATION — operators upgrading MUST add the `capacity)` case from that file**, the same way this
-section records the changed verbs (`seed)` out, `rollback)` in). Without it every zfs storage card reads *"free
-space unavailable"* and the daemon logs `capacity unavailable on a reachable storage — omitted`.
-Nothing else breaks: backups, commits, snapshots and retention are untouched, and quince omits the
-number rather than showing a wrong one — which is why this is a migration note rather than a
-release blocker.
-
-**`Test helper` in the UI now TELLS YOU whether you did this.** Adding a storage on the
-zfs backend fires two of the arms above — `capacity` (no argument) then `list <your parent dataset>`
-— and distinguishes four states rather than working/not-working:
-
-| what happens | what it means |
-| --- | --- |
-| both answer | the key, the forced command and the parent all line up |
-| `capacity` refused, `list` answers | **you have not applied the migration above** |
-| `capacity` answers, `list` refused | the dataset you typed is not the `PARENT` set in this script |
-| neither answers | the key, the forced command in `authorized_keys`, or the host |
-
-**An empty answer from `list` is SUCCESS, not a failure.** It returns the `@quince-*` snapshots
-under the parent, and a storage with no backups yet has none — so a correct, freshly-installed
-helper answers with nothing at all.
-
-Both verbs are read-only and path-guarded, which is why quince is willing to fire them from a form.
-Nothing quince sends can create, destroy or write, and that is a property of the `case` arms above
-rather than of quince's restraint — which is the point of a forced command.
-
-**Why a new verb rather than letting `list` take flags** (quince#600).
-quince first shipped this read as `list -H -p -o used,available "$PARENT"`, which assumes the
-helper forwards argv to `zfs`. **It does not, and that is the entire point of a forced command.**
-The `list` arm runs a fixed `zfs list -t snapshot`, so the call returned the *snapshot list* at
-**exit 0** — a succeeded command with wrong-shaped output, which is why it survived a release.
-Teaching `list` to forward flags was the tempting fix and was refused: the same key would then take
-arbitrary `zfs list` arguments, and *"dataset destroy is intentionally NOT reachable"* would stop
-being checkable by reading these five case arms.
-
-**The `rollback` verb is what Reset uses**, and it is the only verb that changes a device's
-live data. It returns the device dataset to its newest `@quince-*` snapshot, discarding whatever a
-failed job left in the head. **It structurally cannot lose a committed version, and that is a
-property of the parse rather than of quince's restraint:** the helper discards every flag, so
-`rollback -r <snap>` reaches `zfs` as a plain `zfs rollback <snap>` — and a plain rollback refuses
-any snapshot but the most recent, while `-r`/`-R` are exactly what destroy newer ones. Measured
-through this script on real ZFS, 2026-08-08: `-r` was discarded and the newer snapshot survived; a
-non-`@quince-*` target was refused; `destroy <dataset>` with no `@` was refused.
-
-**It cannot be probed, which is a stated cost.** `Test helper` fires `capacity` and `list` because
-both are harmless; there is no harmless way to test a rollback, since testing it means performing
-one. So a helper that never got the new case surfaces at the **first reset a user asks for**, as this
-script's own `quince-zfs-helper: refused: rollback …` on stderr. quince's job is to make that legible
-rather than to pretend it can be caught earlier.
-
-**`zfs rollback` also refuses whenever ANY newer snapshot exists — including a foreign one.** That is
-why the host snapshotter must be excluded (see REQUIRED SETUP above): an automatic snapshotter firing
-every few minutes means a `@quince-*` snapshot stops being the most recent within minutes of being
-taken, and from then on reset is refused. quince surfaces that refusal with `zfs`'s own words and
-tells the operator the dirty head is still resumable — it does not, and must not, destroy somebody
-else's snapshots to clear the path.
-
-**The old `seed` verb is GONE.** quince has no job-start clone on this backend any more: the tool
-writes straight into the dataset root, so there is nothing to seed from and nothing to seed into.
-Delete the case from your script — nothing calls it, and leaving it is a `cp -a --reflink` and an
-`rm -rf` reachable by a key that no longer needs them. Hookless deployments are likewise unaffected:
-the in-container seed ladder is not reached on zfs either.
-
-Then the transport. **You give quince the user and the host; it composes the rest** — the key, the
-port and all three host-key options — and appends the operation + target as argv:
-
-```yaml
-zfs:
-  parent_dataset: rpool/quince
-  ssh_user: zfsuser
-  ssh_host: zfshost
-  # ssh_port: 22               # both OPTIONAL — these are the defaults, so leave them out
-  # ssh_key: /data/keys/zfs    # unless you already keep the key somewhere else
-```
-
-which quince runs as:
-
-```
-ssh -i /data/keys/zfs -p 22 -o BatchMode=yes -o UserKnownHostsFile=/data/keys/known_hosts -o StrictHostKeyChecking=yes zfsuser@zfshost
-```
-
-**`StrictHostKeyChecking=yes`, not `accept-new`.** `accept-new` trusts whatever answers first, which
-on a first connect is exactly the moment a machine-in-the-middle would want. Seeding `known_hosts`
-below is what makes `yes` workable, and it is the property standing between this and somebody else's
-host receiving your backups.
-
-**THE HOST KEY IS NOT OPTIONAL, AND OMITTING IT FAILS EVERY HOOK CALL FROM THE FIRST ONE.**
-`BatchMode=yes` disables the interactive *"are you sure you want to continue connecting?"* prompt —
-that is what makes it safe to run unattended — so ssh cannot accept an unknown host key and refuses
-instead. A container's `known_hosts` is empty on a first install, which is exactly when an operator
-sets this up. Measured on a lab rig, 2026-08-10, with the command shape this document carried until
-now (`-i <key> -o BatchMode=yes user@host`), against a real forced-command helper:
-
-```
-Test helper → outcome: unreachable
-              detail:  Host key verification failed.
-```
-
-The same command with the two options above answers `ok`. **Nothing about the key, the forced
-command or the pool was wrong** — and `unreachable`'s remedy text points at all three, so the one
-cause it cannot be is the one it is.
-
-**Seed `known_hosts` on the host, before the first backup.** This is the recommended form: it pins
-the key you verified, once, and `StrictHostKeyChecking=yes` refuses anything else forever after.
-
-```sh
-ssh-keyscan -t ed25519 zfshost >> /path/to/quince/data/keys/known_hosts   # then EYEBALL it
-```
-
-**`StrictHostKeyChecking=accept-new` IS NO LONGER SELECTABLE, and this paragraph used to offer it.**
-It was *"the documented alternative"* — record the key on first contact, refuse a *change*
-thereafter; weaker than seeding, because it trusts whatever answers the first time. That was a real
-choice while the operator wrote the whole command. **Since quince#818 quince composes it**, so the
-only reachable value is `yes` and there is no spelling of `config.yml` that yields `accept-new`.
-
-**Corrected rather than deleted, because it was live guidance the day before** — an operator who
-chose `accept-new` deliberately needs to know it is gone, rather than wonder why their setting
-stopped having an effect. Seeding is therefore no longer *recommended over* the alternative; it is
-the only path, which is why the step above is required.
-
-Child-dataset visibility: a dataset created after the container starts appears as an empty stub
-inside a plain bind mount. The host `zfs create` must propagate through **both** hops — into the
-LXC (`lxc.mount.entry: /pool-mount mnt/x none rbind,rslave,create=dir 0 0`, which becomes
-slave+shared when the host mount is `shared`) **and** onto the OCI bind (`propagation: rslave` /
-`-v src:dst:rslave`) — so the new child mounts live at `/backups/<udid>` in the container
-(design §5). quince probes visibility and prints `pct set -mpN` fallback instructions when
-propagation is absent.
-
-## Offsite sync (D5a) — the anchored filter block
-
-The offsite model is a **whole-tree** rclone job over the storage parent that walks live mounts.
-The live namespace always presents a consistent last-verified `latest/` per device; the mutable
-and local-only areas are excluded by **anchored** filter rules. Ship this block verbatim (adjust
-`iphone-backup` to quince's directory name under your transfer root):
+Run rclone over the whole storage directory and exclude two paths:
 
 ```
 --filter "- /iphone-backup/*/working/**"
 --filter "- /iphone-backup/*/versions/**"
 ```
 
-(the old per-job `work/<job>/` dir is gone — the mutable in-progress tree is now
-`working/<udid>/`, still covered by the anchored `working/**` rule.)
+Change `iphone-backup` to whatever quince's directory is called under your transfer root.
 
-⚠ **The leading `/` (anchor) is load-bearing.** An unanchored `--exclude "**/working/**"` would
-also drop any directory named `working` *inside* backup content under `latest/`, silently
-corrupting the offsite copy. quince's `storage.AnchoredFilterRules` emits exactly these rules and
-`storage.PathExcluded` proves their semantics in CI; the real `rclone` binary is exercised in the
-lab gate against real hardware.
+⚠ **The leading `/` matters.** Without it, `**/working/**` would also drop any folder called
+`working` *inside* your actual backup content — silently corrupting the copy. quince generates
+exactly these rules itself, and they are tested.
 
-`versions/` is excluded because rclone has no reflink/hardlink awareness and would upload every
-version at full size — local history stays local; remote history comes from B2 bucket versioning
-or `--backup-dir`. The operator's flow is:
+`versions/` is excluded because rclone cannot see that versions share data, so it would upload
+every one at full size. Keep history locally; get remote history from bucket versioning or
+`--backup-dir`.
 
-```
-zfs snapshot -r pool/path/to/iphone-backup@offsite-$(date +%s)   # local restore point (zfs backend)
-rclone sync /pool/path b2:bucket/quince <the three --filter lines above>
-```
+**It is safe to run this while a backup is in progress.** A version only appears once it has
+been verified, and it appears all at once, so a sync can never pick up half of one.
 
-**There is no non-atomic instant — ON THE reflink / hardlink / copy BACKENDS.** There
-`latest/` changes only by a single `renameat2(RENAME_EXCHANGE)`, so it is never unoccupied and a walk
-crossing a commit always sees a complete `latest/`, never a missing one. This replaced the old
-two-rename swap, whose window an `rclone sync` could cross and mirror as a **deletion** of the remote
-copy. Between backups the device dir holds only
-`latest/` (the per-job `working/` exists only during/after a backup, and is rclone-excluded).
-
-⚠ **ON ZFS THAT GUARANTEE IS GONE, AND THE FILTER RULES ABOVE MATCH NOTHING.** The backup
-tree is the dataset root, so there is no `working/`, no `versions/` and no `latest/` — the whole
-device dataset is in scope for a whole-tree walk, and **during a backup it is a half-transferred
-tree**. An rclone job crossing it uploads that as though it were a verified version, and it fails
-silently from the operator's side.
-
-**So a zfs storage must be EXCLUDED from a whole-host rclone job until the snapshot-sourced offsite
-path exists** — that is [quince#735](https://github.com/novkostya/quince/issues/735), which reads
-`.zfs/snapshot/<snap>/` instead of the live tree. The cost was accepted knowingly when the in-place
-shape was ruled; it is stated here rather than left to be discovered.
+⚠ **Except on ZFS, where it is not safe and the filters above match nothing.** There, the
+backup is written in place, so during a backup the directory holds a half-transferred tree —
+and rclone would upload that as though it were a finished version, with nothing to tell you.
+**Exclude a ZFS storage from a whole-disk rclone job** until quince can sync from snapshots
+instead: [quince#735](https://github.com/novkostya/quince/issues/735).

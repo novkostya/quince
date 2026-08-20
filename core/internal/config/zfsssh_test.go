@@ -72,7 +72,7 @@ func TestSSHArgvDefaultsThePortAndTheKey(t *testing.T) {
 
 // THE HOST-KEY OPTIONS ARE NOT OPTIONAL, and `StrictHostKeyChecking` must be `yes` rather than
 // `accept-new`. `accept-new` trusts whatever answers first, which on a first connect is exactly the
-// moment a machine-in-the-middle would want — and `deploy/storage.md` names this as the property
+// moment a machine-in-the-middle would want — and `deploy/zfs-helper.md` names this as the property
 // standing between that and the operator's backups.
 func TestSSHArgvComposesStrictHostKeyChecking(t *testing.T) {
 	joined := strings.Join(ZFSConfig{SSHUser: "u", SSHHost: "h"}.SSHArgv(), " ")

@@ -11,6 +11,7 @@ Plain English, with none of this project's internal vocabulary, and no block cap
 | --- | --- |
 | [`compose.yml`](compose.yml) | The example stack. Start here. |
 | [`storage.md`](storage.md) | Where backups go, and what each kind of disk gives you |
+| [`zfs-helper.md`](zfs-helper.md) | Setting up the ZFS helper script, if you use ZFS |
 | [`tls.md`](tls.md) | Getting HTTPS in front of quince |
 
 ## For people working on quince

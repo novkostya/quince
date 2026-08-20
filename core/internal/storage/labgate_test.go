@@ -7,7 +7,7 @@
 //
 // It hardcodes NO infrastructure (privacy rule) — everything comes from env. Produce an encrypted
 // backup into the device's working/ first (idevicebackup2 backup, phone unlocked + passcode), set
-// up the constrained hook per deploy/storage.md, then run in the toolchain container with the
+// up the constrained hook per deploy/zfs-helper.md, then run in the toolchain container with the
 // dataset parent bound at /backups and the hook key reachable, e.g.:
 //
 //	nerdctl run --rm -v /root/quince:/src -w /src/core \
@@ -17,7 +17,7 @@
 //	  -e QUINCE_LAB_ZFS_PARENT=<pool/parent> \
 //	  -e QUINCE_LAB_ZFS_HOOK="ssh -i /data/keys/zfs -o BatchMode=yes -o UserKnownHostsFile=/data/keys/known_hosts -o StrictHostKeyChecking=accept-new <user>@<host>" \
 //	  # the two host-key options are load-bearing: BatchMode disables the accept-key prompt, so a
-//	  # container with an empty known_hosts REFUSES every hook call. See deploy/storage.md.
+//	  # container with an empty known_hosts REFUSES every hook call. See deploy/zfs-helper.md.
 //	  -e QUINCE_LAB_ZFS_SEED=auto \
 //	  quince-toolchain-go:local go test -tags lab ./internal/storage/ -run TestLabGate12 -v
 //
