@@ -63,7 +63,7 @@ services:
       - ./quince/data:/data # config, database, pairing records — keep this
       - ./quince/cache:/cache # scratch, safe to delete
 
-      # ▸ YOUR BACKUPS GO HERE. Point the left side at real storage — a NAS share, a ZFS
+      # ▸ Your backups go here. Point the left side at real storage — a NAS share, a ZFS
       #   dataset, a big disk. A full iPhone backup can run to tens of gigabytes.
       - ./quince/backups:/backups
 
