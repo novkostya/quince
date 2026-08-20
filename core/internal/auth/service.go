@@ -358,6 +358,20 @@ func (s *Service) ChangePassword(proofs *Proofs, pres Presented, next, sessionID
 	if err := s.store.SetSetting(settingPasswordHash, newHash); err != nil {
 		return err
 	}
+	// END THE SESSIONS THE OLD PASSWORD CREATED (quince#1001). People change a password when
+	// they think it leaked, and the sessions that password created are exactly the ones that
+	// must not survive it. AFTER the write, so a failure here cannot leave the old password
+	// live with the sessions already gone.
+	//
+	// BEST EFFORT, AND SAID SO RATHER THAN SWALLOWED. The password IS changed by this point;
+	// returning an error would tell the caller the change failed when it did not. The audit
+	// line records what actually happened either way.
+	if n, err := s.store.DeleteAuthSessionsFor(nil, sessionID); err != nil {
+		s.log.Warn("could not end sessions after a password change",
+			"err", err, "note", "the password WAS changed; other sessions may still be live")
+	} else if n > 0 {
+		s.audit("sessions_ended_password_changed", clientIP)
+	}
 	s.audit("password_changed", clientIP)
 	return nil
 }
@@ -481,6 +495,14 @@ func (s *Service) RemovePassword(proofs *Proofs, pres Presented, rpID, sessionID
 	}
 	if _, err := s.store.DeleteSetting(settingPasswordHash); err != nil {
 		return err
+	}
+	// The password is gone, so every session it created must go with it (quince#1001) — the
+	// same reasoning as a change, and stronger: there is no longer a credential to re-prove.
+	if n, err := s.store.DeleteAuthSessionsFor(nil, sessionID); err != nil {
+		s.log.Warn("could not end sessions after a password removal",
+			"err", err, "note", "the password WAS removed; other sessions may still be live")
+	} else if n > 0 {
+		s.audit("sessions_ended_password_removed", clientIP)
 	}
 	s.audit("password_removed", clientIP)
 	return nil
@@ -629,7 +651,24 @@ func (s *Service) RemovePasskey(proofs *Proofs, pres Presented, credentialID, rp
 		return false, ErrSelfRemoval{Detail: "a passkey cannot authorise its own removal — " +
 			"use your password, or a different passkey."}
 	}
-	return s.store.DeletePasskey(credentialID)
+	deleted, err := s.store.DeletePasskey(credentialID)
+	if err != nil || !deleted {
+		return deleted, err
+	}
+	// A REVOKED CREDENTIAL WHOSE SESSION KEEPS WORKING IS NOT REVOKED (quince#1001, and spec
+	// D9). This is the one of the three that qn.13 makes load-bearing: the admin revoking a
+	// household member's passkey expects that phone to stop working, and under scope a
+	// surviving session would defeat the confinement claim entirely.
+	//
+	// Best effort, for the same reason as the password paths: the credential IS gone, so
+	// reporting failure would misdescribe what happened.
+	if n, err := s.store.DeleteAuthSessionsFor(&credentialID, sessionID); err != nil {
+		s.log.Warn("could not end sessions after a passkey removal",
+			"err", err, "note", "the credential WAS removed; its sessions may still be live")
+	} else if n > 0 {
+		s.audit("sessions_ended_passkey_removed", clientIP)
+	}
+	return deleted, nil
 }
 
 // passkeyRemovalRefusal builds the message for a `remove_passkey` ceremony that cannot produce a
