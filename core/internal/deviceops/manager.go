@@ -49,8 +49,6 @@ type Manager struct {
 	enrichWait      time.Duration
 	validateTimeout time.Duration // amendment A: bound the non-interactive validate read
 
-	lockdown *LockdownStore // optional: answers the D7 write probe. See lockdown.go.
-
 	mu  sync.Mutex
 	ops map[string]wire.Op
 	// inflight is the per-UDID single-flight slot: udid → the op id holding the device. Separate
@@ -58,10 +56,6 @@ type Manager struct {
 	// this must be empty the moment the op's goroutine ends. See startGuardedOp.
 	inflight map[string]string
 }
-
-// SetLockdown attaches a LockdownStore, which answers the qn.6p D7 write probe. Optional — nil
-// means quince makes no claim about whether a pairing can be recorded (e.g. tests, the demo).
-func (m *Manager) SetLockdown(l *LockdownStore) { m.lockdown = l }
 
 const opsSoftCap = 200 // prune terminal ops beyond this to bound the map
 
@@ -203,19 +197,20 @@ func (m *Manager) Pair(_ context.Context, udid string) (string, int, string) {
 	if dev.Transports.USB == nil {
 		return "", http.StatusConflict, "pairing needs a USB connection — connect the device by cable"
 	}
-	// A PAIRING THAT CANNOT BE RECORDED IS NOT A PAIRING (qn.6p D7). Without this, idevicepair
-	// runs, the phone shows Trust, somebody walks over and taps it, and the record fails to
-	// write — so the refusal comes BEFORE the user is asked to act, carrying the reason.
-	//
-	// CHECKED HERE AND NOT ONLY IN THE UI. The wire field the UI reads is the answer from startup;
-	// this is the answer NOW, and a disk fills or a mount changes in between. The field keeps the
-	// button from being offered; this is what makes it harmless if it is.
-	if writable, why := m.PairingWritable(); !writable {
-		return "", http.StatusConflict, "pairing records cannot be written, so a pairing would not " +
-			"survive: " + why + " — if another tool owns these records, quince can still read them"
+	// THE ONE REFUSAL THAT SURVIVES D7, and it is narrower than D7's (qn.6r D3). No safe
+	// pre-check for *can the muxer record a pairing* exists — the only message that answers it
+	// overwrites unconditionally — so quince cannot spend the user's walk to the phone on their
+	// behalf. What it CAN do is refuse when it cannot reach the muxer at all, because then the
+	// pairing certainly cannot be recorded and the answer costs no extra probe: this is the
+	// before-read the op needs anyway.
+	before := m.tools.readPairRecord(m.baseCtx, udid, TransportUSB)
+	if before.State == muxd.PairRecordUnknown {
+		return "", http.StatusConflict, "quince cannot reach the muxer for this device, so a pairing " +
+			"could not be saved and would not survive. Check that the muxer is running and that quince " +
+			"can reach its socket, then try again."
 	}
 	op, free := m.startGuardedOp("pair", udid, "Starting pairing…", func(opID string) {
-		m.runPair(opID, udid)
+		m.runPair(opID, udid, before)
 	})
 	if !free {
 		return "", http.StatusConflict, inFlightMsg
@@ -223,16 +218,9 @@ func (m *Manager) Pair(_ context.Context, udid string) (string, int, string) {
 	return op.ID, http.StatusAccepted, ""
 }
 
-func (m *Manager) runPair(opID, udid string) {
+func (m *Manager) runPair(opID, udid string, before muxd.PairRecord) {
 	ctx, cancel := context.WithTimeout(m.baseCtx, m.pairTimeout)
 	defer cancel()
-
-	// READ THE RECORD BEFORE THE PAIR, because presence afterwards is not the question.
-	// A device whose record is STALE — the phone was reset, or trust was revoked — still has a
-	// file in the muxer's store, and `paired` is a lockdown validation rather than record
-	// presence (contracts.md), so quince offers Pair for exactly that device. Checking only
-	// afterwards would find the OLD record and call the pairing recorded (qn.6r D3).
-	before := m.tools.readPairRecord(ctx, udid, TransportUSB)
 
 	lastMsg := ""
 	for {
@@ -674,24 +662,6 @@ func encDoneMsg(action string) string {
 	default:
 		return "Done."
 	}
-}
-
-// PairingWritable reports whether a pairing record could be written right now (qn.6p D7).
-//
-// IT ASKS THE WRONG FILESYSTEM, and qn.6r D3 is where that is fixed. quince mounts no muxer store,
-// so the directory underneath this is container-local and the answer is effectively always `true`.
-// D3 deletes it rather than repointing it, because no safe pre-check for the muxer's store exists.
-//
-// NO LOCKDOWN STORE MEANS NO CLAIM, AND THAT ARM IS `true` DELIBERATELY. The store is optional —
-// SetLockdown's own doc says nil means quince makes no claim, which is how tests and the demo run —
-// so refusing to pair when nobody attached one would break every caller that never wanted the probe
-// in order to guard a directory that does not exist. The honest reading of nil is "quince is not
-// answering this question", not "quince cannot pair".
-func (m *Manager) PairingWritable() (bool, string) {
-	if m.lockdown == nil {
-		return true, ""
-	}
-	return m.lockdown.Writable()
 }
 
 // pairOutcomeFromRecords turns the two observations into an op result. IT MUST NOT COLLAPSE

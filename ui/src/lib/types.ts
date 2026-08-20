@@ -12,16 +12,6 @@ export interface LastBackup {
   status: string;
 }
 
-// Pairing is a SYSTEM capability from the GET /api/devices envelope, not a per-device one
-// (qn.6p D7): there is one lockdown directory behind every device.
-//
-// `reason` is DIAGNOSTIC, not screen copy. It carries a path and an errno from the server, so
-// a surface renders its own sentence first and this second, as detail — a Go error string is
-// not something a user should have to read to understand what is wrong.
-export interface Pairing {
-  writable: boolean;
-  reason?: string;
-}
 
 export interface Device {
   udid: string;

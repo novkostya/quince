@@ -42,13 +42,6 @@ import (
 	"github.com/novkostya/quince/core/internal/webui"
 )
 
-// lockdownSystemDir is where libimobiledevice looks for the daemon's pairing records on Linux.
-// THE RECORDS ARE THE MUXER'S, NOT QUINCE'S (qn.6r D1): every userpref pair-record call is a
-// message to the muxer, so quince neither persists nor restores them and mounts this path
-// nowhere. What is left underneath is container-local, which is why the D7 probe over it answers
-// a question nobody asked — qn.6r D3.
-const lockdownSystemDir = "/var/lib/lockdown"
-
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "quince: "+err.Error())
