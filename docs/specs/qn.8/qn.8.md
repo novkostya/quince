@@ -306,6 +306,17 @@ is true. quince records the condition on the session and the browse listing mark
 incomplete on any subsequent view, with the sentence that makes it actionable: **the file is
 incomplete in the backup, and retrying will not change that.**
 
+**D8.1a — incompleteness must NOT be carried by the error code, and the reason is that `""` is
+silence rather than a signal** (quince#1348 review). `Code(ErrIncompleteFile)` is `""` because `io`
+would report a failure that did not happen — but `Code(nil)` is `""` too, so the ordinary caller
+shape `if code := Code(err); code != ""` takes the **success** path and the incompleteness vanishes
+with no trace. Against `io` that is still the better trade; what it means is that `Code()` **cannot
+be the thing that surfaces it**, which *no silent caps or fallbacks* requires somewhere.
+
+So slice 6 carries it as a **field** on the response and the browse entry, with a test that the
+surface actually fires. Without that test the failure is invisible: if slice 6 routes on `Code()`
+alone, D8.1's promised surface never appears **and every test still passes**.
+
 ### D9 — Session lifecycle: one TTL, one config key, and a name that does not collide
 
 A session is `{id, version_id, expires_at}` (contracts §2). It is created by `unlock`, ends by `lock`,
@@ -587,7 +598,7 @@ Each is one PR carrying one reviewable claim, **sequenced from `main`, not stack
 | **3** | `vault.Vault` + the conformance suite and its negative control, against the in-process encrypted implementation — quince#184 (D1, D2, D5, G1, G2) | **yes** (D4, D5, D6) |
 | **4** | the unencrypted implementation and the selection on `IsEncrypted` (D7) | yes |
 | **5** | the session registry, `vault.session_ttl_minutes`, teardown and the scratch wipe, plus G3, G5 and **G7 — D10.3 clause (c), the one measurement the spike cannot take** (D6, D9, D10.3b) | no |
-| **6** | the four REST endpoints, the error taxonomy and contracts §4/§2's amendment (D3, D8) | no |
+| **6** | the four REST endpoints, the error taxonomy and contracts §4/§2's amendment (D3, D8) — **and incompleteness travels as a FIELD, not through `Code()`, with a test that the surface fires** (D8.1; quince#1348 review) | no |
 | **7** | the UI — unlock dialog, browser, download, the incomplete-file surface (D8.1), **and the Settings control for `vault.session_ttl_minutes`** | no |
 | **8** | design §7 and §6 rewritten to the seam as built, including D11's gate wording, ruled with the number from slice 2 | no |
 

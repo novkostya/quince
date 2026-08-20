@@ -193,10 +193,21 @@ var (
 //
 // ErrIncompleteFile answers "" DELIBERATELY, and it is the reason this function has an
 // explicit case for something that is not a failure. It reports a fact about the version
-// after a successful read, so routing it here at all is a caller bug — and letting it fall
-// through to `io` would report an I/O failure that did not happen, on a read that
-// delivered every byte the backup holds. Answering "" makes the bug visible instead of
-// dressing it as a plausible error.
+// after a successful read, so letting it fall through to `io` would report an I/O failure
+// that did not happen, on a read that delivered every byte the backup holds.
+//
+// BUT "" IS NOT A SIGNAL — IT IS SILENCE, AND THE DIFFERENCE MATTERS DOWNSTREAM.
+// `Code(nil)` is also "", so the ordinary caller shape `if code := Code(err); code != ""`
+// takes the SUCCESS path and the incompleteness vanishes with no trace. That is still the
+// better trade against `io`, which would report a failure that did not occur — but it
+// means this function CANNOT be the thing that surfaces it, and quince's "no silent caps
+// or fallbacks" rule requires that it be surfaced somewhere.
+//
+// So incompleteness travels as a FIELD, never as a code: contracts.md §4's amendment and
+// the REST surface (slice 6) carry it explicitly, with a test that the surface fires. If a
+// caller ever routes it through here alone, D8.1's promise silently never appears and every
+// test still passes — which is why this paragraph exists rather than a one-line comment.
+// (quince#1348 review.)
 func Code(err error) string {
 	switch {
 	case err == nil:

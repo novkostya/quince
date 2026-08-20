@@ -283,10 +283,12 @@ func (r *Registry) teardown(e *registryEntry) error {
 	// path and never during a backup.
 	//
 	// WHETHER IT REACHES THE BAR IS UNMEASURED and is owed to G7: returned pages are not
-	// the whole of RSS, and fragmentation can hold an address space open regardless. The
-	// clause is written as "within 32 MB of baseline" for exactly that reason, and the
-	// alternative — accepting retention with a stated reason — is live and unruled at
-	// quince#1344.
+	// the whole of RSS, and fragmentation can hold an address space open regardless, which
+	// is why the clause is written as "within 32 MB of baseline" rather than "back to it".
+	// The clause itself is RULED — Operator, 2026-08-20, quince#1344, all three of D10.3's
+	// clauses confirmed as written — and the alternative, accepting retention with a stated
+	// reason, was weighed and REFUSED rather than never raised. It will be re-proposed the
+	// first time this is expensive to meet; D10.3c is where to read why it lost.
 	if r.freeOSMemory != nil {
 		r.freeOSMemory()
 	}
