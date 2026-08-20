@@ -53,6 +53,10 @@ in the shell's shape; the admin's view of what they have issued, and revocation 
    row of a new kind exists: `auth/accepts.go:87` (`if len(creds) > 0`), `auth/reauth.go:195-210`
    (`ListPasskeys`, then `ErrLastCredential`), and `auth/passkey.go:332-361`
    (`existingCredentials`, filtered by rpID and nothing else).
+   **A FOURTH SITE IS A CEREMONY, NOT A PREDICATE**: `auth/reauth.go:158` calls
+   `BeginDiscoverableLogin(opts...)` and passes an allow-list only for `OpRemovePasskey`, so
+   `set_password` and `add_passkey` admit any credential at the rpId as proof. It fails the same way
+   and is covered by the same invariant (D6, G1).
 6. **The per-device notifications switch is `device_notification_prefs`** (`0013_...sql`), keyed on
    `udid`, with an `enabled` boolean. quince#1342 §5 reported finding no such column because it
    searched for `notifications_enabled`; **that item is closed.** The migration's own comment
@@ -119,7 +123,9 @@ capability is a property of a credential. **The no-account-picker question has b
 ### D2.1 — A scoped credential MUST NOT be named `quince-admin` (Operator, 2026-08-20)
 
 **Operator, on being shown the measurement: *"household member must not be quince-admin, that's
-wild."*** Ruled, and the reason is state honesty at the one place the user actually looks: the iOS
+wild."*** **Given IN SESSION and relayed here by the implementer. It is NOT on the forge, and this
+sentence is the whole of its provenance** — the same backing, and the same disclosure, as D7's.
+Ruled, and the reason is state honesty at the one place the user actually looks: the iOS
 sheet labels a credential with its `user.name`, so a household member's phone would tell them they
 hold **admin** — the opposite of what their credential grants.
 
@@ -141,10 +147,30 @@ collapse, so the unselectable single row cannot arise even on a phone holding bo
 The measurement showed iOS selecting a credential with no way for the user to intervene. The fix is
 for quince to stop asking it to.
 
-**The lever already exists and is one call.** `auth/passkey_login.go:35` calls
-`BeginDiscoverableLogin()` — an empty allow-list, which *is* "platform, you choose". The library's
-`BeginLogin(user)` populates `allowCredentials` instead, so quince decides what is offered. Both use
-the same discoverable credentials; only the offer differs.
+**The lever already exists.** `auth/passkey_login.go:35` calls `BeginDiscoverableLogin()` — an empty
+allow-list, which *is* "platform, you choose". The library's `BeginLogin(user)` populates
+`allowCredentials` instead, so quince decides what is offered. Both use the same discoverable
+credentials; only the offer differs.
+
+**There are TWO call sites, not one, and only the login one is D2.2's.** `auth/reauth.go:158` also
+calls `BeginDiscoverableLogin(opts...)` — and it **already narrows**, passing
+`WithAllowedCredentials(allowed)` for `OpRemovePasskey` so the credential being removed cannot prove
+its own removal. Every other operation stays discoverable, with the reason stated at that call:
+`add_passkey` and `set_password` *"are about the credential SET rather than a member of it, so
+restricting them would exclude nothing"*.
+
+**That reason is what this rung changes, and the change belongs to D6 rather than to D2.2.** Once
+credentials carry scope there is no longer *one* credential set: `set_password` and `add_passkey`
+operate on the **admin's**, so admitting a scoped credential as proof would let a scoped holder
+prove an admin operation. **So reauth's allow-list must become scope-correct — an admin operation
+admits only admin credentials — and that is D6's invariant reaching the ceremony rather than the
+predicate.** It is not a remembered-principal question: reauth already knows who is asking, because
+a session is open.
+
+**Stated as a difference rather than a shared mechanism**, because the two sites want opposite
+things for opposite reasons. Login narrows for **convenience** and must fall back when the hint is
+stale. Reauth narrows for **authorization** and must NOT fall back — a fallback there is the refusal
+being skipped.
 
 - **A remembered principal** → `BeginLogin` with that principal's credentials → one tap, one identity,
   no ambiguity.
@@ -285,6 +311,16 @@ All three sites in fact 5 count rows at an rpID and would silently start countin
 
 > **A predicate that asks *is there a credential* must ask *is there an ADMIN credential*. Counting
 > all rows is the unsafe default.**
+
+**AND IT BINDS CEREMONIES, NOT ONLY PREDICATES.** `auth/reauth.go:158` is a fourth site of the same
+defect wearing a different shape: it does not *count* credentials, it decides which ones may
+**prove** an operation, and it currently admits any credential at the rpId for `set_password` and
+`add_passkey`. Those act on the **admin's** credential set, so a scoped credential proving one is a
+scoped holder performing an admin operation — the same failure as a permissive count, arriving
+through the allow-list instead. The generalisation:
+
+> **Anything that asks *which credentials count here* must ask it about the RIGHT credentials.**
+> Counting all rows, and admitting all rows as proof, are the same unsafe default.
 
 This is the defect shape this project has hit repeatedly — a predicate that enumerated a set
 correctly until the set gained a member of a new kind. **G1 is the gate**, and it is written to catch
@@ -461,11 +497,13 @@ authority you signed in as.
 ## Gates
 
 Beyond `make gates` / `make image`:
-
-- **G1 — the scope-blind predicate gate.** A Go test asserting that a scoped-only install cannot
-  reach passwordless (story 7), plus an enumeration over the credential-counting sites so a
-  **fourth** one added later fails the build rather than silently counting the wrong set. D6's
-  invariant is only worth stating if something asserts it for code nobody has written yet.
+- **G1 — the scope-blind site gate.** A Go test asserting that a scoped-only install cannot reach
+  passwordless (story 7), plus an enumeration over the sites that ask *which credentials count here*
+  so a **fifth** one added later fails the build rather than silently admitting the wrong set. **It
+  covers `auth/reauth.go:158` as well as the three predicates**: an operation on the admin's
+  credential set must admit only admin credentials as proof, which is the same invariant reaching a
+  ceremony instead of a count. D6's invariant is only worth stating if something asserts it for code
+  nobody has written yet.
 - **G2 — the NULL default is admin, at exactly one writer.** A test that session creation always
   records the authenticating credential where one exists, so D1's accepted hazard cannot spread from
   one call site to several.
@@ -476,7 +514,11 @@ Beyond `make gates` / `make image`:
 - **G5 — the send filter, including the admin's mute.** A test that a scoped subscription receives
   only its device's sends and that an admin-owned `device_notification_prefs` row of `0` does not
   suppress the scoped holder's (D7, story 9).
-- **G6 — TAKEN 2026-08-20, on hardware, by the Operator.** The iOS account-picker measurement. Result
+- **G6 — TAKEN 2026-08-20, on hardware, by the Operator.** **Reported IN SESSION and relayed here
+  by the implementer, with two screenshots. It is NOT on the forge, and this sentence is the whole
+  of its provenance** — and a MEASUREMENT attributed to somebody who cannot be shown to have taken
+  it is a stronger claim than a ruling on the same backing, so it says so first. The iOS
+  account-picker measurement. Result
   in *Measured* above: one row for three credentials, because the collapse key is `(rpId, username)`.
   The claim it was owed to is now a fact, and the two requirements it produced are G7 and G8.
 - **G7 — no scoped credential is ever named `quince-admin`.** A test over the registration path
@@ -518,7 +560,7 @@ Every hard rule this rung touches *or comes near*, written before building.
 | **Subprocesses** | None beyond the existing job engine, entered by existing routes. |
 | **Every hardware bug becomes a replay fixture** | No hardware path is touched. G6 names what hardware still owes and to whom. |
 | **Docs are part of the diff** | `contracts.md` §1 (D10) and `design.md` §6 (the principal, the scope, and D6's invariant) move with the slices that change them, not with this spec — **this PR asserts no new canon; it proposes.** The roadmap row and the devlog dashboard follow the ruling, not the proposal. Coverage and a known-untested list ride each build slice. |
-| **Don't improvise architecture** | The four proposed items are now **ruled by the architect** (quince#1347 review; `/docs/specs/**` is that seat's under `CODEOWNERS`), and the measurement that was the one genuine gap has since been **taken**, and its section states the result rather than the owner (2026-08-20). **Provenance is stated per ruling rather than in bulk, because three of these have three different origins**: D3's exception and D6's invariant are **transcribed Operator rulings** quoted verbatim from quince#1342; **D7's admin-mute rule is an Operator instruction given in session and relayed here** — not on the forge, and D7 says so in its own words rather than leaving a citation that cannot be followed; D9's marked-rows requirement is **relayed** by the analyst seat without a quote. Written out in full here because git is where a decision survives. Nothing is built past any of it. |
+| **Don't improvise architecture** | The four proposed items are **ruled by the architect** (quince#1347 review; `/docs/specs/**` is that seat's under `CODEOWNERS`), and the measurement that was the one genuine gap has been **taken**. **Provenance is stated AT each ruling and enumerated here, because these have FIVE different origins and a list that omits one is the defect this row is about** (quince#409, and it happened to this very row in quince#1354's first revision): **(1)** D3's exception and **(2)** D6's invariant are **transcribed Operator rulings**, quoted verbatim from quince#1342 and checkable there; **(3)** D7's admin-mute rule, **(4)** D2.1's username rule and **(5)** G6's measurement are **in-session, relayed by the implementer and NOT on the forge** — each says so in its own words, because a citation a reader cannot follow is worse than none, and G6 says it first since a measurement carries more weight than a ruling on the same backing; D9's marked-rows requirement is **relayed by the analyst seat without a quote**. Written out in full here because git is where a decision survives. Nothing is built past any of it. |
 | **Approver ≠ author** | Authored by an implementer session as `quince-coder`; reviewed by the architect. This spec touches the security model, so it is reviewed **before** code exists, which is why it is PR 1. |
 
 ---
