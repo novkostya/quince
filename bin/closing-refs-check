@@ -103,11 +103,27 @@ done
 # the hash, the same trick `bin/pr-title-refs` uses. Without this the gate flags every qualified
 # citation in a file, and a check that fires on safe text is one people learn to skim.
 #
-# DO NOT "IMPROVE" IT TO `(^|[^A-Za-z0-9_-])` to also catch a line starting with the reference.
-# BusyBox `grep -E` — which is `/bin/grep` on these boxes — treats a MID-PATTERN `^` as a zero-width
-# assertion that succeeds anywhere, so the alternation matches the empty string and the guard is
-# silently disabled. Measured: `printf 'abc\n' | grep -cE 'a(^|x)bc'` returns 1 on BusyBox. The
-# careful-looking version is the one that does nothing.
+# DO NOT "IMPROVE" IT TO `(^|[^A-Za-z0-9_-])` to also catch a line starting with the reference. The
+# bracket form is portable; the alternation is not, and the environment it breaks in is the one you
+# will test it in.
+#
+# `grep` ON A SESSION BOX IS `ugrep`, WHICH IS NEITHER OF THE TWO THIS GATE RUNS UNDER. ugrep treats
+# a MID-PATTERN `^` as a zero-width assertion that succeeds anywhere, so the alternation matches the
+# empty string and the guard is silently disabled. BusyBox and GNU both anchor it and would refuse
+# to match — so a session that "improves" this line, tests it by hand, and sees the guard go quiet
+# has measured the one implementation that misbehaves, and would conclude the opposite of the truth
+# about `gates-sh` and CI.
+#
+# Measured, `printf 'abc\n' | grep -cE 'a(^|x)bc'`, with `^abc` as the control that proves a leading
+# anchor still works in all three:
+#
+#     ugrep 7.5.0 (session box `grep`)   1        control 1
+#     BusyBox 1.37.0 (alpine:3.24)       0        control 1
+#     GNU grep 3.11 (debian:trixie)      0        control 1
+#
+# So the careful-looking version does nothing where you type it, and something different from that
+# where it runs. Keep the bracket form, which is the same everywhere. `deploy/dev.md` carries the
+# general statement of this trap under *What a session box actually is*.
 KW='(close[sd]?|fix(e[sd])?|resolve[sd]?)[^.]{0,20}[^A-Za-z0-9_-]#[0-9]+'
 
 # THE URL FORM (quince#701), which the pattern above cannot see because there is no token to see.
