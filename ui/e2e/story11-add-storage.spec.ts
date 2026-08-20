@@ -198,17 +198,26 @@ test("docs references in the add flow are links, not bare repo paths", async ({ 
   // quince#846: bound the count to this surface, so a docs link elsewhere in the app cannot satisfy
   // it. `<main>` is the outlet the router renders into; the sidebar and top bar are outside it.
   const surface = page.locator("main");
-  await expect(surface).toContainText("deploy/storage.md");
 
-  // EVERY occurrence is inside an anchor, asserted by counting rather than by finding one — a
-  // single linked instance beside an unlinked one is the exact state this test exists to catch.
-  const mentions = await surface.getByText("deploy/storage.md").count();
-  const links = await surface.locator('a[href*="deploy/storage.md"]').count();
-  expect(links).toBe(mentions);
-  expect(links).toBeGreaterThan(0);
+  // EVERY docs reference in this surface is a link, WHATEVER THE PATH. Asserted over what the
+  // surface actually renders rather than over a path pinned in this file — pinning one is how this
+  // test failed a rename it had no opinion about (quince#1303): the add flow's helper link moved to
+  // `deploy/zfs-helper.md` when the install instructions did, and a spec asserting the old string
+  // reported a defect in a change that was correct.
+  //
+  // The property is unchanged and is still the point: a single linked instance beside an unlinked
+  // one is the exact state this test exists to catch, so each path is counted rather than found.
+  const paths = [...new Set((await surface.innerText()).match(/deploy\/[\w.-]+\.md/g) ?? [])];
+  expect(paths.length, "the add flow shows no docs reference at all").toBeGreaterThan(0);
 
-  const href = await surface.locator('a[href*="deploy/storage.md"]').first().getAttribute("href");
-  expect(href).toMatch(/^https:\/\/github\.com\/novkostya\/quince\/blob\/main\//);
+  for (const path of paths) {
+    const mentions = await surface.getByText(path).count();
+    const links = await surface.locator(`a[href*="${path}"]`).count();
+    expect(links, `${path} appears as bare text somewhere in the add flow`).toBe(mentions);
+
+    const href = await surface.locator(`a[href*="${path}"]`).first().getAttribute("href");
+    expect(href).toMatch(/^https:\/\/github\.com\/novkostya\/quince\/blob\/main\//);
+  }
 });
 
 // qn.6e PR 9b — THE FIRST-RUN STORAGE STEP.
