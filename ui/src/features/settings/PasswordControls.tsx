@@ -126,9 +126,15 @@ export function PasswordControls() {
       // like nothing happened invites a second attempt with the OLD current password, which then
       // 401s and reads as "the change failed" — the opposite of the truth.
       // THE SAME ASSUMPTION AS THE HEADINGS, IN THE PLACE IT IS HARDEST TO SPOT — quince#888 item 2.
-      // *"as well as your passkey"* holds only in the `passwordless` state; in the other two the
+      // *"as well as your passkey"* holds only in the `passwordless` state; in the last branch the
       // password just set is the ONLY thing that can sign in here, which is both the more important
       // fact and the opposite reassurance.
+      //
+      // THAT LAST BRANCH IS `unconfigured` ALONE SINCE quince#1316, and it covered `elsewhere-only`
+      // too until then. That state no longer renders a form — rule 1 would refuse the request — so
+      // this handler cannot run in it. Kept as the fall-through rather than named explicitly,
+      // because `credentialState` is the thing that decides and a fourth branch here would be a
+      // second place to keep that list correct.
       setChangeMsg({
         ok: true,
         text:
@@ -138,8 +144,8 @@ export function PasswordControls() {
               ? "Password set. You can now sign in with it as well as your passkey."
               : "Password set. This is now the only way to sign in at this address.",
       });
-      // The list carries `has_password`, and SETTING one changes it — so the surface that just
-      // said "Set a password" must stop saying it. Invalidated for the same reason removal is.
+      // The list carries `has_password`, and SETTING one changes it — so the section that described an
+      // install with no password must stop describing one. Invalidated for the same reason removal is.
       await qc.invalidateQueries({ queryKey: passkeysKey });
 
       // THE KEYCHAIN SAVE PROMPT — quince#929, and this one line is the whole fix.
@@ -208,60 +214,127 @@ export function PasswordControls() {
     }
   }
 
+  // THE SECTION IS THE STATE, AND IT CARRIES ITS OWN REMEDY — quince#1316.
+  //
+  // THIS WAS FOUR SECTIONS AND IS NOW ONE. The form used to sit in a section of its own, above three
+  // mutually-exclusive statement sections that pointed DOWN at it — *"use the form above"*, in as
+  // many words. That worked only because the form was unconditionally first. The ruling makes the
+  // order follow the state, so a statement can no longer promise where the form is, and the fix is
+  // not a better pointer: it is putting the remedy in the section that describes the state.
+  //
+  // ELSEWHERE-ONLY IS THE STATE WITH NO REMEDY HERE, and it is absent for a different reason from
+  // the others — it does not merely not apply, it CANNOT SUCCEED. Rule 1 refuses a credential change
+  // to a caller that cannot prove a present credential, so the form would 4xx every time. It says so
+  // rather than silently omitting the control, which is the *no silent caps* rule on a screen where
+  // the missing control is the whole question.
   return (
-    <div className="mt-8 space-y-8">
+    <div className="mt-8">
       <section>
-        {/* THE HEADING IS THE ACTION, and on a passwordless install the action is SET, not change.
-            Same form, same endpoint — `PUT /api/auth/password` treats an absent current password as
-            "there is none" — so only the words and the one field differ. */}
+        {/* THE HEADING IS THE STATE, AND FOR ONE STATE IT IS THE ACTION. `has-password` is the only
+            row where the user is doing something ordinary, so it keeps the imperative it had; the
+            other three lead with what is true, because in those states setting a password is not an
+            improvement to a working setup but the repair for one that cannot sign anybody in. */}
         <SectionHeading>
-          {hasPassword ? "Change your password" : "Set a password"}
+          {credentials === "has-password"
+            ? "Change your password"
+            : credentials === "passwordless"
+              ? "You sign in with a passkey only"
+              : credentials === "elsewhere-only"
+                ? "No passkey of yours works at this address"
+                : "This quince has no way to sign in"}
         </SectionHeading>
-        {/* ONE SENTENCE PER STATE, and the two that are not `passwordless` are WARNINGS rather than
-            explanations: in both, setting a password is not an improvement to a working setup, it is
-            the repair for one that cannot sign anybody in at this address. */}
+        {/* WHAT PASSWORDLESS COSTS, SAID WHERE THE FORM THAT ENDS IT IS — and this paragraph used
+            to be a section of its own with no action in it. Both halves are unchanged facts about
+            this build: `quince auth reset` is the only way back, and it runs on the host. */}
         {credentials === "passwordless" ? (
-          <p className="mt-1 max-w-xl text-sm text-muted">
-            This quince has no password — you sign in with a passkey. Adding one gives you a second
-            way in that does not depend on a device.
-          </p>
+          <>
+            <p className="mt-1 max-w-xl text-sm text-muted">
+              There is no password on this quince. If you lose the device holding your passkey, the
+              only way back is <code className="font-mono text-fg">quince auth reset</code> on the
+              machine running quince — which needs console or SSH access to it, and clears every
+              passkey and session as well.
+            </p>
+            <p className="mt-3 max-w-xl text-sm text-muted">
+              Setting a password gives you a second way in that does not depend on a device. Your
+              passkey keeps working.
+            </p>
+          </>
         ) : null}
         {/* NAMED ADDRESSES ONLY WHEN THERE ARE ANY. A row with an empty `rp_id` cannot be produced by
             this server, but it would have rendered "registered for ." rather than degrading.
 
-            THE `passkeysSupported` CONDITION THAT USED TO GUARD THE SECOND REMEDY IS GONE WITH THE
-            REMEDY. quince#888 item 2's review made *"or add a passkey for this address"* conditional,
-            because at a bare IP no credential can ever match and the sentence pointed at something
-            the user could not do. Rule 1 now refuses that remedy in this state for EVERY address, so
-            the condition guards nothing — and a condition on a clause that no longer exists is the
-            archaeology the Operator ruled out on quince#595. The principle it served survives where
-            it belongs: `Passkeys` still disables its own Add button on an unsupported tier. */}
-        {/* BOTH REMEDIES THIS PARAGRAPH USED TO OFFER ARE NOW REFUSED — qn.6n D8, slice 7. It ended
-            *"Set a password to fix that, or add a passkey for this address"*, and rule 1 closed both:
-            each is a change to the credential set, so each demands a PRESENT credential, and here the
-            user has none that works. The copy was TRUE on `main` until the rung landed, which is why
-            it changes in this diff and not earlier — fixing it sooner would have sent somebody to a
-            console to escape a state the form really did fix. */}
+            AND THE CHEAPER REMEDY IS NAMED FIRST, WHICH qn.6n D8 DID NOT ANTICIPATE. The spec's
+            analysis concluded that `quince auth reset` was *"what is genuinely true there"* — it is
+            true, and it is not the only thing. A passkey registered for another address still WORKS
+            at that address: reach quince there, and setting a password satisfies rule 1 with the
+            credential you have. The password then works everywhere, including here.
+
+            Verified rather than assumed before this copy was written: `provable` imposes no
+            restriction on `set_password`, and `FinishReauth` resolves the credential against the
+            ceremony's own rpId — so an assertion at the address the passkey belongs to mints a
+            usable proof.
+
+            CONDITIONAL, because reachability is the user's fact and not ours. A name in the
+            credential list may be a tunnel they no longer run, so this offers the route and the
+            console both, rather than promising one that may not exist. */}
         {credentials === "elsewhere-only" ? (
-          <p className="mt-1 max-w-xl text-sm text-warn">
-            This quince has no password, and none of its passkeys works at this address
-            {elsewhere.length > 0 ? (
-              <>
-                {" — they are registered for "}
-                <span className="font-mono">{elsewhere.join(", ")}</span>
-              </>
-            ) : null}
-            . A passkey only works at the address it was created on, so nothing can sign in here at
-            the moment — and the form below cannot fix it, because changing what can sign in now
-            requires proving something that already can.
-          </p>
+          <>
+            {/* THE ADDRESSES ARE NAMED ONCE, IN THE REMEDY BELOW, AND THIS PARAGRAPH USED TO NAME
+                THEM TOO — quince#1316. The two sentences were in DIFFERENT sections before the
+                combination, so each had to carry the list; adjacent, they said "quince.example.net"
+                twice in four lines. The remedy is where it earns its place, because there it is an
+                instruction rather than a diagnosis. */}
+            <p className="mt-1 max-w-xl text-sm text-warn">
+              This quince has no password, and none of its passkeys works at this address. A passkey
+              only works at the address it was created on, so nothing can sign in here at the moment.
+            </p>
+            {/* WHY THERE IS NO FORM, RATHER THAN A FORM THAT REFUSES. Rule 1 wants a present
+                credential for any change to the credential set, and in this state there is none —
+                so the control is withdrawn and the reason is the first thing said about it. */}
+            <p className="mt-3 max-w-xl text-sm text-muted">
+              There is no password form here: setting one is itself a change to how you sign in, and
+              that requires proving something that already can — which nothing at this address can
+              do.
+              {elsewhere.length > 0 ? (
+                <>
+                  {" If you can still reach quince at "}
+                  <span className="font-mono">{elsewhere.join(" or ")}</span>
+                  {", open it there — your passkey works at that address, and a password you set " +
+                    "from there will work everywhere, including here."}
+                </>
+              ) : null}{" "}
+              Otherwise the way back is{" "}
+              <code className="font-mono text-fg">quince auth reset</code> at the console, which
+              clears every credential and every session and returns this install to first-run setup.
+            </p>
+          </>
         ) : null}
+        {/* THE TWO NO-PASSKEY STATES SPLIT HERE — qn.6n D8, slice 7, and quince#903. Rule 1's
+            exemption is `Configured()`, which is exactly what separates them:
+
+              unconfigured    no credentials at all → NOT configured → exempt. The form works.
+              elsewhere-only  passkeys exist, none here → CONFIGURED → rule 1 applies. It does not.
+
+            So this state keeps the form and that one cannot, which is why they are the two states
+            whose sections differ by more than their words. */}
         {credentials === "unconfigured" ? (
-          <p className="mt-1 max-w-xl text-sm text-danger">
-            This quince has no password and no passkeys — there is nothing to sign in with. Set a
-            password now: your session is currently the only access to this install.
-          </p>
+          <>
+            <p className="mt-1 max-w-xl text-sm text-danger">
+              This quince has no password and no passkeys — there is nothing to sign in with. Your
+              session is currently the only access to this install.
+            </p>
+            <p className="mt-3 max-w-xl text-sm text-muted">
+              Set a password below: you are signed in now, so you can do it without console access.{" "}
+              <code className="font-mono text-fg">quince auth reset</code> is not the way back from
+              here — it clears credentials rather than restoring them, and you would still have to
+              set one afterwards.
+            </p>
+          </>
         ) : null}
+        {/* NO FORM IN `elsewhere-only`, WHICH IS THE ONE STATE THAT HIDES A CONTROL BECAUSE IT
+            CANNOT SUCCEED rather than because it does not apply. The paragraph above says so; this
+            is the condition that makes it true. */}
+        {credentials === "elsewhere-only" ? null : (
         <form onSubmit={submitChange} className="mt-3 max-w-sm space-y-3">
           {/* THE ANCHOR AGAIN — quince#819. A password manager keys on (origin, username), and this
               is a THIRD password surface on the same origin. Without it, a manager offers to update
@@ -329,77 +402,8 @@ export function PasswordControls() {
             {changeBusy ? "…" : hasPassword ? "Change password" : "Set password"}
           </Button>
         </form>
+        )}
       </section>
-
-      {/* NOTHING TO REMOVE WHEN THERE IS NO PASSWORD — quince#855. The section below offers a
-          destructive action against a thing that does not exist, and its cost list describes a
-          state the user is ALREADY IN. Replaced by a statement of that state rather than hidden
-          silently: "this option is missing" is a worse answer than "you are already here", and the
-          form above is the way out of it. */}
-      {credentials === "passwordless" ? (
-        <section>
-          <SectionHeading>You sign in with a passkey only</SectionHeading>
-          <p className="mt-1 max-w-xl text-sm text-muted">
-            There is no password on this quince. If you lose the device holding your passkey, the
-            only way back is <code className="font-mono text-fg">quince auth reset</code> on the
-            machine running quince — which needs console or SSH access to it, and clears every
-            passkey and session as well.
-          </p>
-        </section>
-      ) : null}
-      {/* THE TWO STATES SPLIT HERE — qn.6n D8, slice 7, and quince#903. They shared one sentence
-          because rule 1 did not exist: on `main` before this rung, `PUT /api/auth/password` accepted
-          an absent `current_password`, so *"use the form above"* was true in BOTH. Rule 1's exemption
-          is `Configured()`, which is exactly what separates them:
-
-            unconfigured    no credentials at all → NOT configured → exempt. The form still works.
-            elsewhere-only  passkeys exist, none here → CONFIGURED → rule 1 applies. The form does not.
-
-          quince#895 split this section from `passwordless`, correctly, and one split short. */}
-      {credentials === "unconfigured" ? (
-        <section>
-          <SectionHeading>This quince has no way to sign in</SectionHeading>
-          <p className="mt-1 max-w-xl text-sm text-muted">
-            Use the form above — you are signed in now, so you can set a password without console
-            access. <code className="font-mono text-fg">quince auth reset</code> is not the way back
-            from here: it clears credentials rather than restoring them, and you would still have to
-            set one afterwards.
-          </p>
-        </section>
-      ) : null}
-      {/* AND THE CHEAPER REMEDY IS NAMED FIRST, WHICH D8 DID NOT ANTICIPATE. The spec's analysis
-          concluded that `quince auth reset` was *"what is genuinely true there"* — it is true, and it
-          is not the only thing. A passkey registered for another address still WORKS at that address:
-          reach quince there, and setting a password satisfies rule 1 with the credential you have.
-          The password then works everywhere, including here.
-
-          Verified rather than assumed before this copy was written: `provable` imposes no restriction
-          on `set_password`, and `FinishReauth` resolves the credential against the ceremony's own
-          rpId — so an assertion at the address the passkey belongs to mints a usable proof.
-
-          CONDITIONAL, because reachability is the user's fact and not ours. A name in the credential
-          list may be a tunnel they no longer run, so this offers the route and the console both,
-          rather than promising one that may not exist. */}
-      {credentials === "elsewhere-only" ? (
-        <section>
-          <SectionHeading>No passkey of yours works at this address</SectionHeading>
-          <p className="mt-1 max-w-xl text-sm text-muted">
-            The form above cannot help here: setting a password now requires proving a credential
-            that already works, and none of yours does at this address.
-            {elsewhere.length > 0 ? (
-              <>
-                {" If you can still reach quince at "}
-                <span className="font-mono">{elsewhere.join(" or ")}</span>
-                {", open it there — your passkey works at that address, and a password you set from " +
-                  "there will work everywhere, including here."}
-              </>
-            ) : null}{" "}
-            Otherwise the way back is{" "}
-            <code className="font-mono text-fg">quince auth reset</code> at the console, which clears
-            every credential and every session and returns this install to first-run setup.
-          </p>
-        </section>
-      ) : null}
     </div>
   );
 }

@@ -226,10 +226,15 @@ describe("removing the password", () => {
 // `PUT /api/auth/password` handled that case correctly all along, so the defect was entirely in
 // what this surface CLAIMED.
 describe("a passwordless install", () => {
-  it("asks to SET a password, with no current-password field", async () => {
+  // THE HEADING IS NOW THE STATE, NOT THE ACTION — quince#1316. The section that used to say "Set a
+  // password" above a form, with a separate "You sign in with a passkey only" statement below it,
+  // is one section: the state, what it costs, and the form that ends it.
+  it("names the state it is in, and carries the form that ends it", async () => {
     renderControls(false);
 
-    expect(await screen.findByRole("heading", { name: "Set a password" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "You sign in with a passkey only" }),
+    ).toBeInTheDocument();
     expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
     expect(screen.getByLabelText("New password")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Set password" })).toBeInTheDocument();
@@ -237,7 +242,17 @@ describe("a passwordless install", () => {
 
   it("says why there is no current password to give", async () => {
     renderControls(false);
-    expect(await screen.findByText(/no password — you sign in with a passkey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/there is no password on this quince/i)).toBeInTheDocument();
+  });
+
+  // AND SAYS WHAT SETTING ONE BUYS, in the same section as the form. The old copy said this from a
+  // section above the form; the point of the combination is that a reader never has to look
+  // elsewhere for the remedy.
+  it("says what a password would add, beside the form that adds it", async () => {
+    renderControls(false);
+    expect(
+      await screen.findByText(/second way in that does not depend on a device/i),
+    ).toBeInTheDocument();
   });
 
   // NOTHING TO REMOVE. Offering a destructive action against a thing that does not exist, with a
@@ -245,10 +260,8 @@ describe("a passwordless install", () => {
   it("does not offer to remove a password that is not there", async () => {
     renderControls(false);
 
-    await screen.findByRole("heading", { name: "Set a password" });
+    await screen.findByRole("heading", { name: "You sign in with a passkey only" });
     expect(screen.queryByRole("button", { name: "Remove password" })).not.toBeInTheDocument();
-    // Replaced rather than hidden: "you are already here" beats a missing section.
-    expect(screen.getByRole("heading", { name: /you sign in with a passkey only/i })).toBeInTheDocument();
   });
 
   // THE COST STILL HAS TO BE ON SCREEN. The user is living with it now, so the console-access fact
@@ -347,11 +360,18 @@ describe("passwordless is not the only reading of has_password: false", () => {
   it("says nothing can sign in here when every passkey belongs elsewhere, and names where", async () => {
     renderControls(false, [passkeyAt(ELSEWHERE, "pk-elsewhere")]);
 
-    const warning = await screen.findByText(/none of its passkeys works at this address/i);
+    expect(
+      await screen.findByText(/none of its passkeys works at this address/i),
+    ).toBeInTheDocument();
     // NAMING THE ADDRESS IS THE POINT, not the warning itself: "your passkeys do not work" at a box
     // that visibly lists one reads as quince being broken. Same reasoning as the server's
     // `last_credential` message and `passkey_rp_mismatch`.
-    expect(warning.textContent).toContain(ELSEWHERE);
+    //
+    // ASSERTED ON THE REMEDY PARAGRAPH SINCE quince#1316, because that is where the list now is —
+    // once, in the sentence that tells you what to do with it, rather than in both halves of a
+    // section that used to be two.
+    const reason = screen.getByText(/there is no password form here/i);
+    expect(reason.textContent).toContain(ELSEWHERE);
     // And the reassuring sentence is GONE, not merely supplemented.
     expect(screen.queryByText(/you sign in with a passkey/i)).not.toBeInTheDocument();
   });
@@ -408,16 +428,22 @@ describe("passwordless is not the only reading of has_password: false", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText(/no password — you sign in with a passkey/i)).toBeInTheDocument();
+    expect(await screen.findByText(/there is no password on this quince/i)).toBeInTheDocument();
     expect(screen.queryByText(/none of its passkeys works/i)).not.toBeInTheDocument();
   });
 
   // THE SUCCESS MESSAGE CARRIES THE SAME ASSUMPTION IN THE PLACE IT IS HARDEST TO SPOT: it is shown
   // AFTER the state has been repaired, so "as well as your passkey" would be reassuring the user
-  // about a credential that still does not work at this address.
-  it("does not promise a working passkey after setting a password from the broken state", async () => {
+  // about a credential that does not work at this address.
+  //
+  // DRIVEN FROM `unconfigured`, AND IT USED TO BE DRIVEN FROM `elsewhere-only` — quince#1316. That
+  // state no longer HAS a form, because rule 1 refuses the change it would submit, so the path this
+  // asserts cannot be walked there any more. `unconfigured` is the remaining state that reaches this
+  // branch, and the sentence is true of it for the same reason: the password just set is the only
+  // thing that can sign in here.
+  it("does not promise a working passkey after setting the first password", async () => {
     vi.spyOn(api, "put").mockResolvedValue(undefined);
-    renderControls(false, [passkeyAt(ELSEWHERE, "pk-elsewhere")]);
+    renderControls(false, []);
 
     fireEvent.change(await screen.findByLabelText("New password"), { target: { value: "new" } });
     fireEvent.click(screen.getByRole("button", { name: "Set password" }));
@@ -489,14 +515,21 @@ describe("the two sections of /settings/auth cannot contradict each other", () =
 });
 
 // A row with an empty `rp_id` cannot be produced by this server — `RPIDFromRequest` is never empty on
-// an HTTP/1.1 request — so this is degradation rather than a reachable case. Without it the sentence
-// renders "registered for ." Asserted because "cannot happen" is how the unreachable case becomes the
-// one nobody notices.
-it("does not render an empty address list when no rp_id can be named", async () => {
+// an HTTP/1.1 request — so this is degradation rather than a reachable case. Asserted because
+// "cannot happen" is how the unreachable case becomes the one nobody notices.
+//
+// IT FOLLOWED THE ADDRESS LIST TO THE REMEDY PARAGRAPH — quince#1316. The diagnosis sentence used to
+// name the addresses too, and this asserted it did not render "registered for ."; combining the
+// sections made that a second copy of one fact, so the list is now named once, where it is an
+// instruction. Re-pointed rather than deleted: the degradation is unchanged, and an assertion left
+// on the old sentence would have passed by matching text that no longer exists.
+it("does not offer a route to an address it cannot name", async () => {
   renderControls(false, [{ ...passkeyAt(""), id: "pk-blank" }], HERE, true);
 
-  const warning = await screen.findByText(/none of its passkeys works at this address/i);
-  expect(warning.textContent).not.toMatch(/registered for\s*\./);
+  const reason = await screen.findByText(/there is no password form here/i);
+  expect(reason.textContent).not.toMatch(/reach quince at\s*[.,]/);
+  // The console remedy is unconditional, so the paragraph still ends with something to do.
+  expect(reason.textContent).toMatch(/quince auth reset/);
 });
 
 // THE COST LIST NAMED THE DEVICE AND NOT THE ADDRESS — quince#902. All three original bullets were
