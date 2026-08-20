@@ -189,12 +189,6 @@ type DeviceOps interface {
 	Encryption(ctx context.Context, udid, action, password, oldPassword, newPassword string) (opID string, status int, reason string)
 	WifiSync(ctx context.Context, udid, action string) (opID string, status int, reason string)
 	Op(opID string) (wire.Op, bool)
-
-	// PairingWritable reports whether a pairing could be RECORDED right now, for the
-	// GET /api/devices envelope (qn.6p D7). Same answer Pair enforces, asked a moment earlier
-	// so the UI can render the control unavailable with a reason instead of offering a button
-	// that will 409.
-	PairingWritable() (writable bool, reason string)
 }
 
 // UnavailableDeviceOps is the DeviceOps used when no device-ops subsystem is wired: every
@@ -404,12 +398,6 @@ func (d Deps) zfsKeyDir() string {
 	}
 	return config.DefaultZFSKeyDir
 }
-
-// PairingWritable: with no device-ops subsystem there is nothing that could pair, so nothing to
-// warn about. `true` here is not a claim that writing would work — it is the absence of a claim,
-// matching every other method on this type, which reports 503 when ASKED to act rather than
-// pre-emptively disabling controls.
-func (UnavailableDeviceOps) PairingWritable() (bool, string) { return true, "" }
 
 // NotificationReader is the Web Push surface's dependency (qn.12). An interface for the same reason
 // every other port here is one: `httpapi` decides shape and status codes, and knows nothing about

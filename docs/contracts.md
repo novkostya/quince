@@ -1079,16 +1079,7 @@ and this sentence is the note that says so.
 ### Devices
 
 ```
-GET  /api/devices                      → {devices: Device[], pairing: {writable, reason?}}
-     // `pairing` is a SYSTEM capability, not a per-device one, which is why it sits on
-     // the envelope: there is ONE lockdown directory, and repeating its writability on
-     // every device would state one fact N times. It rides with this response because
-     // this is what renders the Pair control (qn.6p D7).
-     // writable false ⇒ a pairing would not survive being made; `reason` says why, and
-     // the UI renders the control UNAVAILABLE WITH IT rather than hiding the control —
-     // an absent button explains nothing, which is the complaint this answers.
-     // A HINT, NOT THE GUARD: this is the answer as of the request, and the pair route
-     // re-checks. A disk fills and a mount changes between a render and a click.
+GET  /api/devices                      → {devices: Device[]}
 GET  /api/devices/{udid}               → Device
 POST /api/devices/{udid}/pair          → 202 {op_id} | 404 | 409
      // 409: device not present on USB — pairing is USB-only at the protocol floor,
@@ -1096,12 +1087,21 @@ POST /api/devices/{udid}/pair          → 202 {op_id} | 404 | 409
      // "tap Trust on the phone" / "enter the passcode on the device".
      // 409 ALSO: another device op is already in flight for this udid — the
      // single-flight rule, stated once under wifi-sync below. The action is *wait*.
-     // 409 ALSO: the pairing record cannot be WRITTEN (qn.6p D7) — a read-only
-     // lockdown mount, a permissions problem, or a full filesystem. Checked BEFORE the
-     // op starts, because otherwise idevicepair runs, the phone shows Trust, somebody
-     // taps it, and the record fails to write. The reason names the path and says
-     // another tool may own these records — quince can still READ them, so a device
-     // paired elsewhere still lists and still backs up.
+     // 409 ALSO: quince cannot REACH the muxer for this device, so a pairing could not
+     // be saved. This is the ONE refusal that survives qn.6p D7 (qn.6r D3): there is no
+     // safe pre-check for *can the muxer record a pairing* — the only message that
+     // answers it overwrites unconditionally — so quince cannot spend the user's walk
+     // to the phone on their behalf. Unreachable is the case it CAN answer, and it
+     // costs no extra probe: it is the before-read the op needs anyway.
+     //
+     // THE 202 OP CAN STILL FAIL AFTER THE WALK, and that is the honest shape rather
+     // than a gap. `idevicepair` prints SUCCESS whether or not the muxer saved the
+     // record — lockdownd_pair discards userpref_save_pair_record's return — so the op
+     // asks the muxer before and after and compares. Two failure codes, kept apart
+     // because the remedies differ:
+     //   • pairing_not_recorded — the muxer answered and no new record exists. Its
+     //     store is not writable; the message names --plist-storage.
+     //   • pairing_unverified — quince could not ask. The message names the socket.
 POST /api/devices/{udid}/pair/validate → {paired: bool} | 404 | 409
      // paired == "a pairing is CONFIRMED valid right now". A locked device cannot be
      // confirmed (`idevicepair validate` reports "passcode set" for ANY locked device,

@@ -4,7 +4,6 @@ import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/compone
 import { useDeviceOp, type StartFn } from "./useDeviceOp";
 import { OpNarration } from "./OpNarration";
 import { useDialogRoute } from "@/lib/useDialogRoute";
-import { useDevicesStore } from "@/stores/devices";
 
 // PairDialog drives POST /api/devices/{udid}/pair and narrates the assisted flow (tap Trust +
 // passcode) from the op.updated stream. `post` is injectable for tests. `autoOpen` opens the dialog
@@ -14,7 +13,6 @@ export function PairDialog({ udid, post, autoOpen }: { udid: string; post?: Star
   // Open-ness lives in the URL (quince#931): Back closes the dialog, and the offset of the page
   // behind it is restored by the browser rather than left where the keyboard put it.
   const { open, onOpenChange: setOpen } = useDialogRoute("pair");
-  const pairing = useDevicesStore((s) => s.pairing);
   const { op, starting, startError, start, reset, inFlight } = useDeviceOp(post);
   const done = op?.state === "succeeded";
 
@@ -42,27 +40,6 @@ export function PairDialog({ udid, post, autoOpen }: { udid: string; post?: Star
     if (!o) reset();
   }
 
-  // Pairing records live in one directory, and if quince cannot write there a pairing would not
-  // survive being made (qn.6p D7). The control stays VISIBLE and disabled with the reason beside
-  // it rather than disappearing: a missing button explains nothing, and this state is usually
-  // deliberate — another tool owns the records and quince mounts them read-only.
-  if (!pairing.writable) {
-    return (
-      <div className="space-y-1">
-        <Button disabled>Pair</Button>
-        <p className="text-sm text-muted">
-          quince can’t save pairing records here, so it can’t pair this device. Existing pairings
-          still work — a device paired elsewhere is still listed and still backs up.
-        </p>
-        {pairing.reason ? (
-          // The server's words, kept SECONDARY: they carry a path and an errno, which is what an
-          // operator needs in order to fix it and not what a user should have to read in order to
-          // understand what is wrong.
-          <p className="text-xs text-subtle">{pairing.reason}</p>
-        ) : null}
-      </div>
-    );
-  }
 
   return (
     <>

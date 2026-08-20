@@ -168,28 +168,6 @@ type FileEntry struct {
 // DevicesResponse is GET /api/devices.
 type DevicesResponse struct {
 	Devices []Device `json:"devices"`
-	// Pairing is a SYSTEM capability, not a per-device one, and that is why it sits on the
-	// envelope rather than on Device (qn.6p D7). There is one lockdown directory; repeating its
-	// writability on every device would state one fact N times — the shape quince#409 already cost
-	// this project. It rides with the device list because that is the response whose consumer
-	// renders the Pair control.
-	Pairing Pairing `json:"pairing"`
-}
-
-// Pairing says whether quince can record a pairing, and why not when it cannot (qn.6p D7,
-// Operator 2026-08-16: detect a read-only lockdown dir "and mention it in UI instead of offering
-// Pair button, like springback does").
-//
-// A HINT, NOT THE GUARD. This is the answer as of this request; POST /api/devices/{udid}/pair
-// re-checks and returns 409 carrying the same reason, because a disk fills and a mount changes
-// between a list render and a click. The field keeps the control from being offered; the 409 is
-// what makes offering it harmless.
-type Pairing struct {
-	// Writable false means a pairing would not survive being made. The UI renders the control
-	// unavailable WITH Reason rather than hiding it — an absent button explains nothing, which is
-	// the complaint this field exists to answer.
-	Writable bool   `json:"writable"`
-	Reason   string `json:"reason,omitempty"`
 }
 
 // JobsResponse is GET /api/jobs (cursor pagination; next_cursor null on the last page).

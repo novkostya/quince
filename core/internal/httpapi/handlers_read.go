@@ -19,10 +19,8 @@ func (d Deps) handleDevices() http.HandlerFunc {
 		if devices == nil {
 			devices = []wire.Device{}
 		}
-		writable, reason := d.Ops.PairingWritable()
 		writeJSON(w, d.Log, http.StatusOK, wire.DevicesResponse{
 			Devices: devices,
-			Pairing: wire.Pairing{Writable: writable, Reason: reason},
 		})
 	}
 }
