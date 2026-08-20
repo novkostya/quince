@@ -87,8 +87,7 @@ PUT    /api/auth/password {current_password, new_password}  → 204
        // install "change" IS "set", and the server decides which case applies from its own
        // state, so there is no client flag to get wrong.
        // PRESENTING NOTHING IS `reauth_required`, NOT `bad_password`, even where a password
-       // exists — this said *"an empty value is simply a wrong one and takes the same 401"*
-       // until 2026-08-14. Both are still a 401 and both still refuse; what changed is which
+       // exists. Both are a 401 and both refuse; the difference is which
        // code, and the code is the whole of it: `reauth_required` is the one a client retries
        // by offering the OTHER factor, and `bad_password` is the one it must not retry, because
        // re-authenticating cannot fix a typo. Collapsing them meant a surface that presents
@@ -308,8 +307,8 @@ POST /api/auth/passkeys/register/finish?ceremony=<key>&name=<label>  → 201 {pa
      // NO PROOF FIELD SINCE qn.6n, AND THAT IS A PROPERTY RATHER THAN AN OMISSION. A
      // REGISTRATION ceremony key is only ever produced by a guarded `begin`, so holding one IS
      // the evidence that a proof was presented.
-     // THREE ENDPOINTS PRODUCE KEYS INTO THAT ONE STORE, NOT TWO — this paragraph said two until
-     // quince#930's review. `setup/passkey/begin` answers 409 already_configured once
+     // THREE ENDPOINTS PRODUCE KEYS INTO THAT ONE STORE. `setup/passkey/begin` answers 409
+     // already_configured once
      // `Configured()` is true and so cannot mint one where rule 1 applies. `passkeys/login/begin`
      // is PRE-AUTH, in all three exact-path lists, and callable by anyone who reaches the address.
      // WHAT MAKES THE PROPERTY TRUE IS THE CEREMONY KIND, not the count: a ceremony records what
@@ -420,10 +419,8 @@ POST /api/auth/reauth/finish?ceremony=<key>       → 200 {proof}
 `ProofOperation`'s set is closed, so this list is exhaustive by construction rather than by
 maintenance — if a fifth operation is ever added, it has no consumer until one is written.
 
-**This paragraph said *"NOTHING CONSUMES THE PROOF YET"* until slice 6a, three slices after that
-stopped being true** — the shape quince#409 named, where the sentence describing the WHOLE is the
-part nobody updates when a part changes. Written as a list rather than a status, so the next slice
-has to edit it to stay accurate.
+**Written as a list rather than a status**, so a new operation has to edit it to stay accurate —
+a sentence describing the WHOLE is the part nobody updates when a part changes (quince#409).
 
 Passkeys — assertion (qn.6k):
 
@@ -1132,11 +1129,8 @@ POST /api/devices/rescan               → 202 | 409
 POST /api/devices/{udid}/encryption
      {action: "enable" | "change_password" | "disable",
       password?, old_password?, new_password?}     → 202 {op_id} | 404 | 409 | 422
-     // 404 and 409 were REACHABLE HERE BEFORE THEY WERE DECLARED, and quince#465 found
-     // it: this line read `202 {op_id} | 422` while the handler passed the manager's
-     // 404 (no such device) and 409 (device not connected) straight through. Declared
-     // now, alongside the single-flight condition below — a client written to this
-     // contract would have treated both as undocumented.
+     // 404: no such device. 409: device not connected, or another device op is already in
+     // flight for this udid.
      // 409: device not connected; or another device op is already in flight for this
      // udid — the single-flight rule, stated once under wifi-sync below.
      // 422: bad action or a missing required password field. Drives `idevicebackup2
@@ -1405,7 +1399,7 @@ helper` exists to prevent. A form that has not asked for port or key sends neith
 server-side exactly as the config does.
 
 **DECLARED: this endpoint EXECUTES A REQUEST-INFLUENCED ARGV**, and quince#818 narrowed the
-influence rather than removing it — four typed fields through one composer, where it used to be the
+influence rather than removing it — four typed fields through one composer, rather than the
 entire command line. It adds no capability an authenticated admin lacks — `PUT /api/config` already
 stores a transport that quince execs at the next job — but it shortens the loop from *next backup*
 to *now*. Bounds: behind `authGuard` and `csrfGuard`, nothing added to the five-entry exempt set, an
@@ -1567,9 +1561,7 @@ differ in whether a storage list is a device-independent resource.
 
 Spec: `docs/specs/qn.6c/qn.6c.md`, gap 2. **RULED 2026-07-31 — as recommended, with the `?udid=`
 sub-question settled. NOT YET BUILT: this block is flipped to its ruled form by the slice that
-implements it (slice 5).** This sentence read *"Not built until ruled"* until 2026-08-01, which
-stopped being true the moment the ruling landed and would have told a session to stop on a question
-that is decided — the same inverted-marker defect quince#408 gates for. The distinction that matters
+implements it (slice 5).** The distinction that matters
 to a reader: **ruled-and-unbuilt** is work to do, where **unruled** is a thread to stop.
 
 **Two surfaces this proposal does NOT cover** and which story 5 needs, both proposed in the spec and
@@ -1621,18 +1613,12 @@ which then did, is worth more as a record than as a tidy sentence.
 
 **General config live-apply was a SEPARATE RUNG and explicitly not `qn.6d`. It is `qn.6g`
 (quince#577), and it has landed** — project-wide config→runtime propagation, with storage as its
-first consumer. This paragraph read *"`config.Service` has no `Apply`, `Reload`, `onChange` or
-`Subscribe` at all, so restart-to-apply is the status quo for **every** setting"*; it now has
-`Subscribe`, and storage is wired to it.
+first consumer. `config.Service` has `Subscribe`, and storage is wired to it.
 
 **Restart-to-apply is therefore no longer the blanket status quo, and §6 now says what replaced it:**
 [the per-key table](#which-settings-apply-live--the-per-key-answer). Three bins rather than two,
 because five keys are read by nothing and calling those *restart-required* would promise that
 restarting makes them work.
-
-This paragraph said the table was **owed**, which it was for two PRs. Narrowed in the diff that
-landed it, rather than left to age into a false claim that canon is incomplete — the inverse of the
-defect `CLAUDE.md` names, and just as misleading to a session deciding what is safe to build on.
 
 Spec: `docs/specs/qn.6d/qn.6d.md`, gap B.
 
@@ -1978,9 +1964,7 @@ the path that *adds* to a list it believes is empty.
 - **`default` cannot be claimed.** The first storage is default by implication, and a later one must
   not steal it: honouring the flag would silently re-point every backup that names no storage.
   Re-designation is a separate act on an existing storage, and since quince#722 it has a route —
-  `POST /api/config/storage/{name}/default`, which the refusal now points at. This read *"and this
-  rung does not build it"*, which was true of `qn.6e` and is the sentence that made the refusal
-  unfollowable for as long as it stood.
+  `POST /api/config/storage/{name}/default`, which the refusal points at.
 
 **`PUT /api/config` TAKES THE OPPOSITE POLICY ON THE SAME FIELDS, AND THE ASYMMETRY IS DELIBERATE**
 — ruled 2026-08-08 on [quince#754](https://github.com/novkostya/quince/issues/754). A `PUT` body may
@@ -2245,9 +2229,9 @@ Job: {
   // THESE THREE FIGURES NOW DESCRIBE WHAT THE PROTOCOL ACTUALLY OFFERS (Operator ruling 2026-08-17,
   // quince#808). Read them as a set — the shape only makes sense together:
   //
-  //   • `bytes_done` is CUMULATIVE over the whole job, and MONOTONIC. It used to carry
-  //     idevicebackup2's per-message figure — `backup_real_size` is a local reset on every
-  //     DLMessageUploadFiles — so it fell as often as it rose: 20 downward steps in one measured
+  //   • `bytes_done` is CUMULATIVE over the whole job, and MONOTONIC. **Do not derive it from
+  //     idevicebackup2's per-message figure**: `backup_real_size` is a local reset on every
+  //     DLMessageUploadFiles, so it falls as often as it rises — 20 downward steps in one measured
   //     run, worst 2,684,354,560 → 73,216. The engine banks each finished batch at the tool's own
   //     `Receiving files` boundary.
   //   • `bytes_total` is 0, meaning UNKNOWN, and stays 0. Every total the protocol exposes is
@@ -2409,12 +2393,6 @@ FileEntry: { "file_id": "ab12...", "domain": "CameraRollDomain",
 BUILT (story 5c); `POST /api/jobs {storage_id}` is BUILT too, with `qn.6d` story 6
 — which is *work to do*, not *a thread to stop*.
 
-The heading said `PROPOSED (gap)` until 2026-08-01 while its own body already read *"now ruled AND
-built"* — the sixth instance of this defect in one day, and the third caught by a reviewer reading a
-block rather than its heading. The mechanism is worth naming: **a diff that edits the body does not
-force anyone to look at the heading**, and the heading is the part describing the whole. That is
-quince#408's argument, made by a PR that had been asked in terms to clear exactly this marker.
-
 The multi-storage epic names `Version.backend` as *the symptom* of a modeling error: a version's
 backend is really its **storage's** backend. `qn.6c` fixes the model; this proposal is about how
 much of that reaches the wire.
@@ -2423,11 +2401,6 @@ much of that reaches the wire.
 `Version.storage_id`.** The **`Storage` object** and **`GET /api/storages`** are now ruled AND built
 as well (story 5c), together with `POST /api/storages/{name}/recheck`. What remains **ruled but
 unbuilt** is **the job's** `storage_id` on `POST /api/jobs`, which lands with story 6.
-
-This sentence listed the `Storage` object and `GET /api/storages` as *open* until 2026-08-01 — after
-the ruling that decided them — and was found while preparing a ruling on a question it made look
-unresolved. **Ruled-and-unbuilt is work to do; unruled is a thread to stop**, and prose that
-conflates the two costs a round trip to the seat that has already answered.
 
 **`PROPOSED (gap)` is a load-bearing marker meaning *nothing may be built on this yet*, not a
 title**, so a heading naming a half that has been decided tells a reader searching for open
@@ -3035,8 +3008,8 @@ does not exist.
 
 **Everything else**: `/data/config.yml` — single source of truth, edited by the UI and
 by hand equally (stack D12: atomic validated writes, canonical order, **only the keys the user set
-and no generated annotation** — ruled 2026-08-08, quince#728; this line said *"canonical order +
-generated doc-comments"* until then — file-watch pickup, invalid edits keep last-good + UI banner, no
+and no generated annotation** — ruled 2026-08-08, quince#728 — file-watch pickup, invalid edits keep
+last-good + UI banner, no
 secrets ever).
 
 **THE TWO EDITING PATHS NO LONGER DIFFER — `qn.6q` DISCHARGED THIS.** A setting changed through the
@@ -3465,8 +3438,7 @@ does not share it.
 storage subsystem, so the refusal sits inside the live branch. A check placed before it would
 refuse every demo and every `ui-e2e` run over a subsystem they do not use.
 
-**Second half — OVERRULED 2026-08-02 (quince#458).** It read *"ruled as recommended: `backend`, `zfs`
-and `retention` stay global; a declared entry inherits them"*, and `backend` and `zfs` are now
+**Second half — OVERRULED 2026-08-02 (quince#458).** `backend` and `zfs` are
 **per-entry overrides with the global as the inherited default**. `retention` stays global.
 
 **The recommendation's own reasoning is what fails.** It argued that per-storage zfs settings *"only
@@ -3619,9 +3591,7 @@ deliverable now has two steps**, because this is the second config break in one 
 naming it the most important piece left of `qn.6c` (2026-08-02).** Recorded because it was listed as
 undecided and a later reader will look for where it went.
 
-**Both of this block's open questions are now closed.** It read *"Not ruled here: `qn.6e`'s scope,
-which quince#502 leaves open by instruction; and whether `auto` removal ultimately sits in `qn.6e` or
-travels with quince#443's add-storage flow."* **`qn.6e` was scoped on 2026-08-07** (quince#502, spec
+**Both of this block's open questions are closed.** **`qn.6e` was scoped on 2026-08-07** (quince#502, spec
 at `docs/specs/qn.6e/qn.6e.md`), and **`auto` removal happens in neither place** — it was ruled
 *absorbed* rather than removed, above.
 
