@@ -244,7 +244,3 @@ func TestWifiSyncUnpairedIs409(t *testing.T) {
 		t.Fatalf("wifi-sync status = %d, want 409", resp.StatusCode)
 	}
 }
-
-// PairingWritable: this stub pairs happily, so it reports the capability as present. The
-// read-only case has its own coverage in package deviceops, where the probe lives.
-func (s *stubOps) PairingWritable() (bool, string) { return true, "" }
