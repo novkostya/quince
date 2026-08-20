@@ -476,8 +476,8 @@ if [ -n "$usage_gates" ] && [ "$usage_gates" = "$list_gates" ]; then
 	ok "--list names every gate the usage block advertises (the direction that was broken)"
 else
 	bad "--list and the documented vocabulary disagree — a needed gate would read as not-needed"
-	printf 'usage:  %s\n' "$usage_gates" | sed 's/^/    | /'
-	printf '--list: %s\n' "$list_gates" | sed 's/^/    | /'
+	printf '%s\n' "usage:  $usage_gates" | sed 's/^/    | /'
+	printf '%s\n' "--list: $list_gates" | sed 's/^/    | /'
 fi
 
 vocab_ok=yes
@@ -516,7 +516,7 @@ if [ -z "$missing" ] && [ -n "$all_gates" ]; then
 else
 	bad "ladder gate(s) gate-scope does not know —$missing — would be reported SKIPPED forever"
 	printf 'ALL_GATES:  %s\n' "$all_gates" | sed 's/^/    | /'
-	printf 'gate-scope: %s\n' "$list_gates" | sed 's/^/    | /'
+	printf '%s\n' "gate-scope: $list_gates" | sed 's/^/    | /'
 fi
 
 printf '\ngate-scope-test: %d passed, %d failed\n' "$pass" "$fail"
