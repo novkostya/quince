@@ -131,9 +131,9 @@ thing preventing it. Where the platform grants the capability regardless, quince
 consequence instead of pretending to withhold it**: the admin's older backups keep the password they
 were made with, which is true today, with or without this rung, and with or without quince.
 
-**PROPOSED:** the admin is notified when a scoped holder changes it — *"the encryption password for
+**RULED — REQUIRED** (quince#1347 review): the admin is notified when a scoped holder changes it — *"the encryption password for
 `<device>` was changed"*. That is the state-honesty rule applied to a real consequence, not a
-permission check. See *Proposed for confirmation*.
+permission check. See *Ruled at spec review*, item 3.
 
 ### D4 — Enrolment: a one-shot authorization for a registration, not a token quince stores
 
@@ -204,13 +204,22 @@ device's notifications.
 time: scope can change, a credential can be revoked, and a device can be deleted, all after the
 subscription exists — and a scope change must take effect without the phone re-subscribing.
 
-**`device_notification_prefs` is the ADMIN's preference — Operator, 2026-08-20.** A scoped holder is
-not affected by it. So the owner column fact 6 anticipates is added **with existing rows backfilled
-as admin-owned, not as global**: an admin who has muted device X keeps their own mute, and the
-scoped holder of X still receives their device's notifications. Reading the existing rows as global
-would silently import the admin's preference into a principal who never expressed it — and it fails
-in the direction that makes the feature look broken, since a scoped holder would be enrolled into
-silence with nothing on screen saying why.
+**`device_notification_prefs` is the ADMIN's preference — Operator, 2026-08-20, given IN SESSION and
+relayed here by the implementer. It is NOT on the forge, and this sentence is the whole of its
+provenance.** Stated that way deliberately: an Operator ruling carries weight here, so one cited
+without a findable artifact is worse than an unattributed one — the next session reads it as settled
+by the seat that cannot be overruled and has nothing to check it against. **The prior reasoning IS
+findable and agrees**: quince#1270's body, decided by the architect seat, works the same question to
+the same answer — *"if the admin silences a household member's iPhone, does its owner stop hearing
+about their own phone?"* has *"an obvious right answer — no, the admin was silencing their own
+noise"*, and *"the global reading becomes the admin's-own-preference reading."*
+
+A scoped holder is not affected by it. So the owner column fact 6 anticipates is added **with
+existing rows backfilled as admin-owned, not as global**: an admin who has muted device X keeps
+their own mute, and the scoped holder of X still receives their device's notifications. Reading
+the existing rows as global would silently import the admin's preference into a principal who
+never expressed it — and it fails in the direction that makes the feature look broken, since a
+scoped holder would be enrolled into silence with nothing on screen saying why.
 
 The two conditions compose by AND within one principal: this principal's device preference, then the
 global category switches `qn.12` already ships.
@@ -233,7 +242,7 @@ nobody rebuilds the ceremony out of symmetry.
 
 The admin revokes **one** scoped credential without touching the others, from the device page it was
 issued from. **The admin's Sign-in settings must mark each row as admin or device-scoped, and for a
-scoped one, which device** (Operator, 2026-08-20) — without it the admin cannot answer *what have I
+scoped one, which device** (relayed as the Operator's by the analyst seat on quince#1342, 2026-08-20 — that comment's header names the Operator but, unlike its other two items, carries no quote, so read this as relayed rather than transcribed) — without it the admin cannot answer *what have I
 issued* or revoke intelligently. This composes with the existing per-row rpId state (`worksHere`)
 rather than replacing it: a scoped passkey can also be registered at an address that no longer works,
 and those are two independent facts about one row.
@@ -255,21 +264,29 @@ this spec exists before any of it.
 
 ---
 
-## PROPOSED here, for confirmation at spec review
+## RULED at spec review — all four, by the architect (quince#1347)
 
-The `qn.8` pattern (quince#270, quince#1343): proposed in the spec and confirmed at review costs one
-round trip instead of blocking the rung.
+`/docs/specs/**` is the architect's under `CODEOWNERS`. These were proposed in this spec and ruled in
+its review, which is the `qn.8` pattern (quince#270, quince#1343): one round trip instead of blocking
+the rung. **The heading moved with the body** — a `PROPOSED` heading over a ruled body is quince#408's
+gate-able signature, and this section is exactly the shape that produces it.
 
-1. **Passkey-only for scoped principals** — no password, ever. The Operator's stated inclination is
-   *"not even letting you choose password"*; it is an inclination, not yet a ruling, and
-   `PasswordControls` assumes one principal today. **Proposed: adopt it**, which also removes the
-   password-reset path from the design rather than building one to attack.
+1. **Passkey-only for scoped principals, no password ever — CONFIRMED.** The Operator's stated
+   inclination was *"not even letting you choose password"*; the ruling's own reason is stronger than
+   the inclination — a password for a scoped principal would put a second credential class in the
+   same tables D6's invariant must already be scope-aware about, and passwords need reset paths,
+   which is admin surface a scoped holder must not reach.
 2. **The enrolment secret: single-use, minutes-long TTL, revocable, and unused ones ARE listed** on
-   the device page — an issued-and-unscanned QR is live authority, and authority nobody can see is
-   authority nobody revokes.
-3. **The admin is notified when a scoped holder changes the encryption password** (D3).
-4. **The `qn.13` number itself.** Nothing claims 13 in `roadmap.md` or this repo (grepped, both);
-   the number is proposed, not ruled.
+   the device page — **CONFIRMED**, with the listing named as the part not to trade away. An
+   issued-and-unscanned QR is live authority, and *authority nobody can see is authority nobody
+   revokes* is this project's no-silent-anything rule wearing a security hat.
+3. **The admin is notified when a scoped holder changes the encryption password (D3) — CONFIRMED AS A
+   REQUIREMENT, not merely permitted.** It follows from state honesty rather than from permissions:
+   the consequence is real and asymmetric — the admin's older backups keep the password they were
+   made with — and a consequence the admin cannot see is *troubleshooting is actionable* failing at
+   the only moment it matters.
+4. **The `qn.13` number — CONFIRMED**, verified independently by the reviewer: `docs/specs/` has no
+   `qn.13` and no doc references one.
 
 ---
 
@@ -376,13 +393,13 @@ Every hard rule this rung touches *or comes near*, written before building.
 | **Troubleshooting is actionable** | D5 is this rule applied to the sharpest failure in the rung: three things break differently and two silently, so the message names the address baked in and the remedy, following `ErrUnsupportedRPID`'s house pattern. D6's refusal names why passwordless is unavailable rather than merely refusing. |
 | **Interface facts looked up live** | All eight facts carry the checkout (`acdcfe7`) and date they were established, with file and line. Fact 6 corrects quince#1342 §5 by measurement rather than by memory. No version is pinned by this rung; it adds no dependency. |
 | **Never mutate a committed version** | **Comes near, does not touch.** D3 grants *back up now*, *retry* and *cancel* to a new principal — the same job engine, entered by the same routes, with no new write path into `latest/`, `versions/` or a snapshot. *Delete a version* is refused (D3), which is the only capability in the list that could reach a committed artifact. Nothing here changes when quince#591's zfs in-place ruling is built. |
-| **No silent caps or fallbacks** | D7 filters at send and surfaces the result; D8 refuses server-side rather than hiding; proposal 2 lists unused enrolment secrets rather than leaving live authority invisible; D6's whole subject is a predicate that fails *permissively* and silently. |
+| **No silent caps or fallbacks** | D7 filters at send and surfaces the result; D8 refuses server-side rather than hiding; ruling 2 lists unused enrolment secrets rather than leaving live authority invisible; D6's whole subject is a predicate that fails *permissively* and silently. |
 | **Config tidiness (D12)** | **No new `config.yml` key, and that is deliberate.** Scope is per-credential and the credential set is discovered rather than authored — the same reasoning `0013` used to keep per-device preferences out of `config.yml` (quince#728: the file holds only what the user set). The enrolment TTL is a constant with its reasoning in D4 unless review rules otherwise; a UDID-keyed or credential-keyed block would fill the file with values nobody typed. |
 | **Secrets discipline** | The enrolment secret reaches the app DB and a QR and nothing else — never argv, env or a log line. D3 grants the backup encryption password to a new principal; the existing stdin/pty-only path is unchanged, and this rung adds no new way for it to be spelled. Test fixtures keep the password `test`. |
 | **Subprocesses** | None beyond the existing job engine, entered by existing routes. |
 | **Every hardware bug becomes a replay fixture** | No hardware path is touched. G6 names what hardware still owes and to whom. |
 | **Docs are part of the diff** | `contracts.md` §1 (D10) and `design.md` §6 (the principal, the scope, and D6's invariant) move with the slices that change them, not with this spec — **this PR asserts no new canon; it proposes.** The roadmap row and the devlog dashboard follow the ruling, not the proposal. Coverage and a known-untested list ride each build slice. |
-| **Don't improvise architecture** | Three items are **proposed for confirmation** rather than decided (above); the one genuine gap — the iOS measurement — is a **pointer with an owner**, not an assertion about state, per the 2026-08-18 retirement of the `PROPOSED (gap)` block (quince#1219). D3's exception, D6's invariant and D7's admin-mute rule are transcribed Operator rulings, written out in full here because git is where a decision survives. Nothing is built past any of it. |
+| **Don't improvise architecture** | The four proposed items are now **ruled by the architect** (quince#1347 review; `/docs/specs/**` is that seat's under `CODEOWNERS`), and the one genuine gap — the iOS measurement — is a **pointer with an owner**, not an assertion about state, per the 2026-08-18 retirement of the `PROPOSED (gap)` block (quince#1219). **Provenance is stated per ruling rather than in bulk, because three of these have three different origins**: D3's exception and D6's invariant are **transcribed Operator rulings** quoted verbatim from quince#1342; **D7's admin-mute rule is an Operator instruction given in session and relayed here** — not on the forge, and D7 says so in its own words rather than leaving a citation that cannot be followed; D9's marked-rows requirement is **relayed** by the analyst seat without a quote. Written out in full here because git is where a decision survives. Nothing is built past any of it. |
 | **Approver ≠ author** | Authored by an implementer session as `quince-coder`; reviewed by the architect. This spec touches the security model, so it is reviewed **before** code exists, which is why it is PR 1. |
 
 ---
@@ -398,10 +415,10 @@ Each is one PR carrying one reviewable claim, **sequenced from `main`, not stack
 | **3** | the principal: `sessions_auth` gains its credential, `Authenticate` returns it, `authGuard` binds it into the request context — **no behaviour change, no scope yet** (D1, G2) | no |
 | **4** | scope on the credential, and D6's invariant with its gate — **before anything can mint a scoped row** (D2, D6, G1) | no |
 | **5** | quince#1001, and quince#1259's reachable-and-scope-aware `ErrLastCredential` (D9) | no |
-| **6** | the enrolment ceremony and the QR, against fact 8's precedent (D4, D5, G4) | proposal 2 |
-| **7** | authorization at every route, and the shell's shape (D3, D8, G3) | proposal 1 |
+| **6** | the enrolment ceremony and the QR, against fact 8's precedent (D4, D5, G4) | no — ruled 2 |
+| **7** | authorization at every route, and the shell's shape (D3, D8, G3) | no — ruled 1 |
 | **8** | the send-path filter and the preference's owner column, backfilled admin-owned (D7, G5) | no |
-| **9** | the admin's view: marked rows, listed secrets, revocation from the device page (D9, proposal 2) | proposal 2 |
+| **9** | the admin's view: marked rows, listed secrets, revocation from the device page (D9, ruling 2) | no — ruled 2 |
 
 **Slice 3 before slice 4, and slice 4 before anything mints a scoped credential.** D6's invariant is
 worthless if a scoped row can exist before the predicates know what one is — that ordering is the
