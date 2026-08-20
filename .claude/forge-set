@@ -15,3 +15,16 @@
 # session that would otherwise have quietly watched less has to be told.
 novkostya/quince
 novkostya/quince-devlog
+
+# The two libraries, added 2026-08-20. Operator ruling, this session: "consider
+# ios-backup-crypt part of quince, follow the same practices. if we need changes - we make
+# them." Same practices means the same review: a PR here that nothing watches is a PR that
+# waits on somebody remembering it exists. `ios-backup-crypt#2` was open for minutes with no
+# watcher on that repository, which is what prompted this line.
+#
+# BOTH, not just the one with work in it today. `ios-backup-parser` is the sibling under the
+# same ruling and qn.9 consumes it; adding it when the first PR lands there would repeat the
+# gap this file exists to close, and the cost of watching a quiet repository is one API call
+# a tick.
+novkostya/ios-backup-crypt
+novkostya/ios-backup-parser
