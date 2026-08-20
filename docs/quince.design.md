@@ -226,9 +226,7 @@ stops at *the invariant above all* never reaches the ruling.
 
   **WHICH transport `auto` prefers when the device is present on BOTH is configurable —
   `backup.preferred_transport`, `usb` | `wifi`, default `usb`** (Operator ruling 2026-08-04,
-  quince#654). This paragraph read *"prefers USB when plugged, Wi-Fi otherwise"*, which described a
-  hardcoded USB-first sitting beside a `backup.transport` key that was validated, documented,
-  editable in Settings — and read by nobody.
+  quince#654).
 
   | requested | device present on | result |
   | --- | --- | --- |
@@ -685,9 +683,8 @@ screen that offers passwordless.
   Fixation is defeated by minting a fresh session id, never by evicting anybody — so "one
   concurrent session" would be a *separate* policy, and it is deliberately not the one taken:
   `ui.design.md` calls the iPhone a first-class client, and a second first-class client that
-  evicts the first is not one. This line read only "session rotation on login" until 2026-08-01,
-  which is ambiguous between the two readings; the code took the evicting one while quoting
-  fixation as its reason, and the Operator found it by being signed out of a desktop by an iPad.
+  evicts the first is not one. **Do not compress this to "session rotation on login"** — that
+  phrasing is ambiguous between the two readings, and the evicting one is the wrong half.
 - **Web baseline**: CSRF protection on mutating endpoints; strict WS `Origin`
   validation; CSP + frame denial; reverse-proxy trust headers only from configured
   addresses — **with one deliberate asymmetry, below**; path-traversal-safe file serving
@@ -854,16 +851,12 @@ no user it can wrong."*
 written the flag existed and the licence had expired. The redirect therefore landed **with** its
 exception, in one commit, and no unconditional `301` was ever on `main`.
 
-Kept rather than deleted because the reasoning is still the rule — *a condition may not be written
-on a key that does not exist* — and because a licence that was granted and then quietly dropped
-looks, to the next reader, like an obligation somebody forgot. It was not forgotten; it stopped
-applying. The general form is worth carrying: **a sequencing licence is conditional on the sequence,
-and slices do not always land in the order a spec numbers them.**
+The rule the licence rested on still holds — *a condition may not be written on a key that does not
+exist* — and so does its general form: **a sequencing licence is conditional on the sequence, and
+slices do not always land in the order a spec numbers them.** A licence whose sequence did not
+happen has stopped applying, not been forgotten.
 
-*(These numbers are the `docs/specs/qn.6f/qn.6f.md` PR-slicing table's. They read `slice 2` until
-2026-08-02 — wrong, and wrong in the direction that misdirects: slice 2 is the page and has no
-listener, so it could not ship a redirect to anything. Corrected with quince#513, which found the
-same defect in three more places.)*
+*(These numbers are the `docs/specs/qn.6f/qn.6f.md` PR-slicing table's.)*
 
 **RULED (was `PROPOSED (gap)`): onboarding step 1 IS reachable without a session — a fifth
 `authExempt` route, by exact path.** Operator, 2026-08-02, on quince#501: *"Of course it's pre-auth,
@@ -1059,8 +1052,8 @@ lands — which is the 2026-08-02 ruling in contracts §1.
   its socket, keeping the HTTP-facing, plaintext-handling process free of device privileges.
   `deploy/compose.yml` is the example, and it ships.
 
-  **This read "Two deployment profiles … `simple` — everything in one container (v1 default)".**
-  That `simple` profile is **DESCOPED, NOT ABANDONED**: `muxers[].type: managed` is refused at
+  **The `simple` profile — everything in one container — is DESCOPED, NOT ABANDONED.**
+  `muxers[].type: managed` is refused at
   startup, the image ships no muxer daemon, and `muxsup`'s supervision is parked with its tests
   still running under `make gates`. Bringing it back needs a way for the schema to NAME a daemon
   — `muxers:` has `address` and `type` and no `daemon:`, so the config→spec mapping was retired
