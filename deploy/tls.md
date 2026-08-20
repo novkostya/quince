@@ -1,44 +1,17 @@
-# Reaching quince over HTTPS
+# Getting HTTPS in front of quince
 
-**quince needs an encrypted origin, and a phone is not `localhost`.** The session cookie is marked
-`Secure` for any non-loopback host, so a browser reaching quince over plain `http://` on a LAN
-address accepts the login, discards the cookie, and returns you to the login form.
-quince refuses that with a `426` naming the cause instead of looping in silence — but
-the refusal is a diagnosis, not a fix. This page is the fix.
+**Your phone is not `localhost`, and that is the whole problem.** Browsers throw away a login
+cookie marked `Secure` when the connection is plain `http://`, so you would log in and land straight
+back on the login form. quince refuses with a clear message instead of looping — but that is a
+diagnosis, not a fix. This page is the fix.
 
-There are two supported shapes, and the choice is exactly **does quince terminate TLS**.
+There are two ways round it, and the only question is whether quince handles the certificate itself.
 
----
+## Let something else handle it
 
-## Tier 1 — something else terminates TLS (recommended)
-
-quince stays on plain HTTP, reachable only by the proxy, and configures nothing. Onboarding step 1
-completes itself: quince sees `X-Forwarded-Proto: https` and asks you for nothing.
-
-### `tailscale serve` — the least work of anything here
-
-No certificate to obtain, renew, or mount. Tailscale terminates TLS with a real cert for your
-tailnet name and forwards to quince.
-
-```sh
-tailscale serve --bg --https=443 localhost:8968
-```
-
-Your quince is then at `https://<machine>.<tailnet>.ts.net/`, and only on the tailnet.
-
-**Check `tailscale serve --help` against your own version before pasting that.** Tailscale's own
-documentation records that these flags *"have changed in the 1.52 version"*, and this line is
-written to the documented `--https=<port> <target>` form rather than to a shorthand — verified
-against Tailscale's CLI reference on 2026-08-02, not recalled.
-
-**This is `tailscale serve`, not `tailscale cert`.** They are different features and the difference
-decides which tier you are in: `serve` terminates TLS *for* you (tier 1, nothing to configure in
-quince); `cert` writes a certificate and key to disk for *you* to serve (tier 2, below). Reaching
-for `cert` when you wanted `serve` is a working setup with more moving parts than it needed.
-
-### A reverse proxy
-
-Caddy, nginx, Traefik — anything that terminates TLS and sets `X-Forwarded-Proto`.
+Easiest, and nothing to configure in quince: put a reverse proxy in front — Caddy, nginx, Traefik —
+or use a mesh VPN such as Tailscale, which can terminate HTTPS for you with no certificate to
+obtain or renew.
 
 ```
 # Caddyfile
@@ -47,7 +20,7 @@ quince.example.com {
 }
 ```
 
-Caddy sets `X-Forwarded-Proto` itself. nginx needs it spelled out:
+Caddy sets the headers itself. nginx needs them spelled out:
 
 ```nginx
 proxy_set_header X-Forwarded-Proto $scheme;
@@ -55,51 +28,24 @@ proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
 proxy_set_header Host              $host;
 ```
 
-**`Host` IS LOAD-BEARING FOR PASSKEYS, AND SILENTLY SO.** quince derives the WebAuthn
-relying party — the domain a passkey is bound to — from the request's `Host`, deliberately rather
-than from a config key, so that it stays correct across every tier on this page without anyone
-editing YAML. Caddy's `reverse_proxy` preserves `Host` by default; **nginx does not, which is why
-that third line is here.** Delete it and quince sees the upstream name, so the browser refuses to
-mint a credential for a relying party outside the origin it is visiting — and what the user gets is
-an opaque `SecurityError` on the tier passkeys are chiefly built for. Registration fails and nothing
-says why.
+⚠ **`Host` matters more than it looks.** quince derives the domain your passkeys are bound to from
+it. Get it wrong and passkeys either fail to register or stop working after they already have —
+and nothing in the browser explains why. `proxy_set_header Host $host;` is the whole fix.
 
-**`X-Forwarded-Proto` can only ever upgrade — and only from a proxy you have named.** quince treats
-it as evidence the origin is secure and never as evidence it is not, so a proxy that omits it
-produces the login loop rather than a silent downgrade. If step 1 will not complete behind your
-proxy, that header is the first thing to check.
+You also need to tell quince which proxy to believe, or it ignores those headers and still thinks
+you are on plain HTTP. It is an environment variable, not a `config.yml` key:
 
-**Since quince#555 the header is believed only from an address in `QUINCE_TRUSTED_PROXIES`** — with
-one deliberate exception: **an unset list believes anyone**, which is the shipping default and
-byte-for-byte the old behaviour, so no existing deployment changed. Once you set the list, a peer
-that is not on it is no longer believed. That matters because two things now read this signal and
-both *invert* it — the `426` refusal reports "your cookie is fine" and the onboarding check reports
-"complete" — so an injected header would have told you the setup was finished on an unencrypted
-connection.
+```yaml
+# in compose.yml, under the quince service
+    environment:
+      QUINCE_TRUSTED_PROXIES: "172.16.0.0/12"
+```
 
-**`X-Forwarded-For` is different and must be configured.** quince believes it only from addresses
-listed in **`QUINCE_TRUSTED_PROXIES`** — a bootstrap environment variable, comma-separated, and
-**empty by default**. Out of the box every request is therefore attributed to the proxy's own
-address, and the login rate limit is shared by everyone behind it. Set it to your proxy's address
-(quince#464).
+Comma-separated, and empty by default — which means trust nothing, so this step is not optional.
 
-It is **env rather than `config.yml`**, ruled 2026-08-02 (quince#549), and the reason matters if you
-are tempted to move it: `--public-demo` deletes its config at startup, so the deployment that most
-needs a trust list could never carry one — and in that mode every visitor can `PUT /api/config`,
-which would make a file-based trust list editable by the population it exists to protect against.
+## Or let quince do it
 
-**Bind quince to loopback when a proxy is in front.** `QUINCE_LISTEN=127.0.0.1:8968` — otherwise the
-plain-HTTP port stays reachable on the LAN and the proxy is a suggestion rather than a boundary.
-Note that this conflicts with `network_mode: host` for Wi-Fi backup, which needs quince reachable on
-the LAN for mDNS; if you need both, the proxy and quince are on the same host and the LAN-facing
-plain port is the trade you are making.
-
----
-
-## Tier 2 — quince serves TLS with your certificate
-
-Point quince at a certificate and key. It serves HTTPS **on the same port** it already listens on,
-and redirects plain HTTP there.
+Point it at a certificate and key:
 
 ```yaml
 tls:
@@ -108,107 +54,59 @@ tls:
 ```
 
 ```yaml
-# compose
+# in compose.yml
     volumes:
       - /path/to/certs:/certs:ro
 ```
 
-**Read-only is expected and correct.** quince never writes to that directory — not a renewal, not a
-backup copy. Mount it `:ro` and the guarantee is enforced rather than promised.
+Mount it read-only. quince never writes there, and `:ro` turns that from a promise into a guarantee.
 
-### One port, both protocols
+Get the certificate however you like — `certbot` or `acme.sh` in their own container writing to a
+shared volume is the usual answer.
 
-There is no second port. quince inspects the first byte of each connection — `0x16` is a TLS
-handshake, every HTTP request starts with a method letter — and routes accordingly. Plain HTTP gets
-a `301` to `https://` at the **same host and port**.
+**There is no second port.** quince looks at the first byte of each connection and serves HTTPS or
+redirects plain HTTP to it, on the same port. The address you set up with keeps working.
 
-That is deliberate: the URL you onboarded with keeps working, upgraded in place. There is no *"now
-go to a different port"*, and no bookmark that starts returning a TLS error — which browsers render
-as *"sent an invalid response"* and which is indistinguishable, to a user, from quince being broken.
+**Renewals need no restart.** quince re-reads the files when they change. If a read fails halfway
+through a renewal it keeps serving the old certificate and logs it, rather than dropping the UI.
 
-### Where the certificate comes from
+**A broken certificate stops quince starting**, names the file and the reason, and exits. It will
+not quietly fall back to plain HTTP — that would put your session cookie in the clear on a system
+you had configured for TLS, and your browser would not tell you either.
 
-Any of these; quince does not care which.
+To go back to plain HTTP, remove both keys.
 
-- **`acme.sh` or `certbot`** in their own container, writing to a shared volume.
-- **`tailscale cert <machine>.<tailnet>.ts.net`** — a real, publicly-trusted certificate for your
-  tailnet name, written to disk. Use this when you want quince itself to serve TLS on the tailnet;
-  use `tailscale serve` (tier 1) if you do not.
-- **A wildcard** you already manage. quince serves what it is given and does **not** check that the
-  certificate's name matches the host you reached it on, precisely so a wildcard works.
-
-### Rotation needs no restart
-
-quince re-reads the pair when either file changes on disk, so a renewal that rewrites in place is
-picked up on the next handshake. No restart, no signal, no reload endpoint.
-
-If a re-read fails — a key half-written mid-renewal, say — quince keeps serving the certificate it
-already has and logs a warning. It does not fail the handshake, because a renewal blip should not
-take the UI down.
-
-### An unusable certificate stops the process
-
-If `tls:` is set and the pair cannot be loaded, **quince refuses to start**, names the file and the
-reason, and exits non-zero. It does not fall back to plain HTTP: that would mean serving the session
-cookie in clear to somebody who had configured a certificate, and their browser would not tell them
-either.
-
-To go back to plain HTTP, clear **both** keys.
-
----
-
-## Not recommended, and why they are still here
-
-### Plain HTTP on a network you trust
+## Plain HTTP, if you really mean it
 
 ```yaml
 sessions:
   allow_insecure_transport: true
 ```
 
-Off by default. It relaxes the `Secure` flag for plain-HTTP clients so the login works, and it
-**overrides the redirect above** — if you have both a certificate and this flag, plain HTTP is
-served rather than upgraded.
+**The honest case is a VPN**, where the tunnel is already encrypted and a certificate inside it buys
+nothing. That is a reasonable choice, not a lazy one.
 
-**The honest case for it is a VPN.** Over WireGuard or Tailscale the transport is already encrypted;
-adding TLS inside the tunnel buys nothing and costs a certificate to manage. In that setting this is
-the correct choice rather than the lazy one.
+**What it costs:** your session cookie crosses the network in the clear, so anyone who can read that
+network can sign in as you — to something holding everything on your phone. On a VPN that is the
+tunnel. On a LAN it is everyone on the LAN. quince keeps saying so and will not let you dismiss it.
 
-**The cost, stated plainly:** the session cookie and the CSRF token cross the network in clear.
-Anyone who can read the path can sign in as you, to an application that shows a person's entire
-digital life. On a VPN that path is the tunnel. On a LAN it is everyone on the LAN.
+**It also rules out notifications, permanently.** Browsers only allow web push on a secure origin,
+and plain HTTP to a LAN address is not one. quince does not send push yet — which is exactly why
+this is worth knowing now: the *"your backup is waiting for your passcode"* notification is the
+answer to Wi-Fi backups needing you to confirm on the phone, and a plain-HTTP setup will find that
+feature arrives and does nothing.
 
-quince says so at startup and in Settings, and will not let you turn the warning off.
+**Self-signed certificates have the same problem.** Chromium will not register a service worker on
+an origin with a certificate error, and clicking through the warning does not help. You can mount
+one and quince will serve it; you will meet the browser warning on every new device, and push will
+never work.
 
-**And it forecloses notifications, for the same reason self-signed does.** Browsers only register
-service workers — and therefore only allow web push — on a **secure origin**, and plain HTTP to a
-LAN address is not one. Note that `http://localhost` *is* a secure context, so a developer testing
-locally will not notice this; a phone on the LAN will.
+## Which should I pick?
 
-quince does not send push **yet**. Saying so here is the point: this choice decides whether it ever
-can. The planned *"your backup is waiting for your passcode"* notification is the answer to Wi-Fi
-backup needing an on-device confirmation, and a deployment that picked plain HTTP will find the
-feature arrives and does nothing. **Better known while it is still a choice.**
-
-### Self-signed certificates
-
-**quince does not generate one, and this is deliberate rather than unfinished.** A certificate you
-click through is not trusted, and Chromium refuses to register service workers on an origin with a
-certificate error — the click-through exception does not apply. That would foreclose the push
-notifications quince needs for assisted Wi-Fi backup.
-
-You may of course mount a self-signed certificate yourself via tier 2; quince serves what it is
-given. You will meet the browser interstitial on every new client, and push will not work.
-
----
-
-## Which one should I use?
-
-- **On a tailnet** — `tailscale serve`. Nothing to renew, nothing to mount.
 - **Already running a reverse proxy** — put quince behind it.
-- **Neither, and you have a certificate** — tier 2.
-- **Neither, and you are on a VPN** — the plain-HTTP opt-in, knowingly.
+- **On a mesh VPN that terminates HTTPS** — let it, and configure nothing here.
+- **You have a certificate** — hand it to quince.
+- **On a VPN, and you would rather not manage a certificate** — plain HTTP, knowingly.
 
-The one thing to avoid is plain HTTP on an untrusted network with the opt-in enabled because the
-login would not work otherwise. That is the case the `426` exists to name, and the answer is a
-certificate rather than the flag.
+The one to avoid is plain HTTP on a network you do not control, turned on because the login would
+not work otherwise. That is the case the refusal exists to name, and the answer is a certificate.
