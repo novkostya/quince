@@ -24,7 +24,8 @@ type fakeMuxer struct {
 	ln              net.Listener
 	replies         [][]byte // one per accepted connection; nil means "close without replying"
 	stall           bool     // accept, read the request, never answer
-	closeAfterFirst bool     // close the listener while answering, so a re-dial cannot succeed
+	closeAfterFirst bool     // close the listener while answering, so a re-ask cannot succeed
+	truncate        bool     // write a header promising a body, then close mid-frame
 	conns           int
 }
 
@@ -63,6 +64,14 @@ func (f *fakeMuxer) serve() {
 		go func(conn net.Conn, idx int) {
 			defer func() { _ = conn.Close() }()
 			if _, _, err := readPlist(conn); err != nil {
+				return
+			}
+			if f.truncate {
+				// A header promising a body, then nothing: the muxer died while answering.
+				h := header{Length: 64, Version: 1, Request: 8, Tag: 1}
+				var buf bytes.Buffer
+				_ = binary.Write(&buf, binary.LittleEndian, h)
+				_, _ = conn.Write(buf.Bytes())
 				return
 			}
 			if f.stall {
@@ -154,13 +163,6 @@ func TestCloseWithNoReplyIsUNKNOWNWhenTheMuxerHasGone(t *testing.T) {
 	}
 }
 
-func TestResultWithNonZeroNumberIsAbsent(t *testing.T) {
-	f := newFakeMuxer(t, resultReply(t, 1))
-	if got := read(t, f); got.State != PairRecordAbsent {
-		t.Fatalf("state = %v, want absent", got.State)
-	}
-}
-
 func TestUnreachableMuxerIsUnknownNotAbsent(t *testing.T) {
 	dir := t.TempDir()
 	ep, err := muxaddr.Parse(filepath.Join(dir, "nothing-here.sock"))
@@ -220,6 +222,48 @@ func TestRecordBodyDoesNotEscape(t *testing.T) {
 		b, _ := os.ReadFile(filepath.Join(t.TempDir(), e.Name()))
 		if strings.Contains(string(b), sentinel) {
 			t.Fatalf("the record body was written to %s", e.Name())
+		}
+	}
+}
+
+// A muxer RESTARTED between the ask and the re-ask is the supervised path, not a race: `muxsup`
+// restarts the daemon and the record survives in --plist-storage. A liveness ping would find the
+// new process accepting and report Absent about a record that is still there — and because a
+// false Absent takes the `absent → present` arm, it bypasses Recorded()'s comparison entirely
+// (quince#1336 review).
+func TestSilenceThenAnAnswerTakesTheAnswer(t *testing.T) {
+	f := newFakeMuxer(t, nil, recordReply(t, []byte("STILL-HERE")))
+	got := read(t, f)
+	if got.State != PairRecordPresent {
+		t.Fatalf("state = %v, want present — the re-ask must be a re-ask, not a ping", got.State)
+	}
+}
+
+// A close part-way through a frame is the muxer dying WHILE answering, which is the strongest
+// evidence it had an answer. It must never read as "no record".
+func TestTruncatedFrameIsUnknownNotAbsent(t *testing.T) {
+	f := newFakeMuxer(t, nil)
+	f.truncate = true
+	got := read(t, f)
+	if got.State != PairRecordUnknown {
+		t.Fatalf("state = %v, want unknown — a truncated frame is not an answer", got.State)
+	}
+}
+
+func TestResultENOENTIsAbsent(t *testing.T) {
+	f := newFakeMuxer(t, resultReply(t, 2)) // usbmuxd: send_result(..., ENOENT)
+	if got := read(t, f); got.State != PairRecordAbsent {
+		t.Fatalf("state = %v, want absent", got.State)
+	}
+}
+
+// EINVAL is usbmuxd answering a malformed request, and every other number is some other failure.
+// Reading either as "no record" is a false Absent, which is the direction that bypasses the guard.
+func TestOtherResultNumbersAreUnknownNotAbsent(t *testing.T) {
+	for _, n := range []int{1, 3, 6, 22} {
+		f := newFakeMuxer(t, resultReply(t, n))
+		if got := read(t, f); got.State != PairRecordUnknown {
+			t.Fatalf("result %d: state = %v, want unknown", n, got.State)
 		}
 	}
 }
