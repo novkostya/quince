@@ -578,8 +578,8 @@ Each is one PR carrying one reviewable claim, **sequenced from `main`, not stack
 | **5** | quince#1001, and quince#1259's reachable-and-scope-aware `ErrLastCredential` (D9) | no |
 | **6** | the credential username: scoped rows carry their device, admin rows keep `quince-admin` (D2.1, G7) | no |
 | **7** | the remembered principal and the subtle *change user* — `passkeyHint` holds a credential id, login sends `allowCredentials` (D2.2, G8) | no |
-| **8** | the enrolment ceremony and the QR, against fact 8's precedent, excluding nothing (D4, D4.1, D5, G4) | no |
-| **9** | authorization at every route, and the shell's shape (D3, D8, G3) | no |
+| **8** | authorization at every route, and the shell's shape (D3, D8, G3) | no |
+| **9** | the enrolment ceremony and the QR, against fact 8's precedent, excluding nothing (D4, D4.1, D5, G4) — **AFTER slice 8; see the ordering rule below** | no |
 | **10** | the send-path filter and the preference's owner column, backfilled admin-owned (D7, G5) | no |
 | **11** | the admin's view: marked rows, listed secrets, revocation from the device page (D9) | no |
 
@@ -587,3 +587,23 @@ Each is one PR carrying one reviewable claim, **sequenced from `main`, not stack
 worthless if a scoped row can exist before the predicates know what one is — that ordering is the
 same reasoning `0008_passkeys.sql` used to ship `quince auth reset` before any credential could be
 issued.
+
+**AND AUTHORIZATION BEFORE ENROLMENT — slices 8 and 9 were the other way round until 2026-08-21, and
+that order opens a hole rather than merely being untidy.** Enrolment is the first thing that can MINT
+a scoped credential; authorization is what makes every route consult a principal's scope. Landing
+enrolment first leaves a window — one merge wide, possibly longer — in which a scoped credential
+EXISTS and every route still serves it in full. Its holder would reach Settings, storages, other
+devices and the whole of the admin surface, which is the precise opposite of what issuing it means.
+
+**The window is not hypothetical, because the QR is how a real person gets a credential.** A rung
+half-landed on a running install is the state this project actually ships through — `qn.13`'s own
+slices have been merging one at a time all night — so "we would not enrol anyone before authorization lands" is a
+statement about intentions, not about what the code permits.
+
+**It is the same rule as slice 4's, one layer up**, and worth stating as the general form rather than
+as a second special case:
+
+> **Nothing that CREATES a principal may land before the thing that CONSTRAINS it.**
+
+Slice 4 applied that to the predicates and the scope column; this applies it to the ceremony and the
+routes. Both are instances of the ordering `0008` established for this codebase.
