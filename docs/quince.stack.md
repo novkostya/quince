@@ -125,34 +125,13 @@ quince supervises netmuxd as
   Wi-Fi health to USB health, backwards for two transports that should fail independently.
 - `--disable-usb` keeps this decision's two-daemon split real: without it both daemons claim the
   same USB device. It is the single flag the single-muxer flip removes after qn.7's audition.
-- **The pair-record store: this bullet is REWRITTEN, because it was wrong in both of its halves**
-  (qn.6r D1, ruling A on quince#1309). It read:
-
-  > No `--plist-storage`: netmuxd reads `/var/lib/lockdown/<UDID>.plist`, the same pairing records
-  > quince already persists and restores (qn.3 amendment 1).
-
-  **The store is the MUXER's, not quince's.** `userpref_read/save/delete_pair_record` are each a
-  message to the muxer with no filesystem fallback (libimobiledevice 1.4.0, `common/userpref.c`), so
-  `/var/lib/lockdown` is the daemon's directory and always was. It looked like quince's because the
-  topology this decision describes put both daemons inside quince's container; qn.6p moved the
-  daemon out and this sentence did not follow. quince now neither persists nor restores a record and
-  mounts that path nowhere, so the *"(qn.3 amendment 1)"* pointer named a mechanism that has since
-  retired.
-
-  **netmuxd WRITES as well as reads.** `SavePairRecord` is implemented — measured at the pinned
-  `ac8da97` — so *"reads"* was incomplete in its own terms, independently of who owns the directory.
-
-  **And *"No `--plist-storage`"* was a claim about QUINCE-AS-SUPERVISOR, which no longer exists.**
-  It described the flags quince passed when it launched netmuxd itself, where the default sufficed.
-  qn.6p retired that supervision, and the operator's own file passes the flag explicitly:
-  `deploy/compose.yml:44` is `command: ["--socket-path", "/var/run/usbmuxd", "--plist-storage",
-  "/var/lib/lockdown"]`. So a reader checking this line against the shipped example found it
-  contradicted, on `main`, before this rung existed.
-
-  Rewritten rather than amended clause by clause, because a canon line with one clause fixed reads
-  as a line that was checked (quince#1315 review). `RUST_LOG=info` is injected when unset, since
-  netmuxd is silent below `error` — the one part of the original that is still true, and it is about
-  logging rather than storage.
+- **The pair-record store is the MUXER's, and quince mounts it nowhere.**
+  `userpref_read/save/delete_pair_record` are each a message to the muxer with no filesystem
+  fallback (libimobiledevice 1.4.0, `common/userpref.c`), so `/var/lib/lockdown` is the daemon's
+  directory. netmuxd both reads it and **writes** it — `SavePairRecord` is implemented (pinned
+  `ac8da97`) — so the muxer must be able to write there, or a pairing cannot be recorded.
+  `deploy/compose.yml` passes `--plist-storage` explicitly and keeps that store outside quince's
+  data directory. `RUST_LOG=info` is injected when unset, since netmuxd is silent below `error`.
 - **Wi-Fi discovery is mDNS-only**, so a supervised netmuxd is necessary but not sufficient: the
   container must be able to receive multicast from the LAN (`deploy/compose.yml`).
 
