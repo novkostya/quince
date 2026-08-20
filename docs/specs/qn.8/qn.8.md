@@ -457,6 +457,54 @@ rather than never raised.
 suite is unchanged (D5), and the RPC becomes a second implementation with its own rung. The number
 is what makes that a scheduled decision instead of an open gap.
 
+**D10.5 — THE NUMBER, taken 2026-08-21 on a session box by `core/cmd/rss-spike`.** Synthetic
+manifests from the fixture generator; one process builds the fixture, a second opens it and
+is the only one measured.
+
+| phase | input | peak RSS |
+| --- | --- | --- |
+| unlock | 1 000 → 50 000 rows | 7.2 → 10.9 MiB |
+| full walk | 1 000 → 50 000 rows | 12.4 → 19.6 MiB |
+| stream one file | 1 MiB → 128 MiB | 7.8 → 7.9 MiB |
+
+**Clause (a) passes** — 19.6 MiB against a 256 MB bar. **Clause (b) passes**: a 128× increase
+in file size moves peak RSS by nothing, so the stream is a stream; the manifest curves
+plateau, 50× the rows for 1.5× the memory, with the residual consistent with the SQLite
+index itself rather than per-row retention. **Clause (c) is not measured and cannot be by
+this harness** (D10.3b) — it is G7's, on the implementation slice.
+
+**Two runs, and they agree.** Every row reproduces within 1–2% — `unlock@50k` 10.9 / 11.0 MiB,
+`walk@50k` 19.6 / 19.8, `stream@128MiB` 7.9 / 7.9. Stated because a single sample of a
+memory figure is a claim about one scheduling accident, and the shape of these curves is
+what the threshold reads.
+
+**So the evidence says in-process, and D10.4 stands unchanged**: the sidecar is not built,
+and the reasons it might be one day — crash isolation, an rlimitable ceiling — are untouched
+rather than refuted. What the number removes is the *memory* argument for paying for them now.
+
+**D10.6 — the first measurement was wrong in the direction that would have decided it the
+other way, and the method matters more than the figures.** The harness originally built each
+fixture inside the process it measured. `fixture` reads the whole assembled `Manifest.db`
+into memory and holds plaintext and ciphertext at once, and the caller holds a slice of
+every row it asked for.
+
+Readings, same box, same day:
+
+| | flawed | corrected |
+| --- | --- | --- |
+| unlock, 1 000 → 50 000 rows | 13.6 → 124.9 MiB | 7.2 → 10.9 MiB |
+| stream, 128 MiB file | 777.9 MiB | 7.9 MiB |
+
+Every flawed figure was a true reading of the wrong thing, nothing looked broken, and the
+shape it produced — **rising with input** — is exactly what clause (b) fails on. **The
+instrument would have bought a sidecar.**
+
+Two things follow, and they are the reason this section exists rather than a footnote:
+**a measurement harness needs a control as much as a test does**, and **the cheapest control
+here was arithmetic** — a 128 MiB file costing 777.9 MiB is roughly 6×, which is a builder
+holding a plaintext and a ciphertext copy, not a reader. Reading the number for plausibility
+before reading it for meaning is what caught it.
+
 ### D11 — `provably confined` is not true today, and the gate says what is true instead
 
 The roadmap's gate reads: *"keys provably confined to the vault process (no password/keys in core

@@ -224,23 +224,50 @@ holds. The conformance suite — golden requests/responses against fixture backu
 contract's executable form, and **any implementation must pass it before it can ship.**
 That is a gate, not a preference.
 
-**OPEN — the process model, decided at qn.8**
-([quince#270](https://github.com/novkostya/quince/issues/270) §6). Nothing here presumes
-it. Whether the vault runs in-process or as a stdio-RPC child is unruled. In-process is
-far simpler and streams once, where a process boundary forces every file read through
-decrypt → scratch → read → unlink, i.e. double I/O on the slowest disks quince targets. A
-child process buys crash isolation (a decrypt panic or OOM must not kill the daemon
-mid-multi-hour transfer), a memory ceiling that can be rlimited on small-RAM hardware,
-and a password that exits at `lock` rather than living for the daemon's lifetime.
-`contracts.md` §4 specifies the RPC and permits either, because the seam is the
-*interface*, not the process. **The deciding measurement is peak RSS decrypting the
-largest realistic backup on the smallest target box** — it turns a design argument into a
-number.
+**MEASURED — the process model is IN-PROCESS on the evidence, and the number is here rather
+than in a report** ([quince#270](https://github.com/novkostya/quince/issues/270) §6; qn.8
+spec D10). The deciding measurement was always *peak RSS reading the largest realistic
+backup*, and it has been taken against synthetic manifests on a session box by
+`core/cmd/rss-spike`:
 
-**Not built, and not yet validated on real data.** `core/internal/vault/` does not exist;
-the implementation is qn.8 (M6). The decryption library's correctness today rests on
-known-answer vectors, a synthetic round trip under `-race`, and a differential against an
-independent reference implementation — **not** on a real device backup. The rung gate
+| phase | input | peak RSS |
+| --- | --- | --- |
+| unlock | 1 000 → 50 000 rows | 7.2 → 10.9 MiB |
+| full walk | 1 000 → 50 000 rows | 12.4 → 19.6 MiB |
+| stream one file | 1 MiB → 128 MiB | 7.8 → 7.9 MiB |
+
+**The stream row is the one that settles the design question.** A 128× increase in file size
+moves peak RSS by nothing at all, so `DecryptFile` genuinely streams — the property the
+whole in-process case rests on. The manifest curves plateau rather than scale: 50× the rows
+for 1.5× the memory, with the residual consistent with the SQLite index itself rather than
+with per-row retention.
+
+Against qn.8 D10.3's confirmed threshold: **(a)** under 256 MB — passes with more than an
+order of magnitude to spare; **(b)** no growth beyond a flat streaming constant — passes.
+**(c)**, memory returning to baseline after `lock`, is **not measured here and cannot be**:
+a process that exits has no post-lock RSS. It is owed to G7, in-process, on the
+implementation slice.
+
+**So the sidecar is not built, and the reasons it might be are unchanged rather than
+refuted.** Crash isolation and an rlimitable ceiling are still real things a child process
+buys; what the number removes is the *memory* argument for paying for them now. The seam is
+the interface either way (`contracts.md` §4), so an RPC implementation remains a drop-in
+whenever something else earns it.
+
+**THE FIRST VERSION OF THIS MEASUREMENT WAS WRONG IN THE DIRECTION THAT WOULD HAVE DECIDED
+IT THE OTHER WAY, and that is worth more than the figures.** It built each fixture inside
+the process it was measuring. `fixture` reads the whole assembled `Manifest.db` into memory
+and holds plaintext and ciphertext at once, so the readings rose 13.6 → 124.9 MiB across
+1 000 → 50 000 rows and a 128 MiB file appeared to cost 777.9 MiB. Every one of those
+numbers was a true reading of the wrong thing, nothing looked broken, and **a rising curve
+is exactly what clause (b) fails on** — the instrument would have bought a sidecar. The
+harness now builds in a separate process and measures only the reader.
+**Partly built, and not yet validated on real data.** `core/internal/vault/` now holds the
+`vault.Vault` interface and the session registry (qn.8 slice 5); **nothing implements the
+interface yet**, which is the slice that reads a backup. The decryption library's
+correctness today rests on known-answer vectors, a synthetic round trip under `-race`, and a
+differential against an independent reference implementation — **not** on a real device
+backup. The rung gate
 (*unlock a real version, browse domains, download a file, lock*) is what closes that, and
 it is operator-local work. `CLAUDE.md`'s *"hardware-proven over both transports"* is a
 claim about the backup engine; the vault does not inherit it.
