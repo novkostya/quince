@@ -1,0 +1,57 @@
+# quince — self-hosted iPhone & iPad backups, using the usbmuxd you already run.
+#
+# This file is for a machine that already has usbmuxd running. If you are not sure:
+#
+#   ss -lx | grep usbmux
+#
+#   something    →  this is the right file
+#   nothing      →  use compose.yml instead, which brings its own
+#
+# Then:
+#
+#   1. Save this file as compose.yml
+#   2. docker compose up -d
+#   3. Open http://<this-host>:8968
+#
+# Change the backups path, marked below. You will also need HTTPS before you can sign in from
+# your phone — the commented-out certificate line below is one way to get it.
+#
+# ⚠ USB only. A plain usbmuxd does not find devices over Wi-Fi. If you want Wi-Fi backups — and
+#   they are the point of running quince on a server — use compose.yml instead, which runs
+#   netmuxd alongside quince and does both. You cannot run both muxers: they fight over the USB
+#   bus.
+
+services:
+  quince:
+    # Pinned on purpose: quince is pre-release, so there is no `latest` tag to follow.
+    # Override with QUINCE_VERSION to try another one.
+    image: ghcr.io/novkostya/quince:${QUINCE_VERSION:-0.1.0-alpha.2}
+    container_name: quince
+    restart: unless-stopped
+    ports:
+      - "8968:8968" # change the left side if something else already uses this port
+    volumes:
+      - ./quince/data:/data # config, database, pairing records — keep this
+      - ./quince/cache:/cache # scratch, safe to delete
+
+      # ▸ Your backups go here. Point the left side at real storage — a NAS share, a ZFS
+      #   dataset, a big disk. A full iPhone backup can run to tens of gigabytes.
+      - ./quince/backups:/backups
+
+      - ./quince/data/lockdown:/var/lib/lockdown # pairing records, written here
+
+      # Your usbmuxd's socket. This is its standard path and quince looks there by default,
+      # so there is nothing to configure. If yours listens elsewhere, put your path on the left
+      # and keep the right side as it is.
+      - /var/run/usbmuxd:/var/run/usbmuxd
+
+      # HTTPS — you will need it. Browsers drop the login cookie over plain http, so you would be
+      # able to sign in from this machine and from nowhere else. Either put a reverse proxy with a
+      # certificate in front of quince, or drop a certificate into ./quince/certs and uncomment the
+      # line below — quince finds it and walks you through the rest. More in deploy/tls.md.
+      # - ./quince/certs:/certs:ro
+
+# ── Configuration ─────────────────────────────────────────────────────────────────────────────
+# There is none to write. quince starts on defaults and asks for a storage location the first
+# time you open it; everything else is editable in the web UI, and lands in config.yml under
+# ./quince/data.

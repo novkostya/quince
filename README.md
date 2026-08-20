@@ -38,19 +38,26 @@ notification when a backup is worth doing instead of pretending it can run unatt
 You need a Linux server with Docker — x86-64 or ARM, so a NAS or a Pi is fine — and your phone on
 the same network.
 
+**1. Pick your file.** Talking to an iPhone over USB needs a service called `usbmuxd`. quince can
+run one for you, but if this machine already has one they will fight over the phone, so check:
+
 ```sh
-mkdir quince && cd quince
-wget https://raw.githubusercontent.com/novkostya/quince/main/deploy/compose.yml
+ss -lx | grep usbmux
+```
+
+Nothing → [`compose.yml`](deploy/compose.yml). Something → [`compose.host-muxer.yml`](deploy/compose.host-muxer.yml),
+which uses the one you have.
+
+**2. Save it as `compose.yml` and change the backups path** to point at real storage — a big disk,
+a NAS share. It is marked in the file, and it is the only line you must change before starting.
+
+**3. Start it, and open `http://<your-server>:8968`.**
+
+```sh
 docker compose up -d
 ```
 
-Then open `http://<your-server>:8968`. quince starts by helping you set up HTTPS — browsers throw
-away the login cookie on an unencrypted connection, so nothing but localhost would stay signed in —
-and then asks for a password and a folder to keep backups in. Plug in your iPhone, pair it, and
-back it up.
-
-[`deploy/compose.yml`](deploy/compose.yml) is commented, including what to change if you
-already run `usbmuxd` on that machine.
+quince takes you through the rest — a password, where backups go, and pairing your phone.
 
 ## Docs
 
