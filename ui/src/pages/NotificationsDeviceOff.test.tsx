@@ -129,3 +129,41 @@ describe("device_off — the sixth status cause", () => {
     expect(screen.getByText(/whatever\s+the categories below say/i)).toBeTruthy();
   });
 });
+
+// THE SCREEN SAYS PER-DEVICE EXCLUSION EXISTS EVEN WHEN NOTHING IS EXCLUDED (Operator, 2026-08-20).
+//
+// `DeviceCoverageNotice` reports the EXCEPTION and renders nothing when there is none — so in the
+// all-enabled, nothing-muted state, which is where a working install sits, the five category
+// switches were the whole of the policy a reader could see. The feature was discoverable only to
+// somebody who had already found it.
+//
+// The assertions are deliberately about the QUIET state. A test that only checked the muted state
+// would have passed against the old code.
+describe("the per-device switch is mentioned even when nothing is muted", () => {
+  it("says the categories apply to every device, and points at Devices", () => {
+    seed([device(), device({ udid: "DEV-2", name: "studio-ipad" })]);
+    renderSettings(config());
+
+    expect(screen.getByText(/these apply to every device/i)).toBeTruthy();
+    // The remedy AND where it lives — a sentence that says a device can be silenced without saying
+    // where is an orientation line that does not orient.
+    const link = screen.getByRole("link", { name: "Devices" });
+    expect(link.getAttribute("href")).toBe("/");
+  });
+
+  it("names the reason it is not just 'turn the category off'", () => {
+    seed([device()]);
+    renderSettings(config());
+    expect(screen.getByText(/without losing the category for the rest/i)).toBeTruthy();
+  });
+
+  // It is orientation, not a report — so it does not come and go with the state, and it does not
+  // replace the notice that names which devices are excluded.
+  it("stays when a device IS muted, beside the notice rather than instead of it", () => {
+    seed([device({ notifications_enabled: false })]);
+    renderSettings(config());
+
+    expect(screen.getByText(/these apply to every device/i)).toBeTruthy();
+    expect(screen.getByText(/will not notify you about one of your devices/i)).toBeTruthy();
+  });
+});

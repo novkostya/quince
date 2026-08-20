@@ -171,6 +171,33 @@ export function NotificationSettings({ config }: { config: Config }) {
             </li>
           ))}
         </ul>
+        {/* WHAT THIS SCREEN DOES NOT SAY OTHERWISE (Operator, 2026-08-20, screenshot with every
+            category on). The five switches above are the whole of the policy a reader can SEE, so
+            in the all-enabled state — the state a working install sits in — nothing on this page
+            reveals that a single device can be excluded. `DeviceCoverageNotice` reports the
+            exception and returns null when there is none, which means the feature is discoverable
+            only to somebody who has already found it.
+
+            IT NAMES THE SCOPE FIRST, because the misconception is about the switches above rather
+            than about the missing control: their real defect is not being incomplete, it is reading
+            as per-install when they are per-EVERYTHING. Saying "these apply to every device" is what
+            makes the next sentence land.
+
+            MUTED, NOT WARN, AND ALWAYS PRESENT. It is an orientation line, not a report about a
+            state — the warn-toned notice above is what reports state, and it names the devices. The
+            two coexist deliberately: that one says WHAT is excluded, this one says exclusion EXISTS.
+
+            THE LINK GOES TO THE DEVICE LIST, not to a device. There is no single right device to
+            send anybody to, and `/devices` redirects to `/` (router.tsx), so `/` is the honest
+            destination and "Devices" is what the reader sees it called. */}
+        <p className="mt-3 max-w-md text-xs text-muted">
+          These apply to every device. To silence just one — without losing the category for the
+          rest — turn its notifications off from{" "}
+          <Link className="underline underline-offset-2" to="/">
+            Devices
+          </Link>
+          .
+        </p>
       </div>
 
       <div>
