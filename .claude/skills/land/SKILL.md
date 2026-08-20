@@ -21,12 +21,11 @@ into one. `/architect` §1 says a reviewer host is *expected* to look unauthenti
 **Everything on this seat goes through `bin/gh-review`** — reads, writes and the merge alike
 (`/architect` §1). There is nothing to choose.
 
-**There USED to be a choice, and losing it is the point rather than a tidy-up.** This section carried
-a read-versus-write table: reads through `bin/gh-arch`, writes through `bin/gh-review`, because
-approving, merging or commenting through the PAT re-created quince#47 on the box built to end it —
-*invisibly, because the output looks identical*. `bin/gh-arch` is retired (quince#676, Operator
-ruling 2026-08-07), so **one credential means one wrapper, and the class of error that table existed
-to prevent can no longer be committed on this seat.**
+**ONE CREDENTIAL MEANS ONE WRAPPER.** `bin/gh-arch` is retired (quince#676, Operator ruling
+2026-08-07), so every read and every write on this seat goes through `bin/gh-review`. There is no
+read-versus-write choice to get wrong, and the error that choice used to permit — approving, merging
+or commenting through the PAT, re-creating quince#47 *invisibly, because the output looks
+identical* — can no longer be committed here.
 
 **`bin/gh-coder` is NOT an option here, and it used to appear in §2.** It is the implementer wrapper
 and it **refuses outright** on this box: it dies if a reviewer App key or an architect token is

@@ -39,10 +39,8 @@ git clone --depth 1 https://github.com/novkostya/quince-devlog.git "$DEVLOG_DIR"
 In that clone, in this order:
 
 - `progress.md` — the **one-line state** at the top (the frontier, what is proven, what is
-  owed) and the per-rung dashboard. **Read it whole; it is 71 lines.** It was 5,446, and this
-  bullet used to say *"long and append-heavy … search rather than scroll"*: the narrative left
-  on 2026-07-31 (quince-devlog#152) and what remains is current state only, kept that way by
-  `bin/dashboard-size`.
+  owed) and the per-rung dashboard. **Read it whole; it is 71 lines** — current state only, kept
+  that way by `bin/dashboard-size`.
 - `decisions/` — one file per decision, citable by path. **This is where the decisions log went**;
   read `decisions/0000` first, then whichever bear on the question at hand.
 - **the `journal` branch** — one entry per file, newest first in its generated `README.md`.
@@ -82,10 +80,8 @@ the index and then what the frontier rung touches.
 # So ask which wrapper this box's credential lets ACT. Each fails closed when it is not this seat's,
 # so at most three cheap calls settle it.
 #
-# `bin/gh-review` IS THE ARCHITECT'S READ PATH, and this comment said the opposite until quince#676 —
-# that it was *"deliberately absent: it is the verdict path, not a read path, and /onboard must never
-# reach for it"*. True while `bin/gh-arch` existed to do the reading; it is that seat's ONLY
-# credential now, so a ladder that skips it leaves the architect box with no probe that can succeed
+# `bin/gh-review` IS THE ARCHITECT'S READ PATH. It is that seat's ONLY
+# credential, so a ladder that skips it leaves the architect box with no probe that can succeed
 # and /onboard reports "no forge credential" about a box holding one.
 #
 # READING IS NOT A VERDICT — that is what makes this safe rather than a relaxation. The rule was
@@ -110,10 +106,6 @@ done
 | a cold stranger — the resurrection test | fails, no credential | nothing; web URLs are genuinely the answer |
 | the architect box | `exit=4`, empty stdout, *"please run: gh auth login"* | a working `bin/gh-review` |
 | **the runner box** | **`exit=4`, empty stdout, same message** (gh 2.93.0, 2026-07-29) | a working `bin/gh-coder` |
-
-The runner row was open until 2026-07-29 — quince#149 filed it as *"unmeasured — I hold no bot token
-and will not guess"*, correctly, because an architect box cannot hold the implementer identity. An
-implementer session closed it, and the answer is the same on both.
 
 **A capability check that tests for a FILE cannot distinguish two boxes that both carry the file** —
 and in this repository every box carries all four wrappers, because they are committed. That is the

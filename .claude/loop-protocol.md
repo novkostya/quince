@@ -41,9 +41,9 @@ replacement is armed into the same conditions.
 **Why `stop` and not `kill`.** The pid is only known to be *our* watcher while its heartbeat is fresh,
 and `wedged` is *defined* by that heartbeat being stale — so "the pid exists" and "the pid is ours" come
 apart in exactly the state where the tool asks you to signal it. On a box where the kernel has recycled
-that pid, a bare kill hits a bystander. Demonstrated in review: with a foreign pid in the state, an
-earlier version told the reader **to kill init**, in the imperative, with a plausible explanation
-attached. `stop` records the process start time at arming and re-checks it at the moment of the signal;
+that pid, a bare kill hits a bystander — with a foreign pid in the state it can name **init**, in the
+imperative, with a plausible explanation attached.
+`stop` records the process start time at arming and re-checks it at the moment of the signal;
 every branch that cannot prove the identity refuses instead of guessing.
 
 **Why these must never collapse.** Reseeding a *dead* watch turns it into a fresh one that has "seen
@@ -98,8 +98,7 @@ self-caused events are *how a turn ends*, where an architect's approvals and mer
 
 **Suppressed means NOT WOKEN ON, never NOT SEEN**, and that distinction is the whole of what
 quince#242 built. Every event is still printed, on every tick; the filters decide only whether the
-loop *ends*. This paragraph read *"self-caused events are deliberately not suppressed (quince#62)"*
-until quince#309, and quince#242 had made that false eight days earlier.
+loop *ends*.
 
 | your own act | wakes you? |
 | --- | --- |
@@ -134,11 +133,8 @@ to arm beside a live watcher *reads that record*: erasing it did not merely misl
 disabled the guard, so the very next arm — the one this ordering prescribes — put a second watcher on
 one state file, which is quince#50's race reached **through** the guard rather than around it.
 
-That is worth stating as a rule and not just as history: **a safety argument that checks one direction
-of a two-directional property has not been checked.** The first version of this section asserted only
-that a hand tick cannot make a dead watch look alive and called it *"the one way this ordering could
-have been unsound"*. It was not the one way. It was the way that happened to be true, and the ordering
-was ruled and nearly landed on it.
+That is worth stating as a rule: **a safety argument that checks one direction
+of a two-directional property has not been checked.**
 
 Measured on the implementer side: three `Stop`-hook firings before the tick step was adopted, none
 after (quince#100). The ordering itself needed **no** change to `watch` or `tick`, which is how
@@ -236,9 +232,9 @@ So:
    that was not needed.
 
    **Arm unconditionally. Never gate an arming behind a shell pre-check** (quince#88). The row above
-   used to read *"do not re-arm"*, on the reasoning that the refusal is quince#50's guard working. The
-   guard is working — but a refusal is true only at the instant it is produced, and the rule turned it
-   into a durable one. Measured across one architect session: **five** losses of the watch came from
+   **Arm unconditionally. Never gate an arming behind a shell pre-check** (quince#88). **A refusal is
+   true only at the instant it is produced** — treating it as durable is what turns quince#50's guard
+   working into a lost watch. Measured across one architect session: **five** losses of the watch came from
    *not* arming because something was live; **none** came from arming when nothing should have been.
    The costs are not comparable — a wrong arm is one exit 1 and no lost watcher, a wrong stand-down is
    being unwatched while two notifications both read as success.

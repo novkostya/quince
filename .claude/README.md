@@ -56,8 +56,8 @@ that every gate runs inside, and the documentation domains that the
 
 **Two things about the `make` entries that JSON cannot carry as a comment** (quince#256):
 
-*Every* target is listed, not only the language gates. It used to be only those, because each suite
-added since arrived in a PR that did not think about the allowlist — drift, not a decision. Measured
+*Every* target is listed, not only the language gates — a suite added in a PR that does not think
+about the allowlist is how entries go missing, which is drift rather than a decision. Measured
 2026-07-30: **19 of 34 `make help` targets had no entry**, and they were almost exactly the
 sub-targets `make gates-sh` invokes — so the suites a session runs while iterating on a fix were the
 ones it could not invoke individually. Note `make preflight` is listed and is **not** in `make help`:

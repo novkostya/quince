@@ -233,10 +233,10 @@ for r in $(sed 's/#.*//' .claude/forge-set | grep -v '^[[:space:]]*$'); do
 done
 ```
 
-**The set is `.claude/forge-set`, and it is not optional.** An earlier version of this step said "both
-repos, every time" and hardcoded the two. That was right for a day and wrong-in-waiting: it goes stale
-the moment a third repository matters, and a watch that covers one repo while reporting "nothing to
-review" is making a claim it never checked — that is how a devlog PR sat unreviewed for hours while the
+**The set is `.claude/forge-set`, and it is not optional.** Do not hardcode the repositories: a
+hardcoded pair goes stale the moment a third one matters, and a watch that covers one repo while
+reporting "nothing to review" is making a claim it never checked — that is how a devlog PR sat
+unreviewed for hours while the
 queue was reported clear. `bin/forge-watch tick --all` reads the same file and **hard-fails** if it is
 missing or empty rather than falling back to one repo. A canon or journal PR is review work exactly as
 code is.
@@ -545,10 +545,8 @@ natural reading — arm once you know you need one, right after handling the eve
 the broken one: a watch armed *before* your next approval or merge can still be dead by the time the
 turn ends, and the `Stop` hook is telling the truth when it says so.
 
-**Suppressed means NOT WOKEN ON, never NOT SEEN.** This paragraph read *"self-caused events are
-deliberately not suppressed (quince#62, item 6)"* until quince#309, eight days after quince#242 built
-the suppression. Every event is still printed on every tick; the filters decide only whether the loop
-*ends*. **This seat is the better-covered of the two:**
+**Suppressed means NOT WOKEN ON, never NOT SEEN.** Every event is still printed on every tick; the
+filters decide only whether the loop *ends*. **This seat is the better-covered of the two:**
 
 - your own **approvals and merges** do not wake you — the per-runner ledger cancels them, because
   those lines are computed by diffing observations and carry no actor at all;
