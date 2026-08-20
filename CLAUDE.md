@@ -373,13 +373,8 @@ repo is not a message bus, and no human is an RPC layer.
 - The token is scoped to this repo and has **no `workflow` scope**. Measured (quince#113): a `PUT`
   under `.github/workflows/**` returns `403 Resource not accessible by personal access token`, while
   an ordinary contents write to the same branch succeeds. **No PAT seat can push a workflow.**
-  **THE ARCHITECT IS NO LONGER ONE OF THEM, and this bullet asserted it was until 2026-08-07**: it
-  read *"neither does the architect's … neither the implementer's nor the architect's"*, which was a
-  claim about a PAT the Operator has since deleted (quince#676). **The architect seat now holds
-  `quince-review[bot]` and nothing else**, so the live question is the App's grant, immediately below
-  — not a PAT refusal. Corrected rather than deleted because a session that reads a present-tense
-  `403` here concludes it is blocked and follows this bullet's own escalation, which would now be
-  unnecessary work against a seat that may hold the grant.
+  **The architect seat holds `quince-review[bot]` and no PAT** (quince#676), so its workflow-push
+  question is the App's grant, immediately below — not a PAT refusal.
   The Operator always can (an SSH push consults no OAuth scope). `quince-review[bot]`
   **declares `workflows: write`** — measured 2026-07-29 by asking `GET /app` with a JWT signed from
   the reviewer key, which returns the App's permission set; note that `bin/gh-review` cannot make
@@ -530,13 +525,10 @@ is the bootstrap artefact of an identity that did not yet exist.
 quince#330 deleted the `.claude/seats` list, so there is no enumeration to update. Widening the
 alternation itself is the cost, and `analyst<N>` is the first time it has been paid.
 
-**What does not change — and one thing that does.** `approver ≠ author` is untouched, and it is
-untouched *mechanically* rather than by restraint: GitHub refuses an approval from a pull request's
-own author, and `.github/CODEOWNERS` routes canon to `@novkostya`, which no App can satisfy. **What
-changed is the sentence this paragraph used to carry** — *"the seat still cannot author code, open a
-pull request, cast a review verdict, or merge"*. It can now author code and open pull requests; it
-holds no `administration` and cannot merge. Corrected rather than deleted, because it was the
-load-bearing reassurance the ruling was taken against.
+**What does not change.** `approver ≠ author` is untouched, and it is untouched *mechanically*
+rather than by restraint: GitHub refuses an approval from a pull request's own author, and
+`.github/CODEOWNERS` routes canon to `@novkostya`, which no App can satisfy. **The seat can author
+code and open pull requests; it holds no `administration` and cannot merge.**
 
 **Authored by the seat it would grant, and the ruling has since been taken.** This block was written
 by the supervisor seat, proposing capability for itself, which is worth naming rather than leaving
@@ -694,10 +686,10 @@ on 2026-07-28, both identities, create *and* delete, each probe removing its own
 classic `repo` scope the token already held, the moment Discussions was *enabled* — a permission
 decision nobody made, produced by a container choice.
 
-**Kept rather than deleted, because the shape outlives the instance.** Enabling a GitHub feature
-can hand every `repo`-scoped token a capability nobody reviewed, and disabling the feature — not
-revoking a grant — is what takes it back. Revoking `discussions: write` from the App would not have
-touched this, and the App's grant was a separate thing revoked separately.
+**The shape outlives the instance.** Enabling a GitHub feature can hand every `repo`-scoped token
+a capability nobody reviewed, and disabling the feature — not revoking a grant — is what takes it
+back. Revoking `discussions: write` from the App would not have touched this, and the App's grant
+was a separate thing revoked separately.
 
 **The permission is real and nothing is at stake behind it, and that second clause is new.** This
 paragraph used to read *"devlog#30 moves the journal into Discussions … afterwards it is a set of
@@ -1231,24 +1223,15 @@ a journal entry pushed from this box, swept only because the session ran the gat
 its banner. **The remedy is an Operator action and a re-run rather than new work**: `provision` has
 placed both since quince#308, so `deploy/runner/provision` for this role installs them.
 
-**Recorded rather than quietly fixed, because the error is this file's own defect class arriving
-inside the correction for it.** A ruling was carried into canon citing an issue that had been closed
-seven hours earlier, by a session that had read the closed-issue event and not connected it.
-
-**And the correction was itself wrong, in the same paragraph, one revision later.** It said the
-remedy was *"an Operator action — re-run `deploy/runner/provision` on each box — not a new work
-item."* **That is true for two boxes and impossible for the third**, per `provision:27` above. The
-honest split:
+**The remedy differs by box, and the third one is not a re-run:**
 
 - **implementer and arch** — re-run `provision`. A freshness problem, an Operator action, no new work.
 - **supervisor** — **there is no command.** The role does not exist in that script. This is a new
   work item, not a re-run, and it is the box the ruling was about.
 
-**Three revisions, three wrong remedies, each more specific than the last** — *build the hook* (it
-existed), *re-run provision* (not on that box), and now *provision needs a role it does not have*.
-Left standing as a sequence rather than collapsed into the final answer, because the pattern is the
-lesson: each version was checked against the thing it named and none was checked against the box it
-was for.
+**Check a claim against the box it is FOR, not only against the mechanism it names.** That is what
+`provision:27` decides and it is the thing a remedy for this section keeps missing: a fix verified
+at the script can still be impossible on the machine it was written for.
 
 **`preflight`'s "reach" is presence, not freshness — and this paragraph committed the same
 defect one size up (quince#121).** Measured on the architect box: a clone at an HTTPS remote
