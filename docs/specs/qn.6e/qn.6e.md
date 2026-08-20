@@ -176,8 +176,7 @@ Every **path-guarded** arm — `create`, `snapshot`, `destroy`, `list`, `seed` �
 `case "$target" in "$PARENT"…`, so a target outside the baked-in `$PARENT` falls through to that
 refusal. So `list <typed parent>` **does** discriminate: it proves the key, the forced command, and
 that the operator's `$PARENT` matches what the user typed. (**`capacity` is the exception and has no
-guard**, because it takes no caller argument at all — the next bullet is about exactly that, and an
-earlier draft said *"every arm"* while asserting the exception two lines later.)
+guard**, because it takes no caller argument at all — the next bullet is about exactly that.)
 
 **Two traps in that, both measured off the script rather than reasoned:**
 
@@ -220,11 +219,11 @@ New, in `core/internal/storage/`. It **never creates**, **never mints a marker**
 constructs a `Backend`**. `Select` **creates and constructs** — `probeNamespace`'s `MkdirAll`
 (`probe.go:83`) and a live `Backend` on every return path — which is why it is the wrong tool.
 
-**`Select` does NOT mint a marker, and an earlier draft of this line said it did.** Measured:
+**`Select` does NOT mint a marker.** Measured:
 `WriteStorageMarker` has exactly one non-test caller, `creation.go:206` inside `ResolveStorage`, and
-`probe.go:30-69` contains no marker reference at all. The correction matters beyond the sentence —
+`probe.go:30-69` contains no marker reference at all. This is storage semantics rather than prose:
 an implementer who believes markers are minted on the probe path will model storage creation
-wrongly, and that is storage semantics rather than prose (quince#687 review).
+wrongly.
 
 ```go
 // Inspect reports what a candidate storage path IS, without changing it.
@@ -541,9 +540,8 @@ stderr → hand-write YAML into `./quince/data/config.yml` beside the compose fi
 
 **The bind mount is the one mercy in that sequence and is worth stating precisely**, because it is
 what makes the hand-edit *possible* at all: the file is on the host filesystem next to
-`compose.yml`, not inside a volume the user would have to `docker cp` into. An earlier draft called
-it a Docker volume, which would have made the workaround materially worse than it is (quince#687
-review). That is not the Plex bar design §9 promises, and it means
+`compose.yml`, not inside a volume the user would have to `docker cp` into.
+That is not the Plex bar design §9 promises, and it means
 the storage step cannot be appended to onboarding: it must run **while quince has no storage**,
 which is precisely the state the refusal exists to forbid.
 
@@ -749,9 +747,7 @@ Written before building. Every rule this rung touches **or comes near**, near-mi
 5. **`zfs.mode: exec` is undeployable with the shipped image** (fact 3) while `Resolved()` still
    defaults to it. This rung works around it in the form and does **not** change the default, which
    would be a config break. **FILED AS [quince#697](https://github.com/novkostya/quince/issues/697).**
-   This line said *"worth its own issue; filed with PR 2"* while no issue existed and PR 2 had
-   merged — quince#320's defect in miniature, since a deferral aimed at nothing is one nobody can
-   pick up. The issue carries the two measurements and three candidate shapes, and rules none.
+   The issue carries the two measurements and three candidate shapes, and rules none.
    **CLOSED 2026-08-10 — none of the three.** The Operator removed `exec` (quince#793); `hook` is
    the only value and the default. The config break this item declined to take was taken
    deliberately, as a refusal that names the key rather than a silent re-default.
@@ -798,9 +794,6 @@ against. Canon accepts exactly this trade: sequencing costs one review cycle, st
 pull request. Recorded here because the table reads as a set of independent items and four of them
 are not.
 
-**9 no longer gates the rung and no longer risks it either.** This read *"if the gap is unruled at
-close, the rung ships with the add flow working on every install that already has a storage, and
-says plainly that the fresh-install path is the half that is missing."* The ruling landed on
-2026-08-07, so that contingency is spent — but the slicing it produced is what made it survivable,
-and that is the part worth keeping: **9 was written last and depended on by nothing**, so an unruled
-gap would have cost the rung one story rather than the rung.
+**9 gates nothing and risks nothing.** The gap it depended on was ruled 2026-08-07, and the slicing
+is what made that survivable either way: **9 was written last and is depended on by nothing**, so an
+unruled gap would have cost the rung one story rather than the rung.

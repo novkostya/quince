@@ -35,13 +35,6 @@ things it needs do not exist:
   implementer sessions reach the lab rig with, and it is the credential `pr.6` constraint 2 named as
   the cost of a push design.
 
-  **This line said the opposite until 2026-08-10** — *"the runner holds no private ssh key, only
-  `authorized_keys`. It cannot reach anything today, and that is the cleanest that axis has ever
-  been."* True when it was written on 2026-07-28, false three days later, and it is a claim about
-  a **credential boundary**, which is the class where a document describing a narrower reality than
-  the one that exists is worth the most. Corrected rather than deleted, because the paragraph below
-  prices a trade against it.
-
 So a push-from-the-runner design **no longer costs a new private key — that cost has already been
 paid**, for a different reason and without this trade being revisited. What remains is standing
 sshd up on the host that runs the soak. `pr.6` constraint 2's concern is unchanged and is now one

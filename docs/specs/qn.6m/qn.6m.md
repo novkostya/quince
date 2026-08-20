@@ -356,22 +356,16 @@ which story 1 now asserts outright rather than leaving as an assumption. So ever
 consistent with the feature being **inert**, which is exactly how `qn.6k` shipped in nine green pull
 requests. See *Owed gates* below: both have a named owner and neither is reachable from an agent seat.
 
-**SEVEN SLICES BECAME NINE, AND THIS TABLE STILL SAID SEVEN AFTER SIX OF THEM HAD MERGED.** Corrected
-here rather than quietly, because `CLAUDE.md` names a status table as the second thing that describes
-the whole and is therefore stale by default after every flip — the defect quince#408 and quince#409
-were filed for, arriving in the document that cites them. Both splits were deliberate, both were made
-at build time, and both contradict what this section originally argued, so the arguments are corrected
-rather than deleted.
+**THE SLICE TABLE IS A STATUS TABLE, so it is stale by default after every flip** — the defect
+quince#408 and quince#409 were filed for. Check it against what has merged rather than trusting it.
 
-**5 SPLIT, AND THE PARAGRAPH ARGUING IT SHOULD NOT WAS RIGHT ABOUT A DIFFERENT CUT.** It said *"change
-and remove are one claim, and D3's redefinition belongs to neither of them alone — splitting it would
-leave the security change homeless."* That is true of splitting **change from remove**, which was not
-done. The cut actually made was **D3 away from both**, which gives the security change its own home
-instead of taking one away: 5a lands the guard, alone and reviewable, **before anything can create the
+**5 IS SPLIT AS D3-AWAY-FROM-BOTH, not change-away-from-remove.** Splitting change from remove would
+leave the security change homeless; cutting D3 away from both gives it its own home instead: 5a
+lands the guard, alone and reviewable, **before anything can create the
 state it defends against**. Same ordering ruling `qn.6k` used to put `quince auth reset` ahead of the
 first credential.
 
-**6 SPLIT FOR A REASON THAT DID NOT EXIST WHEN THIS WAS WRITTEN.** The settings page consumes 5b's
+**6 IS A SEPARATE SLICE FROM 5b.** The settings page consumes 5b's
 endpoints, and 5b sits behind a code-owner review that 6 does not need. Building both together meant
 either stacking on 5b's branch — which `CLAUDE.md` §1 rules against — or landing UI whose buttons 404
 if the merge order slips. So 6a ships the page and the card move, calling **no endpoint that does not

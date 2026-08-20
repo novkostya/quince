@@ -144,7 +144,7 @@ shape: the mode takes the interval as a value it is told and asserts nothing abo
 The Operator left the *value* open deliberately — *decide it when the instance exists* — and this
 ruling is about where it lives, not what it is.
 
-**DECIDED, rung-local (this line read "still open" until story 6 was built): `QUINCE_DEMO_RESET_MINUTES`,
+**DECIDED, rung-local: `QUINCE_DEMO_RESET_MINUTES`,
 a positive whole number of minutes, read by `config.LoadBootstrap` and reported on `GET /api/health`
 as `demo_reset_minutes`.**
 
@@ -179,10 +179,8 @@ interval it declares. quince#494 owns both the timer and the var, so it can set 
 and the login screen would then state a schedule nobody keeps. That is an owed assertion against
 #494, recorded there, rather than a defect in this rung.
 
-*(The enumeration of candidates was never repeated here, and this section is not the place to start.
-An earlier draft listed them in both this spec and canon, and the two sets diverged within the hour
-while both PRs were open — canon gained a possibility the spec did not have. One option set, one home,
-and a builder reads the spec.)*
+*(The enumeration of candidates lives in canon, not here, and this section is not the place to start
+one. Two copies diverge — one option set, one home, and a builder reads the spec.)*
 
 ## Rule check
 

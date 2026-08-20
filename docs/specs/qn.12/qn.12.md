@@ -409,10 +409,9 @@ of booleans on two endpoints with no rule about which is newer, and the D6 statu
 reading a copy of a document it also writes.
 
 So the cause is computed from the config the settings form already has, and the field is never
-added. Recorded rather than deleted because the plan was reasonable and the reason it is wrong is
-not obvious from the endpoint list — a later reader asking *"why is there no `categories`?"* should
-find this rather than re-derive it. Nothing in `docs/contracts.md` ever carried the field, so no
-frozen interface changes.
+added. A later reader asking *"why is there no `categories`?"* should find this rather than
+re-derive it: the reason is not obvious from the endpoint list. Nothing in `docs/contracts.md` ever
+carried the field, so no frozen interface changes.
 
 `vapid_public_key` is public by construction — it is the `applicationServerKey` every subscription
 must carry. `POST …/test` exists because *"is this working?"* is otherwise unanswerable without

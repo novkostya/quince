@@ -57,10 +57,8 @@ is not built, quince keeps working exactly as it does today.
 - **The version MODEL — but NOT the layout, and that distinction is now load-bearing.** A version is
   still a `@quince-*` snapshot; markers, verify, retention, adopt, prune and
   reconcile-from-snapshots keep their semantics. **What moves is where the content sits inside the
-  snapshot**: `<snap>/latest/` becomes `<snap>/`. This bullet read *"the snapshot still contains
-  `latest/`, byte for byte the tree it contains today"* until the 2026-08-08 ruling and that is now
-  **false** — the consequence is that pre-`qn.6h` snapshots are **not browsable**, ruled with no
-  dual-read fallback (D1).
+  snapshot**: `<snap>/latest/` becomes `<snap>/`. The consequence is that pre-`qn.6h` snapshots are
+  **not browsable**, ruled with no dual-read fallback (D1).
 - **Data migration, and a migration PROCEDURE for the helper.** Operator ruling relayed 2026-08-08:
   *"I am the only quince user for now and there was no v0.1 release tag yet — so migration is out of
   the table."* Existing `@quince-*` snapshots keep working **without a compatibility path**, because
@@ -254,11 +252,8 @@ is the one file that is certainly on disk at capture time and would be in every 
 ordering. The sentinel is cleared whenever — before or after the snapshot — because it was never
 capturable.
 
-*(This section said the removal ordering was "the whole of it", and carried a paragraph about
-`os.RemoveAll(workingParent)` being `lstat`-based so it would unlink a symlink rather than traverse
-into the committed tree. Both described the withdrawn shim: **there is no `working/` and no symlink**,
-so the property guards nothing and is deleted rather than reworded. Recorded because it was added at
-a reviewer's request and its disappearance would otherwise look like an oversight.)*
+*(There is no `working/` and no symlink on this backend, so the removal-ordering property that would
+otherwise guard the committed tree guards nothing here.)*
 
 `PhaseExchanged` stops occurring. The enum keeps its shape — per-backend phase sets are already the
 design.

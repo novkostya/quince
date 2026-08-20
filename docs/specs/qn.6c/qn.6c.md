@@ -772,9 +772,7 @@ beyond the four declared above.
 
    **So the ruling is right on the merits, not merely the Operator's to make.** The argue-then-defer
    record (quince-devlog#49) asks which seat was right; the answer is available now rather than
-   after an incident, and it is the Operator. An earlier draft of this entry carried a *"what would
-   settle who was right"* clause — **struck**, because it framed as pending evidence something the
-   reasoning already settles.
+   after an incident, and it is the Operator.
 
    **What it buys:** every storage is explicit, and nothing about where a backup lands is implied
    by a deployment variable invisible in `config.yml`.

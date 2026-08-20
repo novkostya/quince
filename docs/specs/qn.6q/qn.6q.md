@@ -201,9 +201,8 @@ are the same thing here**, which is what makes D1 easy.
   on remount, so navigating away and back was current; **staying on the page was the case that never
   updated** — which is exactly what testing a hand-edit looks like, and how the Operator found it.
 
-  **Kept as an overturned bullet rather than deleted**, because this rung shipped without the event
-  and a reader comparing `qn.6q` against the code needs to know which side of the ruling each part
-  landed on.
+  **This rung shipped WITHOUT the event**, so the code matches the ruling rather than the bullet
+  above.
 - **The lost-update interleaving.** Operator hand-edits while a UI save is in flight: the save wins
   and the hand-edit is overwritten. That is true **today** and is a property of two writers with no
   lock between them, not of the watcher. **RULED as an acceptance** (question 3 below): named in
@@ -244,13 +243,10 @@ a merged spec is citable and the next builder needs to know which one to defend:
    was given.** The chain has three links and no verdict in it: *Operator raises an objection →
    architect agrees and re-weights on quince#1094 → this spec writes it down.*
 
-**This spec argued (3) as a `no silent caps or fallbacks` point and ordered it first.** That reads
-stronger than it is for this file in this deployment, and the objection above — with the architect's
-re-weighting on quince#1094, which is where the reasoning actually happened — is why it now reads
-last. D1 itself is rung-local and was never re-ruled. Corrected rather than deleted: a reader who
-takes the network-filesystem argument for the load-bearing one would think D1 falls if that argument
-is rebutted, and it does not — **poll because it is 12 µs and needs nothing, not because of network
-filesystems.**
+**(3) is ordered LAST deliberately, and D1 does not rest on it.** The load-bearing reason to poll is
+that it costs 12 µs and needs nothing — **not** the network-filesystem argument. A reader who takes
+the latter for the load-bearing one would think D1 falls if that argument is rebutted, and it does
+not. D1 itself is rung-local and was never re-ruled.
 
 **The cost is honest and bounded: latency up to one interval.** For a hand-edit — a human at an
 editor — one second is not a perceptible difference from instant, and it is a **guaranteed** ceiling

@@ -70,10 +70,9 @@ key reference that has to exist for it is quince#726's, not this rung's.
   lets `- path: /backups` mean what the 2026-08-01 ruling says it means, without any consumer
   learning that a name might be empty"* survives untouched, and `Resolved()` is not edited.
   **Only what gets MARSHALLED changes**, which is the ruling's own words.
-  **This bullet said *"`Parse` still resolves; the in-memory document is still the resolved one"* and
-  that second clause was FALSE on the write path** — the architect's review of quince#753 named it
-  and the measurement in facts 9 and 10 confirms it. **WHERE resolution runs is therefore in scope**
-  and is D2a; what it *means* is not.
+  **`Parse` still resolves, but the in-memory document is NOT the resolved one on the write path**
+  — the measurement in facts 9 and 10 is what shows it. **WHERE resolution runs is therefore in
+  scope** and is D2a; what it *means* is not.
 - **quince#493 — `PUT /api/config` zeroes any key the client omits.** Independent, and the analyst's
   direction table on quince#728 is why: marshal runs server→disk, the decoder runs wire→server, and
   fixing one cannot fix the other. This rung owes it a **guard**, not a fix — story 6 — because the
@@ -586,10 +585,9 @@ test.
    remedy is probably a UI refusal to save while the banner is up, which is a `qn.6`-family question
    rather than a config-package one.
 5. ~~**Whether D2a lands in this rung or on quince#754 alone.**~~ **RULED 2026-08-08 (architect,
-   quince#753): here, as PR 2.** Kept rather than deleted because it was ruled *both ways within a
-   minute* — quince#754 said "its own PR, not folded into the rung" and quince#753 reversed it — so a
-   reader who finds the earlier ruling needs this entry to know it was superseded. D2a carries the
-   reasoning.
+   quince#753): here, as PR 2.** It was ruled *both ways within a minute* — quince#754 said "its own
+   PR, not folded into the rung" and quince#753 reversed it — so a reader who finds the earlier
+   ruling needs this entry to know it was superseded. D2a carries the reasoning.
 
 ---
 

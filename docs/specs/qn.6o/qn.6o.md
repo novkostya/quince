@@ -175,11 +175,6 @@ passkey-only install set up on an iPhone → signed in on a Mac by QR → added 
 with the iPhone's passkey by QR → **the creation prompt appeared by itself.** Chaining `create()`
 off a passkey proof works, so **the mandatory fresh click is removed** (quince#998).
 
-**THE REASONING ABOVE IS KEPT BECAUSE IT WAS SOUND AND IT WAS LABELLED.** This paragraph read
-*"UNMEASURED, and stated as such — Chrome is lenient about activation for `create()` and Safari is
-strict; nobody has run either"*, and that honesty is what made the experiment obvious to run. A
-prediction that flags its own evidence is worth more than one that turns out right.
-
 **WHAT WAS MEASURED IS ONE ENGINE AND ONE TRANSPORT** — Safari driving a cross-device ceremony — so
 the button survives as a **fallback** rather than as a step: the chained attempt runs first, and a
 refusal renders the click instead of resetting the row. Where the measurement holds nobody sees it;
