@@ -11,6 +11,7 @@ import (
 	"github.com/novkostya/quince/core/internal/bus"
 	"github.com/novkostya/quince/core/internal/device"
 	"github.com/novkostya/quince/core/internal/id"
+	"github.com/novkostya/quince/core/internal/muxd"
 	"github.com/novkostya/quince/core/internal/store"
 	"github.com/novkostya/quince/core/internal/wire"
 )
@@ -225,11 +226,28 @@ func (m *Manager) Pair(_ context.Context, udid string) (string, int, string) {
 func (m *Manager) runPair(opID, udid string) {
 	ctx, cancel := context.WithTimeout(m.baseCtx, m.pairTimeout)
 	defer cancel()
+
+	// READ THE RECORD BEFORE THE PAIR, because presence afterwards is not the question.
+	// A device whose record is STALE — the phone was reset, or trust was revoked — still has a
+	// file in the muxer's store, and `paired` is a lockdown validation rather than record
+	// presence (contracts.md), so quince offers Pair for exactly that device. Checking only
+	// afterwards would find the OLD record and call the pairing recorded (qn.6r D3).
+	before := m.tools.readPairRecord(ctx, udid, TransportUSB)
+
 	lastMsg := ""
 	for {
 		outcome, msg, err := m.tools.pairAttempt(ctx, udid, TransportUSB)
 		switch outcome {
 		case pairPaired:
+			// `idevicepair` PRINTS SUCCESS WHETHER OR NOT THE MUXER SAVED THE RECORD.
+			// libimobiledevice's lockdownd_pair calls userpref_save_pair_record and discards its
+			// return value, so the tool's own verdict cannot see a refused save. Asking the muxer
+			// is the only way this claim is true.
+			if ok, code, message := pairOutcomeFromRecords(before, m.tools.readPairRecord(ctx, udid, TransportUSB)); !ok {
+				m.setOp(opID, "failed", "", &wire.JobError{Code: code, Message: message})
+				m.auditEvent("device.pair", udid, code)
+				return
+			}
 			m.setOp(opID, "succeeded", msg, nil)
 			m.reEnrich(udid, TransportUSB)
 			m.auditEvent("device.pair", udid, "paired")
@@ -674,4 +692,22 @@ func (m *Manager) PairingWritable() (bool, string) {
 		return true, ""
 	}
 	return m.lockdown.Writable()
+}
+
+// pairOutcomeFromRecords turns the two observations into an op result. IT MUST NOT COLLAPSE
+// *the muxer did not record it* INTO *quince could not ask* — they have different remedies, and
+// a true sentence covering both is still a defect (Troubleshooting is ACTIONABLE). `Recorded()`
+// answers false for both, deliberately, so the split lives here where the message is written.
+func pairOutcomeFromRecords(before, after muxd.PairRecord) (ok bool, code, message string) {
+	if before.Recorded(after) {
+		return true, "", ""
+	}
+	if before.State == muxd.PairRecordUnknown || after.State == muxd.PairRecordUnknown {
+		return false, "pairing_unverified", "The device reported that it paired, but quince could not " +
+			"reach the muxer to confirm the pairing was saved. Check that the muxer is running and that " +
+			"quince can reach its socket, then pair again."
+	}
+	return false, "pairing_not_recorded", "The device paired, but the muxer did not save the pairing, " +
+		"so it will not survive. Make the muxer's pairing-record directory writable — it is the path " +
+		"passed to netmuxd as --plist-storage, mounted read-only in some setups — then pair again."
 }
