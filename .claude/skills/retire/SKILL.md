@@ -31,9 +31,8 @@ first principles. Where a step looks fussy, it is the shape of something that we
 ```
 
 `<gh>` is your seat's wrapper — `bin/gh-coder` on the runner, `bin/gh-review` on the architect box.
-**It is the same wrapper in §2, which posts**, and this line used to say otherwise: the architect
-box held two credentials, so §1's read and §2's write were different tools. quince#676 retired
-`bin/gh-arch`, so the substitution now carries straight through. `/retire` is the first skill *both*
+**It is the same wrapper in §2, which posts.** quince#676 retired
+`bin/gh-arch`, so the substitution carries straight through. `/retire` is the first skill *both*
 seats run,
 so §1 cannot name one wrapper: an architect host must never hold
 `~/.config/quince/quince-bot.token` — `/architect` §1 hard-stops if it finds one and `preflight`

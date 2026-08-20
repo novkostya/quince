@@ -94,9 +94,9 @@ mis-scoped — say so early rather than reviewing it anyway.
 
 ## 2. Run it — reading produces opinions, running produces findings
 
-**Where you check out is not a detail.** `gh pr checkout` needs a clone to already be in, and this
-skill used to say nothing about which — so sessions improvised into `/tmp`, where **58 review
-clones accumulated in a single day, 161.9 MB, invisible to `bin/scratch-reap`** because they were
+**Where you check out is not a detail.** `gh pr checkout` needs a clone to already be in, and an
+improvised `/tmp` is invisible to `bin/scratch-reap`: **58 review
+clones accumulated in a single day, 161.9 MB**, because they were
 outside every root it knows. The reviewer's seat is the heavier user: it clones per PR reviewed,
 sometimes twice when a head moves. Use the same root the implementer does, so the reaper covers
 both seats (quince#45):
@@ -162,9 +162,8 @@ defect in a docs PR exactly as a failing test is in a code PR.
   ln -sfn "${QUINCE_PRIVATE_LAYER:-/root/quince-local}" local   # in the devlog clone too
   ```
 
-  This clause used to read *"which both clones carry"*, flatly. That sentence is what stopped a
-  reader noticing §2 had no symlink line at all: it asserted the postcondition of a step that was
-  missing, so the gap read as satisfied (quince#240). Prefer **your work clone's** copy of the
+  **Do not assume both clones carry it** — asserting the postcondition of a step that is missing is
+  what makes a gap read as satisfied (quince#240). Prefer **your work clone's** copy of the
   script over the launchpad's, since a stale one is exactly the one that exits `0` having checked
   nothing (quince#41) and the launchpad has been measured stale (quince#33). Full reasoning in
   `/report` §2. **Exit `2` is DID NOT RUN, not clean**: treat it as an owed sweep, never as a ticked
@@ -242,8 +241,7 @@ optional.
 **ON A VERDICT — `--approve` or `--request-changes` — A STALE PIN CAN BE REFUSED OUTRIGHT, AND THE
 VERDICT IS THEN NOT RECORDED AT ALL.** Measured on quince#875 (quince#877): `422 … "This pull request
 has been updated since you started reviewing"`, wrapper exit 1, and `/pulls/875/reviews` **empty**
-afterwards. This paragraph read *"a non-head oid is accepted with no error"* flatly until 2026-08-16 —
-a sentence a session follows while holding a verdict it turns out it cannot cast.
+afterwards.
 
 **And a stale pin has also been ACCEPTED on a verdict**, measured this session on quince#1063. So the
 rule is not *"comments accept, verdicts refuse"* either: **two verdict castings with stale pins, one

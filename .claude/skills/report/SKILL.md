@@ -43,10 +43,9 @@ make privacy-check REF=origin/main...HEAD TEXT="$BODY"
 /path/to/your/quince/deploy/privacy/privacy-check --ref origin/main...HEAD --text "$BODY"
 ```
 
-**`/tmp/pr-body.md` was canon until 2026-07-29, and it is a collision.** One host runs several
-implementers (quince#111), so a fixed path under `/tmp` is a **shared mutable file**. Measured that
-day: `r1` went to write its body and found `r2`'s in-flight body for another PR already there,
-minutes old. One write would have replaced it.
+**NEVER a fixed path under `/tmp` for the body — it is a SHARED MUTABLE FILE.** One host runs several
+implementers (quince#111). Measured 2026-07-29: `r1` went to write its body and found `r2`'s
+in-flight body for another PR already there, minutes old. One write would have replaced it.
 
 **The data loss is the smaller half.** The bigger one is that `TEXT=` would then have swept *the
 wrong session's* text — reporting `clean` over a body the other session believed was covered, while
@@ -185,13 +184,6 @@ It builds the production image **on this box**, serves it in `--demo` mode, wait
 - the loopback address it fetched (`127.0.0.1:<port>`) — **never** in PR text. It is what
   this box verified, not something a reader can open.
 
-**This paragraph described `devct deploy` until 2026-07-29 and every sentence in it was
-wrong.** It said the build happened *on a dev container*, gave the URL as
-`http://quince-dev-N:8080/`, and told you to paste an `ssh -L` line — while `/qa` §2, added
-in the same PR that replaced the tool, already recorded that **there is no `ssh -L` line any
-more**. Two halves of one change, and only one of them was finished: the skill that
-PRODUCES the PR text kept instructing sessions to paste output that no tool emits.
-
 Then click it yourself and write ≤5 imperative lines a reviewer can follow. Demo mode
 asks for an admin password first — that is line 1 of most click lists.
 
@@ -242,9 +234,8 @@ bin/gh-coder pr create --repo novkostya/quince --base main --head <branch> \
   --title "<qn.N|pr.N>: <claim>" --label <process|bug|enhancement> --body-file <file>
 ```
 
-**Never `export GH_TOKEN=$(cat …)`.** This block did exactly that until 2026-07-29, against
-`quince-bot.token` — an account suspended on 2026-07-28, so a session following it verbatim
-exported a dead credential and discovered it at the one moment it was ready to publish. The
+**Never `export GH_TOKEN=$(cat …)`.** The token file behind it can be a dead credential, and you
+find out at the one moment you are ready to publish. The
 wrapper mints a fresh installation token per call and keeps it out of argv, which is also why an
 allowlist rule can match it: a rule never matches past a leading `VAR=value`.
 
@@ -264,12 +255,10 @@ fix before asking for review.
 
 ## 6. The journal entry
 
-**THE JOURNAL IS NOT IN `progress.md`, AND THIS SECTION SAID IT WAS UNTIL 2026-07-31**
-(quince-devlog#30's ruling, delivered by quince-devlog#152). That file is now 71 lines — the
-one-line state and the per-rung dashboard — with no decisions log in it to append to, and
-`bin/dashboard-size` fails if one reappears. A session following the old text either failed outright
-or wrote a journal entry into the one file the size gate exists to guard. Recorded rather than
-quietly replaced, because the instruction was live and wrong for a day.
+**THE JOURNAL IS NOT IN `progress.md`** (quince-devlog#30's ruling, delivered by
+quince-devlog#152). That file is the one-line state and the per-rung dashboard — no decisions log to
+append to — and `bin/dashboard-size` fails if one reappears, so a journal entry written there trips
+the gate that exists to guard it.
 
 **One entry, one file, on the unprotected `journal` branch of `quince-devlog`** —
 `<YYYY-MM>/<YYYY-MM-DD>-<short-slug>.md`. **No pull request.** A journal is append-only events with

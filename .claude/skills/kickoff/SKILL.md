@@ -154,10 +154,9 @@ shape is what lets a watch on the OTHER box attribute your branches: the branch 
 the local registry is not, so a name that is not seat-shaped wakes every watch on every box for every
 event it produces.
 
-**A new ORDINAL is free; a new KIND is a one-line PR** — and this paragraph said the opposite until
-quince#375. It read *"the refusal names the file and lists the known seats. Adding a seat is a PR"*,
-which was true of the committed `.claude/seats` list that quince#330 **deleted**: there is no file and
-no enumeration, so `r8` and `arch3` need nothing. What still costs a PR is widening the alternation
+**A new ORDINAL is free; a new KIND is a one-line PR.** There is no seat file and no enumeration —
+quince#330 deleted the committed `.claude/seats` list — so `r8` and `arch3` need nothing. What still
+costs a PR is widening the alternation
 itself, which quince#375 did for `analyst<N>`, and that is the intended cost — a third seat kind is a
 decision, where a seventh implementer is not.
 
@@ -186,11 +185,10 @@ it by colliding with another session's clone, not by being told.
 configure a credential that cannot authenticate and an author that no longer resolves. See
 `quince-devlog` `decisions/0014`.
 
-**The helper points at `bin/git-coder`, and is not hand-rolled here.** An earlier version of this
-block inlined `password=$(gh-coder auth token)` — which is character for character the defect
-quince#198 fixed hours earlier: a failing substitution still emits a syntactically valid
+**The helper points at `bin/git-coder`, and is not hand-rolled here.** **Never inline
+`password=$(gh-coder auth token)`** — a failing substitution still emits a syntactically valid
 credential with an EMPTY password, so git reports `authentication failed` while the real reason,
-a boundary refusal naming the offending file, is stranded on stderr. The helper exits 0.
+a boundary refusal naming the offending file, is stranded on stderr (quince#198). The helper exits 0.
 
 In a skill that is worse than in a wrapper: it is re-created in every fresh clone, in a
 .git/config nobody re-reads, on the one path where the hidden failure is a BOUNDARY refusal.
@@ -213,9 +211,7 @@ and the product checkout's `deploy/privacy/privacy-check` in the devlog, which h
 ln -sfn "${QUINCE_PRIVATE_LAYER:-/root/quince-local}" local
 ```
 
-This line used to say *"On the Operator's machine only"*. That was true when the Mac was where work
-happened; once work moved to the boxes it applied nowhere, so the gate was inert everywhere and
-every PR in that cycle hand-declared that its sweep had not really run (quince#44). The layer is now
+The private layer is
 a property of a provisioned box — `preflight` **refuses to start** one that cannot reach it — so if
 you have a session at all, the layer is there.
 
@@ -305,17 +301,15 @@ bin/forge-watch watch …"` is how a declared set is expanded, and it appears in
 as well as in both that failed. The trailing `&` and the `;` are what discriminate. A rule that
 forbids what you were doing correctly is a rule that gets ignored wholesale.
 
-**This section used to say "the moment your first PR is open, ARM THE WATCH" and never said when in the
-turn**, and the natural reading of that — arm as soon as you know you need one — is the broken one
-(quince#100). **An implementer's last act is almost always a push or a comment**, which is precisely an
+**ARMING AS SOON AS YOU KNOW YOU NEED ONE IS THE BROKEN READING** (quince#100). **An implementer's
+last act is almost always a push or a comment**, which is precisely an
 event on a PR it is watching. Self-caused wake suppression covers some of those and not others, so a
 watch armed before that act is still dead by the time the turn ends more often than not, and the
 `Stop` hook below is telling the truth when it says so. That is worse for you than for the architect,
 whose self-caused events are approvals and merges — occasional — where yours are *how a turn ends*.
 
 **Suppressed means NOT WOKEN ON, never NOT SEEN.** Every event is still printed on every tick;
-quince#242's filters decide only whether the loop *ends*. This paragraph read *"self-caused events are
-deliberately not suppressed"* until quince#309, eight days after that stopped being true. **On your
+quince#242's filters decide only whether the loop *ends*. **On your
 seat specifically:**
 
 - your own **push to a `<runner>/…` branch you own** does not wake you, and neither does a review,
@@ -346,8 +340,7 @@ make a **dead** watch look **alive** (quince#49), and `step()` carries the watch
 it cannot make a **live** watch look **dead** (quince#103). **The second direction is the one that was
 broken**, and the one that matters here: `watch` refuses to arm beside a live watcher by reading that
 record, so a tick that erased it turned step 3 into a *second* watcher on one state file — quince#50's
-race, reached through the guard rather than around it. This paragraph asserted only the first half
-until quince#103 landed, and the first half is the half that could not fail.
+race, reached through the guard rather than around it.
 
 **And DECLARE WHAT YOU ARE BLOCKED ON, in the same command.** Your PR set is self-describing; your
 *blocked* set is not, and the channel that carries authority here is an **issue** — an Operator ruling
@@ -408,10 +401,9 @@ measured (quince#62). On **this** box it has delivered **once, about an hour aft
 is the only measurement there is here and is not a cadence you can plan against. The floor under you is
 `watch`'s own `--max-wait`, which is measured to fire.
 
-The earlier version of this paragraph said it *"has delivered nothing across every arming measured to
-date"* — unscoped, from architect-box measurements, in the file the implementer reads. It was
-falsified on the runner within the hour, by the very heartbeat it described. **A measurement carries
-the box it was taken on**; strip that and it becomes a claim about a machine nobody tested.
+**A measurement carries the box it was taken on.** Strip that and it becomes a claim about a machine
+nobody tested — an architect-box figure, quoted unscoped in the file the implementer reads, was
+falsified on the runner within the hour.
 
 **Your harness will report exits 6 and 7 as "failed".** A background task that exits non-zero is
 rendered as *"failed with exit code 6"*, and 6 is the tool's designed idle heartbeat. Read the last
@@ -455,11 +447,9 @@ are on has no private layer the gate exits **`2` — DID NOT RUN**, saying *"thi
 Nothing was swept."*: do **not** tick the box, declare the sweep owed and name the head. Then say when
 the head is final, so whoever runs the sweep is not racing you.
 
-*(This paragraph used to say the gate "prints `skipped` and exits 0 having checked nothing" — the
-behaviour quince#41 removed, and the direct opposite of what §3 of this same skill says. One skill
-asserting both the pre- and post-fix behaviour is devlog#54's drift, inside a single file. Measured on
-a layer-less clone before correcting it: exit **2**, and the first attempt to measure it read a
-`tail` pipeline's exit `0` instead of the script's — devlog#27's class, on the third occasion today.)*
+*(Measured on a layer-less clone: exit **2**. **Read the SCRIPT's exit, not a pipeline's** — the
+first attempt to measure this read a `tail` pipeline's `0` instead of the gate's `2`, which is
+devlog#27's class and the easiest way to record a clean sweep that never happened.)*
 
 **Count the stalls.** When the host client drops, `Read`/`Write` fail after exactly ten minutes with
 `PreToolUse hook did not respond before its timeout` while `Bash` keeps working — one session lost ~84
