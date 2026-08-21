@@ -92,9 +92,15 @@ func (s *Service) Deliver(ctx context.Context, sender Sender, d notify.Decision,
 		// otherwise receive the household backups, their failures, and the device NAMES in the
 		// titles.
 		//
-		// AT SEND RATHER THAN AT SUBSCRIBE, which is the placement D7 asks for: a scope can
-		// change and a credential can be revoked after a subscription exists, so a filter
-		// applied once at subscribe would keep delivering under authority that has since gone.
+		// AT SEND, which is D7s placement — but READ WHY, because placement alone does not make
+		// revocation take effect and slice 10a first claimed it did (quince#1403 review).
+		// `scope_udid` is written at INSERT and never updated, so this compares against a value
+		// frozen at subscribe. What placement buys is that a change to the ROW takes effect on
+		// the next send rather than needing the phone to re-subscribe.
+		//
+		// REVOCATION REACHES THE SUBSCRIPTIONS DIRECTLY instead: removing a devices last
+		// credential deletes them (`DeletePushSubscriptionsForScope`), which is quince#1366s
+		// shape moved from sessions to push.
 		if !receives(row, d) {
 			continue
 		}

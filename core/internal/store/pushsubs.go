@@ -275,3 +275,27 @@ func (s *Store) ClearPushReminder(udid string) error {
 	_, err := s.db.Exec(`DELETE FROM push_reminders WHERE udid = ?`, udid)
 	return err
 }
+
+// DeletePushSubscriptionsForScope removes every subscription confined to one device, and reports
+// how many went.
+//
+// CALLED WHEN A DEVICE'S LAST CREDENTIAL IS REMOVED (quince#1403 review). `scope_udid` is written at
+// INSERT and never updated, so the send-time filter compares against a value frozen at subscribe —
+// which means placement alone does NOT make revocation take effect. quince#1380's review taught that
+// exact lesson on the socket, and slice 10a quoted it and then reproduced it one surface over.
+//
+// So revocation is made to REACH the subscriptions rather than be inferred from where the filter
+// runs. This is quince#1366's shape — a credential change ends what that credential created — moved
+// from sessions to push.
+//
+// BY SCOPE, NOT BY CREDENTIAL, and only when the LAST one goes. A device may hold two passkeys; the
+// first being removed leaves its holder able to sign in, so their phone must keep receiving. What
+// ends the subscription is the holder losing every way in, not any single key.
+func (s *Store) DeletePushSubscriptionsForScope(udid string) (int, error) {
+	res, err := s.db.Exec(`DELETE FROM push_subscriptions WHERE scope_udid = ?`, udid)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
+}

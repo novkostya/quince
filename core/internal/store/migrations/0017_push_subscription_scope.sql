@@ -9,11 +9,11 @@
 -- NULL MEANS THE ADMIN, the fifth such default in this rung and true of every row that exists — no
 -- subscription can have been created by a scoped principal, because none can exist yet.
 --
--- FILTERED AT SEND, NOT AT SUBSCRIBE, which is why this column is read rather than acted on at
--- write time. Spec D7: a scope can change and a credential can be revoked after a subscription
--- exists, and narrowing once at subscribe would keep delivering under authority that has since gone.
--- The socket learned the same lesson the harder way (quince#1380 review): placement decides WHERE a
--- stale answer is applied, not whether it is stale, so the value has to be re-read per send.
+-- FILTERED AT SEND, and read rather than acted on at write time — but placement alone does NOT
+-- make revocation take effect, which slice 10a first claimed (quince#1403 review). This column is
+-- frozen at INSERT. What send-time placement buys is that a change to the ROW lands on the next
+-- send rather than needing the phone to re-subscribe. REVOCATION reaches these rows directly:
+-- removing a device's last credential deletes its subscriptions (quince#1366's shape, moved to push).
 --
 -- SCOPE_UDID RATHER THAN A CREDENTIAL ID, deliberately. A subscription outlives the credential that
 -- created it — the phone keeps its endpoint across a re-enrolment — so keying on the credential
