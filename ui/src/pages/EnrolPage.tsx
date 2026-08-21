@@ -103,7 +103,7 @@ export function EnrolPage() {
             Passkeys only work over <strong>https</strong>. This link opened over plain http, so no
             browser will offer to add one.
           </p>
-          <p className="text-fg-muted">
+          <p className="text-muted">
             Ask whoever looks after this quince to set up https and send a new QR code — the code
             carries the address it was made at.
           </p>
@@ -169,7 +169,7 @@ export function EnrolPage() {
       {refusal && (
         <div role="alert" className="rounded-lg border border-danger/40 bg-danger/5 p-3 text-sm">
           <p className="font-medium">{refusal.title}</p>
-          <p className="text-fg-muted">{refusal.body}</p>
+          <p className="text-muted">{refusal.body}</p>
         </div>
       )}
       <Button onClick={add} disabled={busy}>
