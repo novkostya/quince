@@ -83,9 +83,15 @@ func (u *unencrypted) Unlock(ctx context.Context, _ string) (Info, error) {
 
 	// READ-ONLY AND IMMUTABLE. `mode=ro` alone still lets SQLite create `-wal`/`-shm`
 	// alongside the database; `immutable=1` promises the file will not change and suppresses
-	// that. On the zfs backend `latest/` IS the live committed tree, so a stray sidecar file
-	// would be a write into a committed version — the one thing storage rules forbid
-	// outright. It is the same open `storage.verifyPlainDB` already uses.
+	// that. It is the same open `storage.verifyPlainDB` already uses.
+	//
+	// THE BACKEND WHERE THIS EARNS ITS KEEP IS THE NAMESPACE FAMILY, NOT ZFS. For an
+	// `is_latest` version on reflink/hardlink/copy, `browseRoot` returns `latestDir()`, and
+	// `latest/` there IS the newest committed version's content — so a sidecar file would be
+	// a write into a committed version, which the storage rules forbid outright. On zfs
+	// browse reads a SNAPSHOT (`zfsSnapRoot`), and a version with no snapshot has no browse
+	// root at all, so the same write would fail rather than corrupt anything. The guard is
+	// right on every backend; only one of them is where it matters.
 	dbPath := filepath.Join(u.dir, "Manifest.db")
 	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&immutable=1")
 	if err != nil {
