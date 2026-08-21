@@ -105,6 +105,20 @@ type pendingCeremony struct {
 	// device` is the property this rung is built on, and it belongs where it cannot be
 	// restated wrongly. Same argument `store.Scope` and `Disclosure` already won.
 	scope store.Scope
+	// handle is the WebAuthn `user.id` this ceremony was BEGUN under, and finish uses THIS one
+	// rather than deriving it again (quince#1440).
+	//
+	// `handleForScope` MINTS A FRESH HANDLE when the device has no credential yet, and persists
+	// nothing — so begin and finish each invented their own, the library compared them, and every
+	// FIRST enrolment for a device died with "ID mismatch for User and Session" AFTER the user had
+	// completed Face ID. There could never be a second either: the first is what stores the handle
+	// a second would reuse.
+	//
+	// THE COMMENT ON `BeginPasskeyRegistration` DESCRIBES THIS EXACT FAILURE — "a Begin under one
+	// identity and a Finish under another would fail after Face ID" — so the guard was written down
+	// and not implemented. It lives here now, beside `scope` and `rpID`, because a ceremony that
+	// carries the identity it was begun under is the only shape in which the two cannot disagree.
+	handle []byte
 }
 
 // NewPasskeyCeremonies builds the in-flight challenge store.
@@ -118,7 +132,7 @@ func NewPasskeyCeremonies() *PasskeyCeremonies {
 // "add a passkey": a goroutine to collect at most a handful of two-minute entries would be more
 // machinery than the thing it manages.
 func (p *PasskeyCeremonies) put(session *webauthn.SessionData, rpID string, kind ceremonyKind,
-	scope store.Scope) (string, error) {
+	scope store.Scope, handle []byte) (string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
@@ -133,7 +147,7 @@ func (p *PasskeyCeremonies) put(session *webauthn.SessionData, rpID string, kind
 			delete(p.in, k)
 		}
 	}
-	p.in[key] = pendingCeremony{session: *session, rpID: rpID, kind: kind, scope: scope,
+	p.in[key] = pendingCeremony{session: *session, rpID: rpID, kind: kind, scope: scope, handle: handle,
 		expires: now.Add(challengeTTL)}
 	return key, nil
 }
@@ -301,6 +315,11 @@ func BeginPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, rpID stri
 	// THE PRINCIPAL'S OWN HANDLE, not the install's (quince#1393). Both halves of the ceremony must
 	// agree: the library compares the assertion's user handle against `WebAuthnID()` and refuses a
 	// mismatch, so a Begin under one identity and a Finish under another would fail after Face ID.
+	//
+	// THIS IS WHERE IT IS DECIDED, AND THE CEREMONY CARRIES IT FROM HERE (quince#1440). Finish used
+	// to call this function again, which for a device with no credential yet MINTS a fresh handle
+	// and persists nothing — so the two halves derived different identities and the library refused
+	// exactly as the paragraph above predicts.
 	handle, err := handleForScope(st, scope)
 	if err != nil {
 		return nil, "", err
@@ -329,7 +348,7 @@ func BeginPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, rpID stri
 	if err != nil {
 		return nil, "", err
 	}
-	key, err := cer.put(session, rpID, ceremonyRegister, scope)
+	key, err := cer.put(session, rpID, ceremonyRegister, scope, handle)
 	if err != nil {
 		return nil, "", err
 	}
@@ -364,12 +383,28 @@ func FinishPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, key, nam
 	if err != nil {
 		return store.Passkey{}, err
 	}
-	// THE PRINCIPAL'S OWN HANDLE, not the install's (quince#1393). Both halves of the ceremony must
-	// agree: the library compares the assertion's user handle against `WebAuthnID()` and refuses a
-	// mismatch, so a Begin under one identity and a Finish under another would fail after Face ID.
-	handle, err := handleForScope(st, scope)
-	if err != nil {
-		return store.Passkey{}, err
+	// THE PRINCIPAL'S OWN HANDLE, not the install's (quince#1393) — AND THE CEREMONY'S OWN, not a
+	// fresh derivation (quince#1440).
+	//
+	// The paragraph that stood here said it already: "both halves of the ceremony must agree; the
+	// library compares the assertion's user handle against `WebAuthnID()` and refuses a mismatch,
+	// so a Begin under one identity and a Finish under another would fail after Face ID." Calling
+	// `handleForScope` again is exactly that Begin-and-Finish-under-two-identities, because for a
+	// device with no credential yet it MINTS a fresh one and persists nothing.
+	//
+	// Measured on hardware, 2026-08-21: every first enrolment for a device failed with the
+	// library's `ID mismatch for User and Session`, after the household member had completed Face
+	// ID and their phone had stored a credential quince then refused.
+	handle := pending.handle
+	if handle == nil {
+		// AN ADMIN CEREMONY BEGUN BEFORE THIS CHANGE, still in flight across the deploy. Its
+		// record carries no handle and the admin's is stable in `settings`, so deriving it is
+		// correct here and only here — a SCOPED ceremony has no stable source to fall back to,
+		// which is the whole defect.
+		var err error
+		if handle, err = handleForScope(st, scope); err != nil {
+			return store.Passkey{}, err
+		}
 	}
 	username, err := scopeUsername(st, scope)
 	if err != nil {
