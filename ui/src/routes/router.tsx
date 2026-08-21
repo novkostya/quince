@@ -14,6 +14,7 @@ import { SettingsAuthPage } from "@/pages/SettingsAuthPage";
 import { NotificationsInstallPage } from "@/pages/NotificationsInstallPage";
 import { StorageDetailsPage } from "@/pages/StorageDetailsPage";
 import { AddStoragePage } from "@/pages/AddStoragePage";
+import { VaultBrowsePage } from "@/pages/VaultBrowsePage";
 
 export const router = createBrowserRouter([
   // OUTSIDE EVERY GUARD, and that is the decision rather than an oversight (qn.6f rung-ruled 6).
@@ -122,6 +123,23 @@ export const router = createBrowserRouter([
       // name exists for every declared storage where an id does not — one that was never created
       // has none, and that is exactly the storage a user goes looking for.
       { path: "storage/:name", element: <StorageDetailsPage /> },
+      // ONE COMMITTED BACKUP, OPENED (qn.8 slice 7). A PAGE rather than a dialog, and this is the
+      // fourth time the same call has gone the same way: quince#838 gave scrolling back to the
+      // browser, quince#908 §4 replaced an accordion with a route because the flow was multi-step
+      // and stateful, and quince#931 made a dialog a place you went. `useDialogRoute`'s own comment
+      // names the exit — "can become one the day a dialog is worth its own screen, at which point it
+      // is a page" — and a filterable list of a hundred thousand rows behind a password is that day.
+      //
+      // ROUTED ON THE VERSION, NOT THE SESSION, and the difference is what makes the URL worth
+      // having. A session id is minted at unlock and dies at the TTL, so a link carrying one is
+      // stale within minutes and cannot be sent to anybody. A version id is the durable thing; the
+      // session is re-established on arrival, which is the same act as typing the password again
+      // and is what contracts §1 means by "unlock is per-session, always".
+      //
+      // NOT NESTED UNDER `devices/:udid`, though a version belongs to a device. The version list is
+      // rendered on the storage page too (mixed across devices), and a link whose shape depends on
+      // which page you clicked from is two links to one thing.
+      { path: "versions/:id/browse", element: <VaultBrowsePage /> },
       { path: "settings", element: <SettingsPage /> },
       // The auth surface is its OWN PAGE, linked from Settings — quince#841 ruling A. A child of
       // the authed shell, unlike its onboarding sibling, which is a top-level route: one has a
