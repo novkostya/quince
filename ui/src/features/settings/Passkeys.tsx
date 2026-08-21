@@ -1,15 +1,14 @@
 import { SectionHeading } from "@/components/ui/section-heading";
-import * as React from "react";
 import { Link } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
-import { api, APIError, messageFor } from "@/lib/api";
-import { removePasskey } from "@/lib/auth";
-import { acceptsOf, onlyPasskey, proveWithPasskey, type Factor, type Present } from "@/lib/reauth";
+import { api, messageFor } from "@/lib/api";
+
+
 import { ReauthChallenge } from "@/features/auth/ReauthChallenge";
 import { AddPasskeyRow } from "./AddPasskeyRow";
-import { forgetPasskey, passkeyHintCredentialID } from "@/lib/passkeyHint";
+import { usePasskeyRemoval } from "./usePasskeyRemoval";
 import { webauthnAvailable } from "@/lib/webauthn";
 import { RelativeTime } from "@/components/RelativeTime";
 import { Badge } from "@/components/ui/badge";
@@ -121,118 +120,16 @@ export function Passkeys() {
 
   const invalidate = () => void qc.invalidateQueries({ queryKey: key });
 
-  // THE ROW BEING CHALLENGED, with what the server said would satisfy it — qn.6o slice 5.
-  //
-  // SET ONLY FROM THE REFUSAL, never guessed ahead of it. That rule is `qn.6n`'s and is unchanged;
-  // what changed is that the server now NAMES the acceptable factors instead of the client inferring
-  // them from `last_credential` + `has_password`. Those two are still the DEAD-END signal and are
-  // still handled below — they just no longer stand in for a list the server can send.
-  const [challenge, setChallenge] = React.useState<{ id: string; accepts: Factor[] } | null>(null);
-  // The ceremony's own failure, which the mutation cannot carry: when the assertion is what went
-  // wrong, `remove` was never called and has no error to render.
-  const [ceremonyErr, setCeremonyErr] = React.useState<string | null>(null);
-
-  // proveThenRemove RUNS THE CEREMONY AND RETRIES, for the one-factor case where no chooser is shown.
-  //
-  // A FUNCTION RATHER THAN AN INLINE `void (async () => …)()` INSIDE `onError`, because that shape
-  // leaked an UNHANDLED REJECTION the moment the sheet was dismissed — caught by `gates-ui` failing
-  // while every test passed, which is the only reason it did not ship. A detached promise with no
-  // catch is a silent failure by construction.
-  //
-  // A DISMISSED SHEET STAYS QUIET, which is this file's existing rule and `AddPasskeyRow`'s: the user
-  // declined, nothing happened, and the Remove button they pressed is still there. Anything else is
-  // a real failure and says so, because the mutation never ran and has no error of its own to show.
-  async function proveThenRemove(id: string) {
-    setCeremonyErr(null);
-    // TWO TRY BLOCKS, NOT ONE, AND THE SPLIT IS THE POINT — architect, reviewing quince#1022.
-    //
-    // One `try` around both calls cannot tell their failures apart. `proveWithPasskey` makes its own
-    // `api.post`s to `reauth/begin` and `reauth/finish`, and both throw `APIError` — the same type a
-    // refused `DELETE` throws. A guard written for the second silently swallowed the first, so
-    // completing a Face ID prompt and having `reauth/finish` answer 401 (expired ceremony, rotated
-    // session) left the screen UNCHANGED: the ceremony error was returned past, the mutation never
-    // ran so `remove.error` was null, and nothing rendered.
-    //
-    // A COMPLETED PROMPT THAT CHANGES NOTHING is the *no silent caps or fallbacks* rule broken on an
-    // auth surface, and it is exactly what `ceremonyErr` was added for. Catching each failure where
-    // its ORIGIN is known is what makes the distinction structural instead of a predicate somebody
-    // has to keep correct.
-    let proof: string;
-    try {
-      proof = await proveWithPasskey("remove_passkey", id);
-    } catch (err) {
-      // A DISMISSED SHEET IS NOT AN ERROR — this file's rule and `AddPasskeyRow`'s. The user
-      // declined, nothing happened, and the Remove button they pressed is still the retry.
-      if (err instanceof Error && err.name === "NotAllowedError") return;
-      setCeremonyErr("Could not confirm with a passkey.");
-      return;
-    }
-    try {
-      await remove.mutateAsync({ id, present: { proof } });
-    } catch {
-      // RENDERED FROM `remove.error`, where it always was. Swallowed here so the refusal is not
-      // reported twice — which is what the original guard was for, and all it should ever have
-      // covered.
-    }
-  }
-
-  const remove = useMutation({
-    mutationFn: ({ id, present }: { id: string; present?: Present }) => removePasskey(id, present),
-    onSuccess: (_data, { id }) => {
-      // REMOVING THE REMEMBERED ONE, OR THE LAST ONE, STOPS THIS BROWSER OFFERING IT. Otherwise the
-      // next visit fires a sheet with nothing to offer — the exact wrong-guess the hint exists to
-      // prevent, caused by us.
-      //
-      // TWO CASES SINCE qn.13, because the hint went from a boolean to a credential id (D2.2):
-      //
-      //   - the LAST credential — nothing can work in this browser any more, which is qn.6k's case
-      //     and is unchanged;
-      //   - the REMEMBERED credential, even with others left — `allowCredentials` would name a
-      //     credential the platform can no longer find, and the sheet reports no passkey available.
-      //
-      // The second is what the admin does on the device page when they revoke a household member's
-      // passkey, so it is the ordinary path rather than an edge. `webauthn.ts` falls back to the
-      // discoverable flow if it happens anyway on some OTHER browser — this only spares THIS one
-      // the wasted ceremony, which is why both exist and neither is redundant.
-      if ((rows.length <= 1 && rows.some((p) => p.id === id)) || passkeyHintCredentialID() === id) {
-        forgetPasskey();
-      }
-      setChallenge(null);
-      invalidate();
-    },
-    onError: (err, { id, present }) => {
-      // THE CHALLENGE, DRIVEN BY THE SERVER'S OWN LIST. `reauth_required` here means *present
-      // something*, and `accepts` says what would work — with rule 2's exclusions already applied,
-      // so the credential being removed is never offered as proof of its own removal.
-      //
-      // NOT AFTER AN ATTEMPT (`present` set) — that would loop the challenge on a wrong password
-      // instead of showing why it was refused.
-      //
-      // `last_credential` IS A DIFFERENT REFUSAL AND KEEPS ITS OWN BEHAVIOUR: it is the dead end,
-      // it carries the server's sentence naming which addresses hold credentials, and it renders as
-      // the message below rather than as a prompt. D4's rule — a dead end is never an empty
-      // challenge — is the server's here, and this is the client half of it.
-      if (present || !(err instanceof APIError) || err.code !== "reauth_required") return;
-      const accepts = acceptsOf(err);
-      if (!accepts) return;
-      // ONE FACTOR NEEDS NO CHOOSER — Operator ruling, D5 as amended. With `["passkey"]` the dialog
-      // is a chooser with one choice, so the ceremony runs straight from the press the user already
-      // made.
-      //
-      // NO ACTIVATION CONCERN ON THIS PATH, unlike the add row's: a removal ends in a `DELETE`, an
-      // ordinary request needing no gesture. `credentials.get()` needs one, and it is two fast local
-      // awaits from the click with no sheet in between — comfortably inside what quince#998 measured
-      // surviving three awaits AND a completed sheet.
-      //
-      // A DISMISSED SHEET LEAVES THE ROW ALONE. `mutateAsync` rejects, `remove.isError` renders the
-      // reason where it always did, and the Remove button they pressed is the retry — no dialog,
-      // then or ever, which is the half of the ruling that took a correction to get right.
-      if (onlyPasskey(accepts)) {
-        void proveThenRemove(id);
-        return;
-      }
-      setChallenge({ id, accepts });
-    },
+  // THE REMOVAL MACHINERY IS SHARED WITH THE DEVICE PAGE — qn.13 slice 11, D9. Everything it owns
+  // (the mutation, the reauth challenge, the ceremony error, the dismissed-sheet rule) used to be
+  // inline here, and it moved rather than being copied when a second surface needed to revoke a
+  // credential. `usePasskeyRemoval`'s header records why; nothing about the behaviour changed.
+  const { remove, challenge, setChallenge, ceremonyErr } = usePasskeyRemoval({
+    onRemoved: invalidate,
+    // ONLY THIS LIST CAN ANSWER IT. `rows` is every credential on the install, so "that was the last
+    // one" is a question the Settings surface can settle and a device page — which sees one device's
+    // — cannot.
+    isLastAt: (id) => rows.length <= 1 && rows.some((p) => p.id === id),
   });
 
 

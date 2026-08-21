@@ -19,6 +19,7 @@ import { PairDialog } from "@/features/devices/PairDialog";
 import { WifiSyncControl } from "@/features/devices/WifiSyncControl";
 import { DeviceNotificationsControl } from "@/features/devices/DeviceNotificationsControl";
 import { DeviceEnrolment } from "@/features/devices/DeviceEnrolment";
+import { DeviceCredentials } from "@/features/devices/DeviceCredentials";
 import { EncryptionDialog, type EncryptionMode } from "@/features/devices/EncryptionDialog";
 import { JobProgressFull } from "@/features/jobs/JobProgress";
 import { JobLogPane } from "@/features/jobs/JobLogPane";
@@ -240,6 +241,10 @@ export function DeviceDetailsPage() {
             <SectionHeading>Share this device</SectionHeading>
             <div className="mt-3">
               <DeviceEnrolment device={device} />
+              {/* WHO ALREADY HOLDS ONE, under the control that hands them out — D9. `DeviceEnrolment`
+                  lists authority handed out and not yet used; this lists authority in use. Either
+                  half alone is a confident, incomplete answer to *what have I issued*. */}
+              <DeviceCredentials device={device} />
             </div>
           </div>
 
