@@ -2143,8 +2143,9 @@ GET    /api/sessions/{id}/file/{file_id}                → streamed decrypted c
 **Implemented at qn.8. The status mapping — and the table is TOTAL over the codes this surface can
 answer with, deliberately: a code with no row here answers 500, which reports a failure that did not
 happen. Two of them did exactly that for a rung (quince#1375), so `core/internal/wire` carries the
-vocabulary as one list and a test asserts the mapper covers it. The last two rows are produced above
-the seam and so are not in §4's RPC set — see §4.**
+vocabulary as one list and a test asserts the mapper covers it. Three of these codes — `busy`,
+`unsupported_version` and `unavailable` — are produced ABOVE the seam and so are not in §4's RPC set;
+§4 says which and why.**
 
 | code | HTTP | why |
 | --- | --- | --- |
@@ -3011,9 +3012,9 @@ frozen five turned out not to cover what it can answer:
   express it would make the RPC implementation lie. Over HTTP it is **`409`, not `404`**: the session
   id may be perfectly real and simply expired.
 
-**TWO CODES LIVE ABOVE THE SEAM AND ARE NOT IN THE SET ABOVE.** The vault process answers the RPC
-taxonomy; the join between it and the REST surface (`vaultsvc`) can fail in two ways the vault itself
-cannot name, and both reach a client:
+**THREE CODES LIVE ABOVE THE SEAM AND ARE NOT IN THE SET ABOVE.** The vault process answers the RPC
+taxonomy; the layers above it — the join (`vaultsvc`) and the HTTP surface — can report three
+conditions the vault itself cannot name, and all three reach a client:
 
 - **`busy`** — the session exists and a file stream is open against it, so the registry holds it. The
   seam cannot report this because it is a property of quince's session registry rather than of the
@@ -3021,10 +3022,17 @@ cannot name, and both reach a client:
   wait, `locked` means unlock again.
 - **`unsupported_version`** — the version is a class this build cannot open, answered before any
   password is checked so it is not a credential failure.
+- **`unavailable`** — no vault subsystem is wired at all (`--demo`, or no storage). **A vault process
+  can never answer this**, because it is the answer given when there is no vault process: it is a
+  property of the deployment rather than of the version asked for.
 
-Both are in `core/internal/wire`'s vocabulary with the §4 codes, and §1's status table is asserted
-total over that one list. They shipped for a rung with no status mapping at all, answering 500 for
-conditions nothing had failed on (quince#1375).
+All three are in `core/internal/wire`'s vocabulary alongside the §4 codes, and §1's status table is
+asserted total over that one list. Two of them shipped for a rung with no status mapping at all,
+answering 500 for conditions nothing had failed on (quince#1375).
+
+**AN IMPLEMENTER OF THE STDIO-RPC VAULT NEEDS ONLY THE SET ABOVE.** These three are quince's to
+answer, and a vault process that implemented `unavailable` would be implementing the one condition it
+cannot be in.
 
 **`unsupported_ios` is UNUSED and deliberately untouched.** The failure it was written for is a
 schema the adapter cannot read, and `ios-backup-parser` reports that as a schema **fingerprint**
