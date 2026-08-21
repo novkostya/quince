@@ -39,6 +39,14 @@ type Passkey struct {
 	// that means anything, and letting the zero value stand for admin is how a forgotten
 	// field becomes a privilege (spec D6).
 	ScopeUDID *string
+
+	// UserHandle is the WebAuthn `user.id` this credential was registered under, or nil for the
+	// admin's shared handle in settings (0016_passkey_user_handle.sql).
+	//
+	// IT IS THE PLATFORM'S NOTION OF WHO THIS IS, where `ScopeUDID` is quince's. They must agree,
+	// and keeping them as two columns is what lets a reader see that they do: same scope, same
+	// handle; different scope, different handle.
+	UserHandle *string
 }
 
 // InsertPasskey records a credential.
@@ -60,10 +68,10 @@ func (s *Store) InsertPasskey(p Passkey, scope Scope) error {
 	_, err := s.db.Exec(
 		`INSERT INTO passkeys
 		   (credential_id, public_key, rp_id, sign_count, aaguid, transports, name, created_at,
-		    backup_eligible, backup_state, scope_udid)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		    backup_eligible, backup_state, scope_udid, user_handle)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.CredentialID, p.PublicKey, p.RPID, p.SignCount, p.AAGUID, p.Transports, p.Name,
-		fmtTime(p.CreatedAt), p.BackupEligible, p.BackupState, scope.value())
+		fmtTime(p.CreatedAt), p.BackupEligible, p.BackupState, scope.value(), p.UserHandle)
 	return err
 }
 
@@ -104,14 +112,18 @@ func scanPasskey(sc interface{ Scan(...any) error }) (Passkey, error) {
 		created    string
 		lastUsed   sql.NullString
 		scopeUDID  sql.NullString
+		userHandle sql.NullString
 		beligible  sql.NullBool
 		bstate     sql.NullBool
 	)
 	if err := sc.Scan(&p.CredentialID, &p.PublicKey, &p.RPID, &p.SignCount, &aaguid,
-		&transports, &p.Name, &beligible, &bstate, &created, &lastUsed, &scopeUDID); err != nil {
+		&transports, &p.Name, &beligible, &bstate, &created, &lastUsed, &scopeUDID, &userHandle); err != nil {
 		return Passkey{}, err
 	}
 	p.AAGUID = aaguid
+	if userHandle.Valid {
+		p.UserHandle = &userHandle.String
+	}
 	if scopeUDID.Valid {
 		p.ScopeUDID = &scopeUDID.String
 	}
@@ -139,7 +151,7 @@ func scanPasskey(sc interface{ Scan(...any) error }) (Passkey, error) {
 
 const passkeyCols = `credential_id, public_key, rp_id, sign_count, aaguid, transports, name,
 	backup_eligible, backup_state,
-	created_at, last_used_at, scope_udid`
+	created_at, last_used_at, scope_udid, user_handle`
 
 // GetPasskey returns one credential by its id, and whether it exists.
 //

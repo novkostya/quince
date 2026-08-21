@@ -262,10 +262,9 @@ func (s *Service) FinishReauth(cer *ReauthCeremonies, proofs *Proofs, key, rpID,
 	if err != nil {
 		return "", err
 	}
-	handle, err := userHandle(s.store)
-	if err != nil {
-		return "", err
-	}
+	// THE HANDLE IS THE CREDENTIALS OWN, resolved in the lookup below (quince#1393). Reauth is
+	// a discoverable assertion like login, so which principal is proving cannot be known until
+	// the authenticator answers.
 
 	// THE STORED rp_id COMPARISON CARRIES THIS PATH TOO. `RPOrigins` derives from the same header as
 	// the rpId, so the library is checking the request against itself and is not an independent
@@ -279,6 +278,10 @@ func (s *Service) FinishReauth(cer *ReauthCeremonies, proofs *Proofs, key, rpID,
 		}
 		resolved = pk
 		creds, err := existingCredentials(s.store, pending.rpID)
+		if err != nil {
+			return nil, err
+		}
+		handle, err := handleOf(s.store, pk)
 		if err != nil {
 			return nil, err
 		}

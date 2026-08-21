@@ -68,10 +68,9 @@ func (s *Service) FinishPasskeyAssertion(cer *PasskeyCeremonies, key, rpID, clie
 	if err != nil {
 		return store.AuthSession{}, "", err
 	}
-	handle, err := userHandle(s.store)
-	if err != nil {
-		return store.AuthSession{}, "", err
-	}
+	// THE HANDLE IS NOW THE CREDENTIALS OWN, resolved inside the lookup below once the
+	// assertion has named which credential it is (quince#1393). It cannot be read before that:
+	// a discoverable login knows nothing about the caller until the authenticator answers.
 
 	// THE STORED rp_id COMPARISON IS WHAT CARRIES THIS PATH, and it is not redundant with the
 	// library's origin check. Because the relying party is built per request, `RPOrigins` derives
@@ -87,6 +86,10 @@ func (s *Service) FinishPasskeyAssertion(cer *PasskeyCeremonies, key, rpID, clie
 		}
 		resolved = pk
 		creds, err := existingCredentials(s.store, pending.rpID)
+		if err != nil {
+			return nil, err
+		}
+		handle, err := handleOf(s.store, pk)
 		if err != nil {
 			return nil, err
 		}
