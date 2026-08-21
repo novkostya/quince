@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"github.com/novkostya/quince/core/internal/auth"
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/novkostya/quince/core/internal/auth"
 )
 
 // deviceResolver answers WHICH DEVICE a request concerns, for a route that is permitted only for
@@ -309,8 +310,8 @@ var errNoPrincipal = errors.New("httpapi: no principal bound to this request")
 // the PATH udid, and says nothing about the query.
 //
 // THE ERROR IS RETURNED RATHER THAN A `refuse` BOOL, so the caller can tell a revoked credential
-// from a database fault. `listUDID` collapses those into one 401 and that is a live defect
-// (quince#1412); this is new code and does not need to reproduce it.
+// from a database fault — the distinction `writeScopeResolutionError` maps, and the one both
+// helpers in this file make. `listUDID` collapsed them into a single 401 until quince#1412.
 func callerScope(d Deps, r *http.Request) (string, error) {
 	p, ok := PrincipalFrom(r.Context())
 	if !ok {
