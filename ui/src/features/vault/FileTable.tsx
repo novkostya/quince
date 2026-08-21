@@ -1,5 +1,7 @@
+import { Download } from "lucide-react";
 import type { VaultFileEntry } from "@/lib/types";
 import { formatBytes } from "@/lib/format";
+import { Badge } from "@/components/ui/badge";
 import { RelativeTime } from "@/components/RelativeTime";
 
 // FileTable renders one page-set of browse rows (contracts §2's FileEntry).
@@ -17,7 +19,7 @@ import { RelativeTime } from "@/components/RelativeTime";
 // when the reader asks for more, so what is mounted is what was requested. That stops being true if
 // a page size ever becomes large or automatic, which is the condition to watch rather than a row
 // count to fear.
-export function FileTable({ entries }: { entries: VaultFileEntry[] }) {
+export function FileTable({ entries, sessionID }: { entries: VaultFileEntry[]; sessionID: string }) {
   return (
     <ul className="flex flex-col divide-y divide-line rounded-card border border-line bg-card">
       {entries.map((e) => (
@@ -34,21 +36,58 @@ export function FileTable({ entries }: { entries: VaultFileEntry[] }) {
             <div className="truncate text-sm" title={e.relative_path || e.domain}>
               {e.relative_path || <span className="text-muted">the domain&rsquo;s own folder</span>}
             </div>
-            <div className="mt-0.5 truncate text-xs text-muted" title={e.domain}>
-              {e.domain}
+            <div className="mt-0.5 flex flex-wrap items-center gap-2">
+              <span className="truncate text-xs text-muted" title={e.domain}>
+                {e.domain}
+              </span>
+              {/* PRESENT ONLY WHEN TRUE, AND THERE IS NO OPPOSITE BADGE. Absence means "nothing to
+                  report", NEVER "checked and clean" — quince#1379's review is explicit that two
+                  different things produce an absent field, the second being that quince did not
+                  look. A green "complete" chip here would turn "we have not read this file" into a
+                  clean bill of health on every row of every backup.
+
+                  THE WORDS ARE ABOVE THE LIST, NOT IN A `title`. A tooltip is unreachable on the
+                  device this product is mostly read on, and these conditions run to tens of files
+                  per version — a sentence per row would bury the list it is explaining. */}
+              {e.incomplete ? <Badge tone="danger">incomplete</Badge> : null}
+              {e.overlong ? <Badge tone="warn">overlong</Badge> : null}
             </div>
           </div>
-          <div className="shrink-0 text-right">
-            {/* A DIRECTORY HAS NO SIZE WORTH PRINTING. The record carries one and it is not the
-                size of anything a user can act on, so the kind is shown instead — `formatBytes(0)`
-                would read as an empty file, which a directory is not. */}
-            <div className="font-mono text-xs tabular-nums text-subtle">
-              {e.kind === "file" ? formatBytes(e.size) : e.kind}
+          <div className="flex shrink-0 items-baseline gap-3 text-right">
+            <div>
+              {/* A DIRECTORY HAS NO SIZE WORTH PRINTING. The record carries one and it is not the
+                  size of anything a user can act on, so the kind is shown instead — `formatBytes(0)`
+                  would read as an empty file, which a directory is not. */}
+              <div className="font-mono text-xs tabular-nums text-subtle">
+                {e.kind === "file" ? formatBytes(e.size) : e.kind}
+              </div>
+              {/* An EMPTY mtime is ordinary rather than corrupt: LastModified is optional in the
+                  backup format (types.ts). RelativeTime already renders an em dash for "", which is
+                  why this is not guarded here — rendering 1 January 1970 is the failure to avoid. */}
+              <RelativeTime iso={e.mtime} className="text-xs text-muted" />
             </div>
-            {/* An EMPTY mtime is ordinary rather than corrupt: LastModified is optional in the
-                backup format (types.ts). RelativeTime already renders an em dash for "", which is
-                why this is not guarded here — rendering 1 January 1970 is the failure to avoid. */}
-            <RelativeTime iso={e.mtime} className="text-xs text-muted" />
+            {/* AN ORDINARY LINK, NOT A FETCH-AND-BLOB. A backup file can be gigabytes; pulling one
+                through script to build an object URL holds the whole thing in the tab's memory for
+                no gain. The browser streams it to disk, shows its own progress, and resumes nothing
+                script would have had to reimplement.
+
+                NO `download` ATTRIBUTE. The server sets `Content-Disposition: attachment` with a
+                sanitized basename and that is a SECURITY control rather than a convenience
+                (contracts §1) — a backup holds arbitrary HTML and SVG, and `inline` at quince's own
+                origin is stored XSS. Adding the attribute would make the client a second naming
+                authority beside the header, and the two could disagree.
+
+                OFFERED ON FILES ONLY. `Open` on a directory or a symlink answers `not_a_file`
+                (story 7), so a control here would be a button whose only outcome is a refusal. */}
+            {e.kind === "file" ? (
+              <a
+                href={`/api/sessions/${sessionID}/file/${e.file_id}`}
+                aria-label={`Download ${e.relative_path}`}
+                className="rounded-lg p-1 text-subtle transition-colors hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                <Download size={16} aria-hidden />
+              </a>
+            ) : null}
           </div>
         </li>
       ))}

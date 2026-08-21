@@ -679,4 +679,125 @@ describe("VaultBrowsePage", () => {
     expect(screen.queryByText(/so far/)).toBeNull();
     expect(get).toHaveBeenCalledTimes(2);
   });
+
+  // STORY 5. The link is the download: an ordinary anchor at the frozen route, so the browser
+  // streams a possibly-gigabyte file to disk instead of script holding it in the tab.
+  it("downloads a file from the session's own route, and offers nothing on a directory", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      id: "S1",
+      version_id: "V1",
+      expires_at: "2026-08-20T00:15:00Z",
+    });
+    vi.spyOn(api, "get").mockResolvedValue({
+      entries: [
+        entry(),
+        entry({ file_id: "D1", kind: "dir", relative_path: "Library/Notes", size: 0 }),
+      ],
+    });
+
+    renderPage();
+    await openAndUnlock();
+    await screen.findByText("Library/Notes/notes.sqlite");
+
+    const link = screen.getByRole("link", { name: /download library\/notes\/notes\.sqlite/i });
+    expect(link.getAttribute("href")).toBe("/api/sessions/S1/file/F1");
+    // NO `download` ATTRIBUTE. The server's `Content-Disposition` is the naming authority and is a
+    // security control besides (contracts §1); a client attribute beside it is a second authority
+    // that can disagree with the first.
+    expect(link.hasAttribute("download")).toBe(false);
+
+    // STORY 7 FROM THE OTHER SIDE. `Open` on a directory answers `not_a_file`, so the UI does not
+    // offer a control whose only outcome is a refusal.
+    expect(screen.queryByRole("link", { name: /download library\/notes$/i })).toBeNull();
+    expect(screen.getByText("dir")).toBeTruthy();
+  });
+
+  // STORY 6. `incomplete` travels as a FIELD rather than through an error code, because the read
+  // SUCCEEDS (spec D8.1) — so the surface has to be the row, and it has to say that a retry will
+  // not help. A message that only said "incomplete" would leave the reader trying again.
+  it("marks an incomplete file and says a retry cannot fix it", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      id: "S1",
+      version_id: "V1",
+      expires_at: "2026-08-20T00:15:00Z",
+    });
+    vi.spyOn(api, "get").mockResolvedValue({ entries: [entry({ incomplete: true })] });
+
+    renderPage();
+    await openAndUnlock();
+
+    // TWO SURFACES CARRY THE WORD and both are wanted: the row's badge says WHICH file, the
+    // explanation's lead says what it means. Asserting one would pass against a build that lost
+    // the other.
+    expect(await screen.findAllByText("incomplete")).toHaveLength(2);
+    expect(screen.getByText(/cannot be completed by retrying/i)).toBeTruthy();
+    expect(screen.getByText(/fresh backup of this device re-records it/i)).toBeTruthy();
+    // Still downloadable: the bytes that survived are the bytes there are, and refusing the action
+    // would decide for the user that a partial file is worth nothing.
+    expect(screen.getByRole("link", { name: /^download /i })).toBeTruthy();
+  });
+
+  it("marks an overlong file and says the download stops at the recorded length", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      id: "S1",
+      version_id: "V1",
+      expires_at: "2026-08-20T00:15:00Z",
+    });
+    vi.spyOn(api, "get").mockResolvedValue({ entries: [entry({ overlong: true })] });
+
+    renderPage();
+    await openAndUnlock();
+
+    expect(await screen.findAllByText("overlong")).toHaveLength(2);
+    expect(screen.getByText(/delivers the recorded length and stops there/i)).toBeTruthy();
+  });
+
+  // THE CONTROL FOR BOTH OF THOSE, and the one that would actually rot. quince#1379's review is
+  // explicit that an absent flag means "not known to be" rather than "checked and clean" — two
+  // different things, one of which is quince not having looked. A "complete" or "verified" chip on
+  // an unflagged row would convert the second into the first on every row of every backup.
+  it("says NOTHING about a file with no flag — no clean bill of health", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      id: "S1",
+      version_id: "V1",
+      expires_at: "2026-08-20T00:15:00Z",
+    });
+    vi.spyOn(api, "get").mockResolvedValue({ entries: [entry()] });
+
+    renderPage();
+    await openAndUnlock();
+    await screen.findByText("Library/Notes/notes.sqlite");
+
+    expect(screen.queryByText("incomplete")).toBeNull();
+    expect(screen.queryByText("overlong")).toBeNull();
+    expect(screen.queryByText(/complete|verified|intact|ok\b/i)).toBeNull();
+    // And no explanatory block either: there is nothing on screen for it to explain.
+    expect(screen.queryByText(/cannot be completed by retrying/i)).toBeNull();
+  });
+
+  // REFRESH IS WHAT MAKES THE FLAGS REACHABLE. They live in the session's memory of what it has
+  // READ, and these pages are held with `staleTime: Infinity` because a refetch is a decrypt — so
+  // a file first discovered short during the reader's own download is flagged on the next browse
+  // and on no other occasion.
+  it("re-reads the loaded pages on request, which is how a flag appears after a download", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      id: "S1",
+      version_id: "V1",
+      expires_at: "2026-08-20T00:15:00Z",
+    });
+    const get = vi
+      .spyOn(api, "get")
+      .mockResolvedValueOnce({ entries: [entry()] })
+      .mockResolvedValue({ entries: [entry({ incomplete: true })] });
+
+    renderPage();
+    await openAndUnlock();
+    await screen.findByText("Library/Notes/notes.sqlite");
+    expect(screen.queryByText("incomplete")).toBeNull();
+
+    // AWAITED, per quince#1421: Refresh is chrome, and a row landing does not prove it rendered.
+    fireEvent.click(await screen.findByRole("button", { name: /^refresh$/i }));
+    expect((await screen.findAllByText("incomplete")).length).toBeGreaterThan(0);
+    expect(get).toHaveBeenLastCalledWith("/api/sessions/S1/browse");
+  });
 });
