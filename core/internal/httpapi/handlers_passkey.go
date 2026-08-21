@@ -221,6 +221,12 @@ func passkeyToWire(p store.Passkey) wire.Passkey {
 		s := p.LastUsedAt.UTC().Format(time.RFC3339)
 		out.LastUsedAt = &s
 	}
+	// NIL STAYS NIL, WHICH IS ADMIN (qn.13 D9). Copied through a fresh value rather than aliasing
+	// the store's pointer: two rows holding one pointer is a shape where changing a scope through
+	// one of them changes the other, and nothing in the type stops a future caller trying.
+	if p.ScopeUDID != nil {
+		out.Scope = &wire.PasskeyScope{UDID: *p.ScopeUDID}
+	}
 	return out
 }
 

@@ -733,6 +733,40 @@ type Passkey struct {
 	// LastUsedAt is null until the first successful assertion — "never used" rather than a zero
 	// timestamp, because a credential nobody has signed in with is exactly the one worth removing.
 	LastUsedAt *string `json:"last_used_at"`
+
+	// Scope is null for an ADMIN credential and names the device for a scoped one (qn.13 D9).
+	//
+	// WITHOUT THIS THE ADMIN CANNOT ANSWER *WHAT HAVE I ISSUED*, which is D9's requirement in as
+	// many words, and `enrolment_ceremony.go` already records what its absence cost: the stored
+	// label had to be derived from the scope precisely because "`wire.Passkey` carries no scope, so
+	// two enrolled devices produced two rows the admin could tell apart only by guessing." The
+	// label made the rows distinguishable; it did not make them CLASSIFIED, because an admin
+	// credential may be called anything, including a device's name.
+	//
+	// NULL MEANS ADMIN, mirroring `store.Passkey.ScopeUDID` rather than inventing a second
+	// spelling — and for the same reason it gives there: letting a zero value stand for admin is
+	// how a forgotten field becomes a privilege. A client that does not know this field reads the
+	// payload it always read and treats every row as admin, which is the safe direction to be
+	// wrong at a surface only the admin can reach.
+	//
+	// IT IS NOT AN AUTHORIZATION SURFACE. `GET /api/auth/passkeys` is admin-only, so this discloses
+	// the shape of the household to the one principal already entitled to change it. Nothing here
+	// decides anything: revocation is `DELETE`, and the server checks the caller either way.
+	Scope *PasskeyScope `json:"scope"`
+}
+
+// PasskeyScope names the device a credential is confined to (qn.13 D2, D9).
+//
+// AN OBJECT RATHER THAN A BARE `scope_udid` STRING, so the field can gain what a scope turns out to
+// need without a second nullable column beside it — and so `scope: null` reads as *no scope* rather
+// than as an empty device id, which is the distinction `store.Scope` exists to protect.
+//
+// THE UDID AND NOT A NAME. The row's `name` already carries the device's name, derived at enrolment
+// — but that is a SNAPSHOT: renaming the device does not rewrite issued credentials, so the label
+// can go stale while the udid cannot. The udid is what links the row to the device page, and it is
+// the only value here that stays correct.
+type PasskeyScope struct {
+	UDID string `json:"udid"`
 }
 
 // PasskeyList is GET /api/auth/passkeys' response (qn.6k).

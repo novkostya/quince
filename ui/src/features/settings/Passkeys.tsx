@@ -1,5 +1,6 @@
 import { SectionHeading } from "@/components/ui/section-heading";
 import * as React from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import { AddPasskeyRow } from "./AddPasskeyRow";
 import { forgetPasskey, passkeyHintCredentialID } from "@/lib/passkeyHint";
 import { webauthnAvailable } from "@/lib/webauthn";
 import { RelativeTime } from "@/components/RelativeTime";
+import { Badge } from "@/components/ui/badge";
 
 // The passkey management surface — qn.6k slice 5b, stories 2, 3, 4 and 8.
 //
@@ -26,7 +28,34 @@ type Passkey = {
   rp_id: string;
   created_at: string;
   last_used_at: string | null;
+  // NULL MEANS ADMIN (qn.13 D9), mirroring the server's own spelling rather than inventing a second
+  // one. `?` as well as `| null` because an older payload simply omits the key, and both readings
+  // have to land on "admin" — which is the safe direction to be wrong on a screen only the admin
+  // can reach.
+  scope?: { udid: string } | null;
 };
+
+/**
+ * scopedTo returns the device a credential is confined to, or "" for an admin credential.
+ *
+ * ONE READING OF THE FIELD, SHARED. Three surfaces on this page ask *is this row scoped* — the
+ * badge, the removal copy and the ordering — and `worksHere` above is this file's own record of what
+ * happens when one question gets three implementations: two of them disagreed and it was a blocking
+ * review finding. This is that lesson applied before it costs anything.
+ *
+ * A MISSING `udid` IS NOT A SCOPE. A `scope` object with an empty udid names no device, so it cannot
+ * be rendered as *this device only* and cannot be linked anywhere; treating it as admin would be
+ * worse, so it is treated as unclassifiable and reported as such by the caller rather than guessed
+ * at here.
+ */
+export function scopedTo(p: { scope?: { udid: string } | null }): string {
+  return typeof p.scope?.udid === "string" ? p.scope.udid : "";
+}
+
+/** isScoped reports whether a credential is confined to a device rather than administering quince. */
+export function isScoped(p: { scope?: { udid: string } | null }): boolean {
+  return p.scope !== null && p.scope !== undefined;
+}
 
 export type PasskeyList = {
   passkeys: Passkey[];
@@ -287,7 +316,24 @@ export function Passkeys() {
               className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-line bg-bg px-3 py-2"
             >
               <div className="min-w-0">
-                <div className="truncate text-sm font-medium">{p.name}</div>
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <div className="truncate text-sm font-medium">{p.name}</div>
+                  {/* MARKED, NOT INFERRED — D9. The admin has to be able to answer *what have I
+                      issued*, and the row's NAME cannot answer it: a scoped credential's label is
+                      derived from its device, but an admin credential may be called anything,
+                      including a device's name. Two rows reading `Kitchen iPad` are an admin
+                      passkey and a household member's until something says which.
+
+                      BOTH SIDES ARE MARKED, rather than badging only the scoped ones. An unmarked
+                      row would mean *admin* by absence, which is the same reasoning `store.Scope`
+                      rejects for the column itself: a state you infer from a missing thing is
+                      indistinguishable from a state nobody set. */}
+                  {isScoped(p) ? (
+                    <Badge tone="accent">one device only</Badge>
+                  ) : (
+                    <Badge tone="neutral">administers quince</Badge>
+                  )}
+                </div>
                 <div className="text-xs text-muted">
                   added <RelativeTime iso={p.created_at} />
                   {p.last_used_at ? (
@@ -309,6 +355,30 @@ export function Passkeys() {
                   <div className="text-xs text-warn">
                     set up for <span className="font-mono">{p.rp_id}</span> — will not work at{" "}
                     <span className="font-mono">{rpID}</span>
+                  </div>
+                ) : null}
+
+                {/* WHICH DEVICE, AS A PLACE TO GO RATHER THAN A STRING TO READ — D9's *and for a
+                    scoped one, which device*.
+
+                    THE LINK IS THE ANSWER AND THE NAME IS NOT. The row's title is the label derived
+                    at enrolment, which is a SNAPSHOT: renaming the device afterwards does not
+                    rewrite issued credentials, so the label can go stale while the udid cannot.
+                    Following the link always lands on the right device.
+
+                    A SCOPE WITH NO UDID NAMES NOTHING, so it gets the badge and no link rather than
+                    a link to `/devices/`, which would be a page about no device. It should be
+                    unreachable — the column is written from `store.DeviceScope`, which is only
+                    constructed with a udid — and rendering it as unlinkable is what keeps a
+                    surprise from becoming a broken route. */}
+                {isScoped(p) && scopedTo(p) ? (
+                  <div className="text-xs text-muted">
+                    <Link
+                      to={`/devices/${encodeURIComponent(scopedTo(p))}`}
+                      className="underline underline-offset-2"
+                    >
+                      open the device it was issued for
+                    </Link>
                   </div>
                 ) : null}
               </div>

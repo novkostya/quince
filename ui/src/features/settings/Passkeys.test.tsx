@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
 
 import { Passkeys } from "./Passkeys";
 import { api, APIError, UnauthorizedError } from "@/lib/api";
@@ -12,12 +13,18 @@ import { withoutWebAuthn } from "@/test/webauthn";
 const HERE = "quince.example.com";
 const ELSEWHERE = "quince.example.net";
 
+// A ROUTER, BECAUSE A SCOPED ROW NOW LINKS TO ITS DEVICE (qn.13 slice 11, D9). `Link` throws outside
+// a router context, so this wraps every case rather than only the scoped ones — the app has always
+// mounted this card inside a router, and a harness that omits one exercises a configuration that
+// does not ship.
 function renderCard() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <QueryClientProvider client={qc}>
-      <Passkeys />
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={qc}>
+        <Passkeys />
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -493,5 +500,130 @@ describe("a domain reached over plain http", () => {
       expect(await screen.findByText(/Passkeys need a domain name over https/)).toBeInTheDocument();
       expect(screen.queryByText(/Passkeys need an https connection/)).not.toBeInTheDocument();
     });
+  });
+});
+
+// qn.13 slice 11 / D9 — THE ADMIN MUST BE ABLE TO ANSWER *WHAT HAVE I ISSUED*.
+//
+// The row's NAME cannot answer it. A scoped credential's label is derived from its device, but an
+// admin credential may be called anything — including a device's name — so two rows reading
+// `hallway tablet` are an admin passkey and a household member's until something marks which.
+//
+// SYNTHETIC UDIDS. A real one is Operator-private and never enters a fixture.
+describe("marked rows", () => {
+  const UDID = "udid-fixture-0001";
+
+  function listWith(passkeys: unknown[]) {
+    vi.spyOn(api, "get").mockResolvedValue({ rp_id: HERE, supported: true, passkeys });
+  }
+
+  it("marks a device-scoped credential as confined", async () => {
+    listWith([
+      {
+        id: "s",
+        name: "hallway tablet",
+        rp_id: HERE,
+        created_at: "2026-08-01T00:00:00Z",
+        last_used_at: null,
+        scope: { udid: UDID },
+      },
+    ]);
+
+    renderCard();
+
+    await screen.findByText("hallway tablet");
+    expect(await screen.findByText(/one device only/i)).toBeInTheDocument();
+    expect(screen.queryByText(/administers quince/i)).not.toBeInTheDocument();
+  });
+
+  it("marks an admin credential as administering, rather than leaving it unmarked", async () => {
+    // BOTH SIDES ARE MARKED. An unmarked row would mean *admin* by absence, which is
+    // indistinguishable from a row nobody classified.
+    listWith([
+      {
+        id: "a",
+        name: "hallway tablet",
+        rp_id: HERE,
+        created_at: "2026-08-01T00:00:00Z",
+        last_used_at: null,
+        scope: null,
+      },
+    ]);
+
+    renderCard();
+
+    expect(await screen.findByText(/administers quince/i)).toBeInTheDocument();
+    expect(screen.queryByText(/one device only/i)).not.toBeInTheDocument();
+  });
+
+  it("reads a payload with NO scope key as admin", async () => {
+    // THE UPGRADE DIRECTION. A server that has not shipped this field omits the key, and the safe
+    // way to be wrong on a screen only the admin can reach is to show them as the admin.
+    listWith([
+      { id: "a", name: "laptop", rp_id: HERE, created_at: "2026-08-01T00:00:00Z", last_used_at: null },
+    ]);
+
+    renderCard();
+
+    expect(await screen.findByText(/administers quince/i)).toBeInTheDocument();
+  });
+
+  it("links a scoped row to the device it was issued for", async () => {
+    // THE LINK IS THE ANSWER TO *WHICH DEVICE*, and the name is not: the label is a snapshot taken
+    // at enrolment and a rename does not rewrite it, so the udid is the only value that stays right.
+    listWith([
+      {
+        id: "s",
+        name: "hallway tablet",
+        rp_id: HERE,
+        created_at: "2026-08-01T00:00:00Z",
+        last_used_at: null,
+        scope: { udid: UDID },
+      },
+    ]);
+
+    renderCard();
+
+    const link = await screen.findByRole("link", { name: /open the device it was issued for/i });
+    expect(link).toHaveAttribute("href", `/devices/${UDID}`);
+  });
+
+  it("gives an admin row no device link, because there is no device", async () => {
+    listWith([
+      {
+        id: "a",
+        name: "laptop",
+        rp_id: HERE,
+        created_at: "2026-08-01T00:00:00Z",
+        last_used_at: null,
+        scope: null,
+      },
+    ]);
+
+    renderCard();
+
+    await screen.findByText("laptop");
+    expect(screen.queryByRole("link", { name: /open the device/i })).not.toBeInTheDocument();
+  });
+
+  it("marks a scope with no udid, but does not link it anywhere", async () => {
+    // SHOULD BE UNREACHABLE — `store.DeviceScope` is only constructed with a udid. Rendering it as
+    // badged-but-unlinkable is what stops a surprise becoming a route to `/devices/`, which is a
+    // page about no device.
+    listWith([
+      {
+        id: "s",
+        name: "mystery",
+        rp_id: HERE,
+        created_at: "2026-08-01T00:00:00Z",
+        last_used_at: null,
+        scope: { udid: "" },
+      },
+    ]);
+
+    renderCard();
+
+    expect(await screen.findByText(/one device only/i)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /open the device/i })).not.toBeInTheDocument();
   });
 });
