@@ -374,6 +374,8 @@ POST /api/enrol/passkey/finish?secret=<secret>&ceremony=<key>&name=<label>
      // SPENT ONLY AFTER THE CREDENTIAL IS STORED, so a failed registration does not burn
      // the QR. Two ceremonies from one QR can therefore both finish; both are removable
      // from the admin's list, and neither can be an admin credential.
+     // 429 rate_limited — THIS DOOR IS METERED TOO (qn.13 slice 9b-2). Both halves take the
+     // secret, so a limiter on begin alone would bound nothing; an attacker uses the other one.
      // 400 no_ceremony · 400 passkey_rejected · 422 name_required · 409 passkey_rp_mismatch
 ```
 
