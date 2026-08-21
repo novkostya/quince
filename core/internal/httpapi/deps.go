@@ -108,6 +108,15 @@ type Deps struct {
 	// same reason rather than a second thing to remember.
 	Reauth *auth.ReauthCeremonies
 	Proofs *auth.Proofs
+	// Enrolments holds outstanding enrolment secrets — qn.13 slice 9a, in memory, minutes-long,
+	// single use. Nil in the same places and under the same condition as Passkeys, so a nil here
+	// is unreachable for the same reason.
+	//
+	// SEPARATE FROM Passkeys RATHER THAN FOLDED INTO IT, because the two answer different
+	// questions and have different lifetimes: a ceremony is one browser round trip, a secret is a
+	// QR somebody carries across a room. Sharing a store would tie the QR's minutes to the
+	// challenge's two.
+	Enrolments *auth.Enrolments
 	// PasswordAdmin backs PUT/DELETE /api/auth/password (qn.6m). NIL IN --demo, ON PURPOSE — and
 	// unlike Passkeys above, the routes ARE still registered when it is nil, because NewRouter
 	// installs UnavailablePasswordAdmin and the surface must refuse with a stated reason rather

@@ -125,6 +125,15 @@ func authExempt(r *http.Request) bool {
 		// (qn.6m D5): first run has no session, and creating one is what it does. One-shot — 409 once
 		// `Configured()` is true — so it closes the instant the install is claimed.
 		"POST /api/auth/setup/passkey/begin", "POST /api/auth/setup/passkey/finish",
+		// ENROLMENT IS PRE-AUTH BY DEFINITION — the QR is scanned by somebody who has no session
+		// and is obtaining a credential, which is the same argument the login pair and the
+		// first-run pair each make (qn.13 D4).
+		//
+		// ITS BOUND IS THE ENROLMENT SECRET, IN THE HANDLER, NOT IN THIS LIST — single-use,
+		// minutes-long, revocable, and carrying its own scope. Being exempt is what makes it
+		// reachable; the secret is what makes it safe, and an exemption here is only ever half
+		// of a decision.
+		"POST /api/enrol/passkey/begin", "POST /api/enrol/passkey/finish",
 		// THE FIRST PRE-AUTH MUTATION IN THIS LIST THAT IS NOT ABOUT OBTAINING A CREDENTIAL
 		// (Operator ruling 2026-08-14, quince#908 slice 6). It writes
 		// `sessions.allow_insecure_transport` and nothing else, so a first-run user stranded on
@@ -226,6 +235,16 @@ func csrfExempt(r *http.Request) bool {
 		"/api/auth/passkeys/login/begin", "/api/auth/passkeys/login/finish",
 		// First-run passkey registration (qn.6m D5): no CSRF cookie exists before a session does.
 		"/api/auth/setup/passkey/begin", "/api/auth/setup/passkey/finish",
+		// THE ENROLMENT PAIR (qn.13 slice 9b-3). No CSRF cookie exists before a session does, and
+		// this pair is how a household member gets one — the same argument the first-run pair
+		// above makes, and the same one the login pair makes.
+		//
+		// WHAT PROTECTS IT INSTEAD IS THE SECRET, not SameSite and not a limiter alone. A
+		// cross-site forgery against this route achieves nothing without the enrolment secret,
+		// which is single-use, minutes-long, and not something an attacking page has — it is in
+		// a QR the admin generated and handed to somebody. The bound named for the two entries
+		// above is `Configured()`; here it is a value quince minted and can revoke.
+		"/api/enrol/passkey/begin", "/api/enrol/passkey/finish",
 		// The pre-auth transport opt-in, for the same reason as everything else here: it is
 		// reachable before a session exists, so there is no CSRF cookie to double-submit.
 		//
