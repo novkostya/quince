@@ -1,7 +1,7 @@
 import * as React from "react";
 import { ArrowLeft } from "lucide-react";
 import { useParams } from "react-router-dom";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BackLink } from "@/components/BackLink";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -52,6 +52,21 @@ export function VaultBrowsePage() {
   // against the same source DeviceDetailsPage resolves `device.name` from.
   const deviceName = useDevicesStore((s) => (version ? s.byUdid[version.udid]?.name : undefined));
 
+  // THE CACHE MUST NOT OUTLIVE THE SESSION, and `staleTime: Infinity` alone does not achieve that.
+  // On a lock the query merely goes INACTIVE, and react-query holds its data for the default
+  // `gcTime` — about five minutes — so a page of decrypted paths and filenames would sit in memory
+  // after the user asked for it to be gone. Nothing wrong is ever displayed, because the key
+  // carries the session id; what was wrong was the claim beside the query that nothing is held.
+  //
+  // BOTH ROUTES OUT OF A SESSION, not just the polite one: an explicit lock, and the 409 that says
+  // the session ended without one. Found in review on quince#1410.
+  const queryClient = useQueryClient();
+  const dropBrowseCache = React.useCallback(
+    (id: string) => {
+      if (id !== "") queryClient.removeQueries({ queryKey: ["vault-browse", id] });
+    },
+    [queryClient],
+  );
   const [session, setSession] = React.useState<Session | null>(null);
   const [lockError, setLockError] = React.useState<string | null>(null);
   const [locking, setLocking] = React.useState(false);
@@ -89,12 +104,21 @@ export function VaultBrowsePage() {
   // cannot check it.
   const expired = browse.error instanceof APIError && browse.error.code === "locked";
 
+  // THE OTHER ROUTE OUT. A `locked` 409 means the session ended without anybody locking it, and the
+  // pages it produced are just as dead — so they go the same way as an explicit lock's. In an
+  // effect rather than in render because dropping a query is a side effect, and doing it while
+  // rendering would fight the very query that reported the error.
+  React.useEffect(() => {
+    if (expired) dropBrowseCache(sessionID);
+  }, [expired, sessionID, dropBrowseCache]);
+
   async function lock() {
     setLocking(true);
     setLockError(null);
     try {
       await api.post(`/api/sessions/${sessionID}/lock`, {});
       setSession(null);
+      dropBrowseCache(sessionID);
     } catch (err) {
       // The session may well be gone already — `lock` is idempotent and an unknown id answers 204
       // (contracts §1) — so anything that reaches here is a real refusal and keeps the session on
@@ -113,8 +137,25 @@ export function VaultBrowsePage() {
         <BackLink to="/" className="inline-flex items-center gap-1 text-sm text-muted hover:text-fg">
           <ArrowLeft size={14} /> Home
         </BackLink>
+        {/* THREE STATES, NOT TWO, AND THE THIRD IS THE ONE THAT LIED. A failed fetch is neither
+            "loading" nor "not in the list": quince did not check the version list, it failed to
+            read it, and the id in the address bar may be perfectly good. Rendering the absent case
+            for it sends the reader looking for a typo they did not make — two distinguishable
+            causes with different remedies collapsed into the wrong one (quince#940).
+
+            The server's own sentence is what says which, so it is shown rather than replaced —
+            "the storage subsystem is not answering" is knowledge this client cannot reconstruct.
+            Found in review on quince#1410. */}
         <div className="mt-4 text-sm text-muted">
-          {all.isPending ? "Loading…" : "That backup is not in this quince's version list."}
+          {all.isPending ? (
+            "Loading…"
+          ) : all.error ? (
+            <span role="alert" className="text-danger">
+              {messageFor(all.error, "Could not read this quince's version list.")}
+            </span>
+          ) : (
+            "That backup is not in this quince's version list."
+          )}
         </div>
       </section>
     );
@@ -196,7 +237,11 @@ export function VaultBrowsePage() {
                     quantity rather than a promise. */}
                 <div className="mt-3 flex items-center justify-between gap-2">
                   <span className="font-mono text-xs tabular-nums text-subtle">
+                    {/* "so far" WHEN THERE IS MORE. The header goes to real trouble not to invent a
+                        total (quince#1408), and a bare count beside a button whose whole meaning is
+                        "there is more" reads as one. Review finding, quince#1410. */}
                     {entries.length} file{entries.length === 1 ? "" : "s"}
+                    {browse.hasNextPage ? " so far" : ""}
                   </span>
                   {browse.hasNextPage ? (
                     <Button

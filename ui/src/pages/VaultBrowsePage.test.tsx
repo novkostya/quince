@@ -56,7 +56,9 @@ function entry(over: Record<string, unknown> = {}) {
 function renderPage(v: Version | null = ver()) {
   if (v) useVersionsStore.getState().replaceAll([v]);
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  // The client is RETURNED so a test can look at what is HELD rather than only at what is shown:
+  // dropping a decrypted page from the cache leaves nothing on screen to assert.
+  const r = render(
     <QueryClientProvider client={qc}>
       {/* Rendered THROUGH THE ROUTE rather than with a mocked `useParams`, so the path shape in
           `router.tsx` and the one this page reads cannot drift apart silently. */}
@@ -67,6 +69,7 @@ function renderPage(v: Version | null = ver()) {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return { ...r, qc };
 }
 
 beforeEach(() => {
@@ -274,5 +277,102 @@ describe("VaultBrowsePage", () => {
     // An absent mtime is ordinary in this format and must not render as 1 January 1970.
     expect(screen.queryByText(/1970/)).toBeNull();
     expect(screen.getByText("dir")).toBeTruthy();
+  });
+
+  // REVIEW FINDING, quince#1410. A FAILED fetch is neither "loading" nor "absent": quince did not
+  // check the version list, it failed to read it, and the id may be perfectly good. The old copy
+  // sent the reader looking for a typo they had not made — and the server's own sentence, which
+  // says which, was sitting unread in `all.error`.
+  it("says the version list could not be READ, rather than that the backup is not in it", async () => {
+    vi.spyOn(api, "get").mockRejectedValue(
+      new APIError(503, "unavailable", "the storage subsystem is not answering"),
+    );
+    renderPage(null);
+
+    expect(await screen.findByText(/storage subsystem is not answering/i)).toBeTruthy();
+    expect(screen.queryByText(/not in this quince's version list/i)).toBeNull();
+  });
+
+  // THE CONTROL for the case above, and it is the one that used to be the only case. A successful
+  // fetch that genuinely does not hold the id still says so.
+  it("still names a version this quince really does not have", async () => {
+    vi.spyOn(api, "get").mockResolvedValue({ versions: [] });
+    renderPage(null);
+    expect(await screen.findByText(/not in this quince's version list/i)).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  // REVIEW FINDING, quince#1410. `staleTime: Infinity` keeps a page fresh; it does not keep it out
+  // of memory. On a lock the query goes INACTIVE and react-query holds its data for `gcTime` — so
+  // a page of decrypted paths would outlive the lock that was meant to end it. Nothing wrong is
+  // displayed either way, which is exactly why this has to be asserted against the CACHE.
+  it("drops the decrypted page from the cache when the session is locked", async () => {
+    const post = vi.spyOn(api, "post").mockResolvedValue({
+      id: "S1",
+      version_id: "V1",
+      expires_at: "2026-08-20T00:15:00Z",
+    });
+    vi.spyOn(api, "get").mockResolvedValue({ entries: [entry()] });
+
+    const { qc } = renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
+    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await screen.findByText("Library/Notes/notes.sqlite");
+    // The control: it really is held before the lock, so the assertion after it can fail.
+    expect(qc.getQueryData(["vault-browse", "S1"])).toBeDefined();
+
+    post.mockResolvedValueOnce(undefined as never);
+    fireEvent.click(screen.getByRole("button", { name: /^lock$/i }));
+    await screen.findByText(/this backup is locked/i);
+    expect(qc.getQueryData(["vault-browse", "S1"])).toBeUndefined();
+  });
+
+  // A session that ended WITHOUT a lock leaves pages just as dead, and the polite route is not the
+  // one users take (nobody clicks Lock). Same assertion, other door — reached here by asking for
+  // the next page, which is what a reader does while a session quietly runs out under them.
+  it("drops it on a session that ended by itself, not only on an explicit lock", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      id: "S1",
+      version_id: "V1",
+      expires_at: "2026-08-20T00:15:00Z",
+    });
+    const get = vi.spyOn(api, "get").mockResolvedValueOnce({ entries: [entry()], next_cursor: "CUR-1" });
+
+    const { qc } = renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
+    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await screen.findByText("Library/Notes/notes.sqlite");
+    expect(qc.getQueryData(["vault-browse", "S1"])).toBeDefined();
+
+    get.mockRejectedValue(new APIError(409, "locked", "vault: no such session"));
+    fireEvent.click(screen.getByRole("button", { name: /show more/i }));
+    await screen.findByText(/no longer open/i);
+    expect(qc.getQueryData(["vault-browse", "S1"])).toBeUndefined();
+  });
+
+  // REVIEW FINDING, quince#1410. The header refuses to invent a total (quince#1408) and the footer
+  // then printed a bare count beside a button whose whole meaning is "there is more", which reads
+  // as one. BOTH directions, because the qualifier must go away on the last page or it becomes the
+  // same defect pointing the other way.
+  it("qualifies the count while more pages exist, and drops the qualifier at the end", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      id: "S1",
+      version_id: "V1",
+      expires_at: "2026-08-20T00:15:00Z",
+    });
+    const get = vi
+      .spyOn(api, "get")
+      .mockResolvedValueOnce({ entries: [entry()], next_cursor: "CUR-1" })
+      .mockResolvedValueOnce({ entries: [entry({ file_id: "F2", relative_path: "Media/a.jpg" })] });
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
+    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+
+    expect(await screen.findByText(/^1 file so far$/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /show more/i }));
+    expect(await screen.findByText(/^2 files$/)).toBeTruthy();
+    expect(screen.queryByText(/so far/)).toBeNull();
+    expect(get).toHaveBeenCalledTimes(2);
   });
 });
