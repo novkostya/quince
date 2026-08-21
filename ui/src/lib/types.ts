@@ -807,6 +807,20 @@ export interface VaultFileEntry {
   // change it. Absent means "not known to be incomplete", which is not the same as complete
   // (contracts §2). It is a FIELD rather than an error code because the read SUCCEEDS.
   incomplete?: boolean;
+
+  // PRESENT ONLY WHEN TRUE, and its meaning is the mirror of `incomplete`: the backup holds
+  // MORE bytes for this file than its own index records, so the download carries the RECORDED
+  // length and stops there (quince#1379).
+  //
+  // ABSENT DOES NOT MEAN THE FILE IS FINE, AND A UI MUST NOT RENDER IT AS ONE. Two different
+  // things produce an absent field:
+  //   - the file is fine;
+  //   - quince did not look. It is only known after a READ, and it is detected on the
+  //     UNENCRYPTED backend only — on an encrypted version the condition shows up as a torn
+  //     transfer instead, so `overlong` is never set there at all. That is the backend most
+  //     users run, for a condition measured at ~34–38 files per version.
+  // So "no badge" means "nothing to report", never "checked and clean" (quince#1379 review).
+  overlong?: boolean;
 }
 
 export interface BrowsePage {
