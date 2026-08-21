@@ -110,3 +110,24 @@ it("surfaces a failure to create", async () => {
   fireEvent.click(await screen.findByRole("button", { name: /create a code/i }));
   expect(await screen.findByRole("alert")).toBeTruthy();
 });
+
+// THE EXPIRY IS SERVER-CORRECTED, NOT A RAW BROWSER CLOCK (quince#1437 review).
+//
+// This screen is the sharpest case in the product for that rule: the window is minutes, the value
+// is a credential, and the decision it drives is whether to hand a device over now. A skewed clock
+// does not make a stale number here — it makes the admin wrong about whether a live credential is
+// still live, in both directions.
+//
+// ASSERTED THROUGH THE RENDERED ELEMENT rather than by reading the source: `RelativeTime` emits a
+// <time> with the ISO in `dateTime`, which `toLocaleTimeString` cannot produce.
+it("renders the expiry through the server-corrected clock", async () => {
+  stageList([
+    { id: "01A", udid: "DEVICE-A", created_at: "2026-08-21T12:00:00Z", expires_at: "2026-08-21T12:10:00Z" },
+  ]);
+  renderSection();
+
+  await screen.findByText(/waiting to be used/i);
+  const time = document.querySelector("time");
+  expect(time).toBeTruthy();
+  expect(time?.getAttribute("dateTime")).toBe("2026-08-21T12:10:00Z");
+});

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { RelativeTime } from "@/components/RelativeTime";
 import { api, messageFor } from "@/lib/api";
 import type { Device } from "@/lib/types";
 
@@ -41,8 +42,20 @@ export function DeviceEnrolment({ device }: { device: Device }) {
   const list = useQuery({
     queryKey: key,
     queryFn: () => api.get<{ enrolments: Enrolment[] }>(`/api/devices/${device.udid}/enrolments`),
+    // IT REFETCHES, AND THE REASON IS THE HEADING RATHER THAN THE ROWS (quince#1437 review).
+    //
+    // The server's list is LIVE-ONLY by design, so a code that expires while this page is open
+    // stops being returned — but nothing would make the page ask again, and the row would sit under
+    // "Waiting to be used" saying something false. A stale ROW is untidy; a stale CLAIM about
+    // outstanding authority is the thing this section exists to be right about.
+    //
+    // THIRTY SECONDS AGAINST A TTL OF MINUTES. Bounded by the window rather than chosen for
+    // smoothness: it has to be short enough that the heading is not wrong for long, and long enough
+    // that a page left open is not polling a device page for its own sake. The rows also carry
+    // RelativeTime, which advances on its own between fetches, so the countdown stays honest even
+    // inside an interval.
+    refetchInterval: 30_000,
   });
-
   const create = useMutation({
     mutationFn: () => api.post<Issued>(`/api/devices/${device.udid}/enrolments`, {}),
     onSuccess: (e) => {
@@ -125,8 +138,20 @@ export function DeviceEnrolment({ device }: { device: Device }) {
             {outstanding.map((e) => (
               <li key={e.id} className="flex items-center justify-between gap-3 text-sm">
                 <span className="text-muted">
-                  Created {new Date(e.created_at).toLocaleTimeString()}, expires{" "}
-                  {new Date(e.expires_at).toLocaleTimeString()}
+                  {/* RelativeTime, NOT toLocaleTimeString — and this screen is the sharpest case in
+                      the product for the rule that component exists for (quince#1437 review).
+
+                      RelativeTime corrects for the server offset; a raw browser clock does not.
+                      Here the window is MINUTES, the value is a CREDENTIAL, and the decision it
+                      drives is "do I hand this device over now or issue a fresh code". A skewed
+                      clock does not make a stale number, it makes the admin wrong about whether a
+                      live credential is still live — in both directions. Measured drift on a real
+                      phone was 26s with "Set Automatically" off, which is a tenth of this TTL.
+
+                      It also fixes a wrap: `toLocaleTimeString()` carries no date, so a code made
+                      at 23:58 and expiring at 00:08 read as "expires 12:08 AM" — the previous
+                      morning. */}
+                  Expires <RelativeTime iso={e.expires_at} />
                 </span>
                 <Button
                   variant="ghost"
