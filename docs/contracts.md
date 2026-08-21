@@ -2154,7 +2154,7 @@ vocabulary as one list and a test asserts the mapper covers it. Three of these c
 | `not_found`, `not_a_file` | 404 | the status cannot distinguish them, so **the body must** — see §4 |
 | `corrupt_manifest`, `unsupported_ios` | 422 | the request is well-formed and the artifact is not |
 | `busy` | **409**, not 500 | the session is real and a file stream is open against it; the registry holds it until the reader closes. The caller retries when the download finishes — a remedy a 500 would deny them |
-| `unsupported_version` | 422 | the version is a class this build cannot open, answered before any password is checked |
+| `unsupported_version` | 422 | the version is a class this build cannot open, answered before any password is checked. **No producer since qn.8 slice 4** — see §4 |
 | `unavailable` | 503 | no vault is wired (`--demo`, or no storage subsystem) |
 | `io` | 500 | something below failed and quince will not guess what |
 
@@ -3043,7 +3043,12 @@ conditions the vault itself cannot name, and all three reach a client:
   backup. Distinct from `locked` in the remedy, which is what makes it its own code: `busy` means
   wait, `locked` means unlock again.
 - **`unsupported_version`** — the version is a class this build cannot open, answered before any
-  password is checked so it is not a credential failure.
+  password is checked so it is not a credential failure. **IT HAS NO PRODUCER TODAY**, and that is
+  worth stating rather than leaving a reader to grep: its one emitter was the refusal of unencrypted
+  versions, and qn.8 slice 4 made that class servable. Kept for the same reason `unsupported_ios` is
+  kept — the status table is asserted total over the vocabulary, so a code removed and later
+  reintroduced comes back through a failing test rather than through a 500 — and because a class this
+  build cannot open is a plausible future rather than a hypothetical one.
 - **`unavailable`** — no vault subsystem is wired at all (`--demo`, or no storage). **A vault process
   can never answer this**, because it is the answer given when there is no vault process: it is a
   property of the deployment rather than of the version asked for.

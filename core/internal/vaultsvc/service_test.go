@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/novkostya/ios-backup-crypt/fixture"
 	"github.com/novkostya/quince/core/internal/vault"
 	"github.com/novkostya/quince/core/internal/wire"
 )
@@ -100,22 +101,54 @@ func TestUnlockAndBrowse(t *testing.T) {
 	}
 }
 
-// D7's refusal, until slice 4: an unencrypted version is refused WITH THE REASON AND THE
-// REMEDY, not with "unsupported". The troubleshooting rule is what this asserts.
-func TestUnencryptedVersionIsRefusedWithAReason(t *testing.T) {
-	v := encrypted()
-	v.Encrypted = false
+// D7, BUILT: an unencrypted version is BROWSABLE, and the selection is what picks the
+// passwordless implementation for it.
+//
+// THIS ASSERTS THE REAL SELECTION AGAINST A REAL BACKUP, not a fake. `s.open = openFor` is
+// the thing under test, so a fake vault would prove only that the test's own stub returns
+// what it was told to. The backup is a synthetic unencrypted one from the library's fixture
+// generator — the same generator the conformance suite uses, so the two cannot disagree
+// about what an unencrypted backup looks like.
+//
+// It replaces a test asserting the OPPOSITE. Until slice 4 this path refused with a reason
+// and the remedy, and that refusal was correct while `Size` and `MTime` had no public
+// decoder. Both are gone: the decoder is exported and the implementation is gated by the
+// same conformance suite as the encrypted one.
+func TestUnencryptedVersionIsBrowsableWithoutAPassword(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := fixture.Build(dir, fixture.Spec{
+		Unencrypted:    true,
+		DeviceName:     "plain-device",
+		ProductVersion: "26.0",
+		Files: []fixture.File{
+			{Domain: "HomeDomain", RelativePath: "Library/Preferences/a.plist", Flags: 1,
+				Data: []byte("alpha")},
+		},
+	}); err != nil {
+		t.Fatalf("building the unencrypted fixture: %v", err)
+	}
+
+	v := wire.Version{ID: "01V", Encrypted: false, BrowseRoot: dir}
 	s := newService(t, v, true, &fakeVault{})
 	s.open = openFor // the real selection, which is what is under test
 
-	_, code, msg := s.Unlock("01V", "")
-	if code != "unsupported_version" {
-		t.Fatalf("code = %q, want unsupported_version", code)
+	// THE PASSWORD IS EMPTY, and that is the claim rather than an incidental argument: an
+	// unencrypted version needs none, and the UI is what declines to offer a field.
+	sess, code, msg := s.Unlock("01V", "")
+	if code != "" {
+		t.Fatalf("Unlock: %s — %s", code, msg)
 	}
-	for _, want := range []string{"not encrypted", "ios-backup-crypt#8", "Encrypted versions"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("message does not mention %q: %s", want, msg)
-		}
+
+	page, code, msg := s.Browse(sess.ID, wire.BrowseQuery{})
+	if code != "" {
+		t.Fatalf("Browse: %s — %s", code, msg)
+	}
+	if len(page.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1: %+v", len(page.Entries), page.Entries)
+	}
+	if got := page.Entries[0].Size; got != int64(len("alpha")) {
+		t.Errorf("size = %d, want %d — the record decoded, which is the whole reason this "+
+			"class was unservable before", got, len("alpha"))
 	}
 }
 
