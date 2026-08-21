@@ -112,6 +112,20 @@ beforeEach(() => {
   useDevicesStore.setState({ byUdid: {}, order: [] });
 });
 
+// THE CONTROLS ARE AWAITED, NOT FETCHED SYNCHRONOUSLY, and that is what makes this file
+// deterministic (quince#1419). Every test here crosses an async boundary — submit the unlock form,
+// then the session and the first page arrive — and the ROW text lands in an earlier render than the
+// chrome around it. `await findByText(row)` therefore does NOT prove `Lock` or `Show more` exist
+// yet, and a synchronous `getByRole` for them raced that gap.
+//
+// Measured on `main` at 874581a before the fix: two failures in five full-suite runs locally, with
+// a DIFFERENT test failing each time — `/^lock$/i` in one run, `/show more/i` in another — which is
+// the signature of a race rather than a broken assertion. It had already turned trunk red once
+// (run 32494673159) on a commit that changed two Go files and nothing else.
+//
+// THE INTERMEDIATE RENDER IS REAL AND IS NOT CHANGED HERE. The page genuinely shows rows for a tick
+// before it shows the controls; that is a fact about the component, benign to a user at this speed,
+// and left alone deliberately — a test that waits properly is the fix for a test that did not.
 describe("VaultBrowsePage", () => {
   it("lands locked, and does not open a password dialog by itself", async () => {
     renderPage();
@@ -145,12 +159,15 @@ describe("VaultBrowsePage", () => {
     await openAndUnlock();
 
     expect(await screen.findByText("Library/Notes/notes.sqlite")).toBeTruthy();
+    // THE CHROME IS AWAITED FIRST, and everything after it is a safe synchronous read of the same
+    // render. The rows arrive in an earlier pass than the controls, so a sync assertion on chrome
+    // placed above this line is the race quince#1419 is about.
+    expect(await screen.findByRole("button", { name: /^lock$/i })).toBeTruthy();
     expect(screen.getByText("HomeDomain")).toBeTruthy();
     expect(screen.getByText("4.1 KB")).toBeTruthy();
     // The expiry is DISPLAYED, not counted down — the word is what pins that a server instant is
     // being rendered rather than a client timer being started.
     expect(screen.getByText(/locks/i)).toBeTruthy();
-    expect(screen.getByRole("button", { name: /^lock$/i })).toBeTruthy();
   });
 
   // STORY 1's LIMIT, ASSERTED AS A NEGATIVE. `Session` carries no device name, iOS version or file
@@ -169,11 +186,15 @@ describe("VaultBrowsePage", () => {
     await openAndUnlock();
     await screen.findByText("Library/Notes/notes.sqlite");
 
+    // THE POSITIVE IS AWAITED BEFORE THE NEGATIVE, and that ordering is load-bearing rather than
+    // tidy: `queryByText(...)).toBeNull()` passes trivially against a page that has not rendered
+    // yet, so a negative placed first would assert nothing at all on exactly the runs where the
+    // race bites (quince#1419).
+    expect(await screen.findByText(/^1 file$/)).toBeTruthy();
     expect(screen.queryByText(/iOS/)).toBeNull();
     // "1 file" is the count of what was LOADED and is true; a total from the backup is not
     // available at all, so no "of N" may appear anywhere.
     expect(screen.queryByText(/\bof \d/)).toBeNull();
-    expect(screen.getByText(/^1 file$/)).toBeTruthy();
   });
 
   // STORY 3's UI HALF. The cursor is the server's and opaque; what the page owes is that a page
@@ -194,14 +215,17 @@ describe("VaultBrowsePage", () => {
     await openAndUnlock();
     await screen.findByText("Library/Notes/notes.sqlite");
 
-    fireEvent.click(screen.getByRole("button", { name: /show more/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /show more/i }));
     expect(await screen.findByText("Media/DCIM/a.jpg")).toBeTruthy();
     // The cursor is ECHOED BACK UNTOUCHED, which is the one thing a client can get wrong about an
     // opaque value.
     expect(get).toHaveBeenLastCalledWith("/api/sessions/S1/browse?cursor=CUR-1");
     // The first page's rows are still there: paging ADDS, it does not replace.
     expect(screen.getByText("Library/Notes/notes.sqlite")).toBeTruthy();
-    expect(screen.getByText(/end of the backup/i)).toBeTruthy();
+    // AWAITED, AND BEFORE THE NEGATIVE BELOW IT. "End of the backup" is chrome that follows the
+    // second page's rows, and `queryByRole(...)).toBeNull()` would pass against a page that has
+    // not caught up — asserting the absence of a control for the wrong reason (quince#1419).
+    expect(await screen.findByText(/end of the backup/i)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /show more/i })).toBeNull();
   });
 
@@ -243,7 +267,7 @@ describe("VaultBrowsePage", () => {
     await screen.findByText("Library/Notes/notes.sqlite");
 
     post.mockResolvedValueOnce(undefined as never);
-    fireEvent.click(screen.getByRole("button", { name: /^lock$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^lock$/i }));
 
     expect(await screen.findByText(/this backup is locked/i)).toBeTruthy();
     expect(post).toHaveBeenLastCalledWith("/api/sessions/S1/lock", {});
@@ -557,7 +581,7 @@ describe("VaultBrowsePage", () => {
     await openAndUnlock();
 
     expect(await screen.findByText(/^1 file so far$/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /show more/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /show more/i }));
     expect(await screen.findByText(/^2 files$/)).toBeTruthy();
     expect(screen.queryByText(/so far/)).toBeNull();
     expect(get).toHaveBeenCalledTimes(2);
