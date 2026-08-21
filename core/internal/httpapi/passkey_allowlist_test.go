@@ -196,3 +196,40 @@ func TestTheListsDoNotMatchByPrefix(t *testing.T) {
 		}
 	}
 }
+
+// THE ENROLMENT PAIR IS IN TWO OF THE THREE, AND ITS ABSENCE FROM THE THIRD IS A DECISION
+// (qn.13 slice 9b-3, spec D4).
+//
+// It is in `authExempt` and `csrfExempt` for the login pair's reasons exactly: a scanner has no
+// session, so requiring one makes the ceremony unreachable by the only person who performs it, and
+// there is no CSRF cookie to double-submit before a session exists.
+//
+// IT IS DELIBERATELY NOT IN `setupAllowed`. That mode is a zero-storage first run, and enrolment
+// cannot happen there: a QR is generated from a device page, and an install with no storage has no
+// devices to generate one from. Adding it would widen the narrowest mode this product has for a
+// ceremony that cannot succeed inside it.
+//
+// WHAT STANDS IN FOR CSRF HERE IS THE SECRET, and it is worth stating because the other entries in
+// that list name different substitutes: `Configured()` for the first-run pair, SameSite plus the
+// login limiter for the auth POSTs. A cross-site forgery against enrolment achieves nothing without
+// a single-use value the admin generated and handed to somebody — and quince can revoke it.
+func TestTheEnrolmentPairIsPreAuthButNotASetupModeRoute(t *testing.T) {
+	enrolment := []string{
+		"/api/enrol/passkey/begin",
+		"/api/enrol/passkey/finish",
+	}
+	for _, p := range enrolment {
+		r := httptest.NewRequest("POST", p, nil)
+		if !authExempt(r) {
+			t.Errorf("%s is not in authExempt — no scanner has a session, so the ceremony would 401", p)
+		}
+		if !csrfExempt(r) {
+			t.Errorf("%s is not in csrfExempt — there is no CSRF cookie before a session exists, so "+
+				"this would refuse with a message about CSRF rather than about anything the user did", p)
+		}
+		if setupAllowed(r) {
+			t.Errorf("%s IS in setupAllowed — that mode is a zero-storage first run, which has no "+
+				"devices and therefore no QR this could be answering", p)
+		}
+	}
+}

@@ -420,6 +420,7 @@ func serve(args []string) error {
 		// themselves live in the app DB, which is why both are wired and neither is optional here.
 		Store: st, Passkeys: auth.NewPasskeyCeremonies(),
 		Reauth: auth.NewReauthCeremonies(), Proofs: auth.NewProofs(),
+		Enrolments: auth.NewEnrolments(),
 		// Nil in demo mode — the carve-out is the nil, not a branch in a handler (qn.6m D6).
 		PasswordAdmin: passwordAdmin(demoMode, authSvc),
 		// Web Push (qn.12). NIL IN DEMO MODE for the same reason `PasswordAdmin` is: the demo

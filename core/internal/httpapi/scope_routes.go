@@ -117,6 +117,10 @@ var routeScope = map[string]scopeClass{
 	"POST /api/auth/passkeys/login/finish": openToAll,
 	"POST /api/auth/setup/passkey/begin":   openToAll,
 	"POST /api/auth/setup/passkey/finish":  openToAll,
+	// Pre-auth: there is no principal yet, so there is no scope to narrow. What bounds these is
+	// the enrolment secret, not this table (qn.13 D4).
+	"POST /api/enrol/passkey/begin":  openToAll,
+	"POST /api/enrol/passkey/finish": openToAll,
 
 	// NOTIFICATIONS ARE THEIRS TO MANAGE (spec D3: "their own notification preference"). The SEND
 	// path is what scopes what they receive (D7); subscribing is not the place to confine them,

@@ -352,6 +352,50 @@ POST /api/auth/setup/passkey/finish?ceremony=<key>&name=<label>
 look almost identical and belong on opposite sides of every list, which is why
 `passkey_allowlist_test.go` asserts both directions by exact path.
 
+Device-scoped **enrolment** — **a THIRD pair, pre-auth and authorized by a secret** (qn.13 D4):
+
+```
+POST /api/enrol/passkey/begin?secret=<secret>   → 200 {ceremony, options}
+     // PRE-AUTH: the scanner has no session, and obtaining one is what this leads to.
+     // ITS BOUND IS THE SECRET, not Configured() — single-use, minutes-long, revocable,
+     // and CARRYING ITS OWN SCOPE. Nothing in the request names a device and no parameter
+     // could: a token whose scope is chosen by the scanner is not a scoped token.
+     // SENDS NO EXCLUSION LIST (D4.1) — the page is reached with no session, so one would
+     // disclose every admin credential id to whoever scanned the QR.
+     // 429 rate_limited, THE SAME BUCKET as login and setup · 426 insecure_origin
+     // 409 passkeys_unsupported_here · and the four secret refusals below.
+POST /api/enrol/passkey/finish?secret=<secret>&ceremony=<key>&name=<label>
+                                    → 200 {state, csrf_token} + session cookie
+     // ISSUES A SCOPED SESSION. AuthStatus, not 201 {passkey}: the outcome is "you are
+     // signed in", and a scoped holder reaches no passkey list to manage a row in.
+     // THE SECRET IS RE-READ HERE, not trusted from begin — the admin can revoke a QR
+     // while the phone sits on the unlock sheet, and a ceremony that consulted only its
+     // own start would honour a cancellation it had already been told about.
+     // SPENT ONLY AFTER THE CREDENTIAL IS STORED, so a failed registration does not burn
+     // the QR. Two ceremonies from one QR can therefore both finish; both are removable
+     // from the admin's list, and neither can be an admin credential.
+     // 400 no_ceremony · 400 passkey_rejected · 422 name_required · 409 passkey_rp_mismatch
+```
+
+**THE FOUR SECRET REFUSALS STAY FOUR, AND THAT IS THE CONTRACT** — they reach an *unauthenticated*
+person holding a link somebody handed them, and what to do next differs in every case:
+
+```
+404 enrolment_unknown   // never ours — check the address, or ask for a new QR
+410 enrolment_expired   // ordinary; ask for a new QR
+410 enrolment_spent     // NOT A RETRY: somebody else enrolled with this link
+410 enrolment_revoked   // the admin cancelled it
+400 bad_request         // no secret at all — a different problem from a dead one
+```
+
+`410 Gone` for the three that were real and `404` for the one that never was: that is the difference
+between *this link is finished* and *this link was never ours*, which is the difference between
+asking the admin and checking the address.
+
+**THIS PAIR IS IN TWO OF THE THREE LISTS, AND THE THIRD IS A DECISION.** `authExempt` and
+`csrfExempt` yes, for the login pair's reasons. **`setupAllowed` no**: that mode is a zero-storage
+first run, which has no devices and therefore no QR this could be answering.
+
 **WHY A SECOND PAIR RATHER THAN EXEMPTING THE FIRST.** `authExempt` is exact-path **and
 unconditional**, and that is its whole value; making membership depend on `needs_setup` would put the
 first state test into the one structure that has none. The alternative considered and rejected was

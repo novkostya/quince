@@ -257,6 +257,16 @@ func NewRouter(deps Deps) http.Handler {
 		apiMux.HandleFunc("POST /api/auth/passkeys/register/finish", deps.handlePasskeyRegisterFinish())
 		apiMux.HandleFunc("POST /api/auth/passkeys/login/begin", deps.handlePasskeyLoginBegin())
 		apiMux.HandleFunc("POST /api/auth/passkeys/login/finish", deps.handlePasskeyLoginFinish())
+		// THE ENROLMENT PAIR — qn.13 slice 9b-3, spec D4. Pre-auth like the first-run pair above,
+		// and gated in the handler like it: there by `Configured()`, here by the enrolment secret.
+		//
+		// GUARDED ON `deps.Enrolments` AS WELL, so a router built without a secret store does not
+		// register routes whose whole authorization it lacks — the same shape as the `Passkeys`
+		// guard this block already sits inside.
+		if deps.Enrolments != nil {
+			apiMux.HandleFunc("POST /api/enrol/passkey/begin", deps.handleEnrolPasskeyBegin())
+			apiMux.HandleFunc("POST /api/enrol/passkey/finish", deps.handleEnrolPasskeyFinish())
+		}
 		// The reauth pair — qn.6n D3. In NONE of the three exact-path lists, unlike the login pair
 		// directly above, which is in all three.
 		apiMux.HandleFunc("POST /api/auth/reauth/begin", deps.handleReauthBegin())
