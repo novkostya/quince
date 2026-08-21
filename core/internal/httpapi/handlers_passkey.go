@@ -85,7 +85,7 @@ func (d Deps) handlePasskeyRegisterBegin() http.HandlerFunc {
 		}
 
 		rpID := auth.RPIDFromRequest(r)
-		options, ceremony, err := auth.BeginPasskeyRegistration(d.Store, d.Passkeys, rpID, store.AdminScope())
+		options, ceremony, err := auth.BeginPasskeyRegistration(d.Store, d.Passkeys, rpID, store.AdminScope(), auth.ExcludeRegistered())
 		if err != nil {
 			if d.writePasskeyError(w, err) {
 				return
