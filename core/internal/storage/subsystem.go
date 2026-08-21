@@ -294,6 +294,28 @@ func (m *Manager) Versions(udid string) []wire.Version {
 	return out
 }
 
+// Version resolves one version by id — the accessor a vault session needs, because unlocking
+// starts from a version id and nothing else.
+//
+// IT GOES THROUGH toWire LIKE Versions DOES, which is the point rather than an implementation
+// detail: `browse_root` is DERIVED at read time (it moves as a namespace version rotates
+// latest→versions) and resolves under THAT VERSION'S OWN storage root. A caller that built a
+// path itself from the row would get a version on storage B rendered against storage A's root.
+//
+// A MISSING ROW AND A FAILED QUERY ARE DIFFERENT and stay different: `false` with no error is
+// "no such version", an error is "the registry could not answer". The vault surface turns the
+// first into 404 and the second into 500, which it cannot do if they arrive as one.
+func (m *Manager) Version(id string) (wire.Version, bool, error) {
+	row, ok, err := m.reg.GetVersion(id)
+	if err != nil {
+		return wire.Version{}, false, fmt.Errorf("storage: reading version %s: %w", id, err)
+	}
+	if !ok {
+		return wire.Version{}, false, nil
+	}
+	return m.toWire(row), true, nil
+}
+
 // Seed provisions the device area (idempotent) and returns the idevicebackup2 TARGET — the
 
 // per-device working/ parent, seeded so the tool's own <target>/<UDID> convention lands the tree in
