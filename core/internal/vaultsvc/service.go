@@ -119,7 +119,7 @@ func (s *Service) Browse(sessionID string, q wire.BrowseQuery) (wire.BrowsePage,
 		if err != nil {
 			return err
 		}
-		page = toWirePage(p, s.registry.IncompleteIn(sessionID))
+		page = toWirePage(p, s.registry.IncompleteIn(sessionID), s.registry.OverlongIn(sessionID))
 		return nil
 	})
 	if err != nil {
@@ -139,7 +139,7 @@ func (s *Service) OpenFile(sessionID, fileID string) (io.ReadCloser, wire.FileEn
 	// The reader records incompleteness on the session when the read comes up short, so the
 	// browse listing can mark that entry afterwards (spec D8.1a). The HTTP layer sees only a
 	// body that ends against a declared Content-Length, which is what makes it detectable.
-	return s.registry.WatchIncomplete(sessionID, fileID, rc), toWireEntry(entry, false), "", ""
+	return s.registry.WatchIncomplete(sessionID, fileID, rc), toWireEntry(entry, false, false), "", ""
 }
 
 // codeFor maps a registry or seam error onto a contracts §4 code. Session-level errors are
@@ -159,19 +159,19 @@ func toWireSession(s vault.Session) wire.Session {
 	return wire.Session{ID: s.ID, VersionID: s.VersionID, ExpiresAt: s.ExpiresAt.UTC().Format(time.RFC3339)}
 }
 
-func toWirePage(p vault.Page, incomplete map[string]bool) wire.BrowsePage {
+func toWirePage(p vault.Page, incomplete, overlong map[string]bool) wire.BrowsePage {
 	out := wire.BrowsePage{
 		Entries:        make([]wire.FileEntry, 0, len(p.Entries)),
 		NextCursor:     p.NextCursor,
 		EffectiveLimit: p.EffectiveLimit,
 	}
 	for _, e := range p.Entries {
-		out.Entries = append(out.Entries, toWireEntry(e, incomplete[e.FileID]))
+		out.Entries = append(out.Entries, toWireEntry(e, incomplete[e.FileID], overlong[e.FileID]))
 	}
 	return out
 }
 
-func toWireEntry(e vault.FileEntry, incomplete bool) wire.FileEntry {
+func toWireEntry(e vault.FileEntry, incomplete, overlong bool) wire.FileEntry {
 	// MTime is OPTIONAL in the format — absent is ordinary, not corrupt — so a zero Time
 	// becomes an empty string rather than 1970 (ios-backup-crypt v0.2.0).
 	mtime := ""
@@ -186,5 +186,6 @@ func toWireEntry(e vault.FileEntry, incomplete bool) wire.FileEntry {
 		Size:         e.Size,
 		Mtime:        mtime,
 		Incomplete:   incomplete,
+		Overlong:     overlong,
 	}
 }

@@ -285,8 +285,14 @@ func (u *unencrypted) blobPath(fileID string) string {
 	return filepath.Join(u.dir, fileID[:2], fileID)
 }
 
-// boundedFile delivers exactly the recorded number of bytes, then reports a short backup as
-// ErrIncompleteFile — after the last byte, never instead of it.
+// boundedFile delivers exactly the recorded number of bytes, then reports how the backup and
+// its index disagreed — after the last byte, never instead of it.
+//
+// BOTH DIRECTIONS, AND THE SECOND ONE IS WHY THIS TYPE IS NOT JUST AN io.LimitedReader. A
+// short blob is ErrIncompleteFile. A blob with MORE bytes than the record is ErrOverlongFile,
+// and without it that case is SILENT: bounding the read means nothing overruns, so the HTTP
+// layer sees a clean success and hands the user a truncated file with the status, the header
+// and the body all agreeing. Measured on hardware (quince#1379).
 type boundedFile struct {
 	f         *os.File
 	remaining int64
@@ -294,6 +300,12 @@ type boundedFile struct {
 
 func (b *boundedFile) Read(p []byte) (int, error) {
 	if b.remaining <= 0 {
+		// The record is satisfied. One more byte on disk means the backup holds more than its
+		// index claims, and the caller is owed that fact rather than a bare EOF.
+		var probe [1]byte
+		if n, _ := b.f.Read(probe[:]); n > 0 {
+			return 0, ErrOverlongFile
+		}
 		return 0, io.EOF
 	}
 	if int64(len(p)) > b.remaining {
@@ -306,7 +318,6 @@ func (b *boundedFile) Read(p []byte) (int, error) {
 	}
 	return n, err
 }
-
 func (b *boundedFile) Close() error { return b.f.Close() }
 
 // VerifyCanary reads one small file to prove the index and the blob store agree.

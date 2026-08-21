@@ -179,6 +179,20 @@ type FileEntry struct {
 	// reading of a file nobody has read yet. Safe here where quince#493 would forbid it on a
 	// config round trip: this is a read-only surface and no client PUTs it back.
 	Incomplete bool `json:"incomplete,omitempty"`
+
+	// Overlong is Incomplete's MIRROR: the backup holds MORE bytes for this file than its own
+	// index records, so the download carries the RECORDED length and stops there. Measured at
+	// ~34–38 files per version on real backups (quince#1379).
+	//
+	// `omitempty` for the same reason: absent means "not known to be overlong", which is not
+	// the same as knowing it is not — and, like Incomplete, it can only be known after a read.
+	//
+	// IT IS A FIELD RATHER THAN A CODE FOR THE SAME REASON, AND IT IS NEEDED MORE. The read
+	// SUCCEEDS: every byte the index promises is delivered. But where an incomplete file at
+	// least ends a body early against a declared length, this one produces a response where
+	// the status, the header and the body all agree — so without this field the truncation is
+	// invisible to a client, which is the silent cap the hard rules forbid.
+	Overlong bool `json:"overlong,omitempty"`
 }
 
 // BrowseQuery is GET /api/sessions/{id}/browse (contracts §1).

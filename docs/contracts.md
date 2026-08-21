@@ -3073,6 +3073,27 @@ every recovered byte is delivered and a retry cannot change it. It travels as a 
 an implementation that routed it through the code would answer `""`, which is what SUCCESS answers,
 so the condition would vanish with no trace and every test would still pass (qn.8 D8.1a).
 
+**AND ITS MIRROR IS A FIELD TOO — `overlong`.** A file the backup holds MORE bytes for than its own
+index records. Measured at ~34–38 files per version on real backups, the same file by the same amount
+across a month of them, so it is a property of iOS backups rather than a transfer accident
+(quince#1379).
+
+`Content-Length` is the RECORDED size on both, and that does not change: making it the on-disk size
+would destroy the short-read detectability the paragraph above depends on. So the download carries
+the recorded length and stops.
+
+**IT NEEDS THE FIELD MORE THAN INCOMPLETENESS DOES.** An incomplete file at least ends a body early
+against a declared length, which a client can see. An overlong one produces a response where the
+status, the header and the body **all agree** — so without this field the truncation is invisible,
+which is the silent cap the hard rules forbid. Measured on hardware: 4,096 bytes delivered for a
+118,784-byte blob, HTTP 200, `curl` exit 0, nothing logged.
+
+**The two backends detect it differently, and that asymmetry is real.** The passwordless
+implementation bounds its read to the record, so it knows by finding a byte past the end and reports
+it cleanly. The encrypted one overruns `Content-Length` and net/http tears the response — loud, but
+crude, and it reaches the client as a failed transfer rather than as a fact about the file.
+
+
 ## 5. Derived caches (`/cache`)
 
 No persistent index of backup content exists (Operator decision — lazy session reads
