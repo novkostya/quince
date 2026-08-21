@@ -13,7 +13,6 @@ package vaultsvc
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"time"
@@ -53,32 +52,26 @@ func New(versions Versions, scratchRoot string, ttl time.Duration, log *slog.Log
 // down at shutdown. Nothing else should reach past this package for it.
 func (s *Service) Registry() *vault.Registry { return s.registry }
 
-// openFor chooses the implementation for a version.
+// openFor chooses the implementation for a version, on the same flag design §4 already
+// branches structural verify on: `Manifest.plist`'s `IsEncrypted`, surfaced as
+// `Version.encrypted`.
 //
-// THE UNENCRYPTED CASE IS REFUSED, WITH THE REASON, AND THAT IS TEMPORARY AND TRACKED. quince
-// permits unencrypted versions (`Version.encrypted`, `backup.require_encryption: false`) and
-// the qn.8 spec's D7 rules that they should be browsable by a second, passwordless
-// implementation of the same interface. That implementation is slice 4 and is blocked on
-// `ios-backup-crypt` exporting its file-record decoder (ios-backup-crypt#8): `Size` and
-// `MTime` live in an NSKeyedArchiver blob whose decoding is NOT a decryption step, and there
-// is no public path to it.
+// BOTH BRANCHES SERVE. This refused the unencrypted case with a reason until slice 4, because
+// `Size` and `MTime` live in an NSKeyedArchiver record with no public decoder and a browse row
+// without a size is not a file browser. `ios-backup-crypt#8` exported the decoder — it is
+// format knowledge rather than a decryption step — and the passwordless implementation is
+// gated by the same golden conformance suite as the encrypted one, so a version is browsable
+// on either branch or on neither.
 //
-// SO THIS REFUSES RATHER THAN SERVING A VERSION WITH TWO FIELDS MISSING. A browse row without
-// a size is not a file browser, and inventing one would be the silent degradation the hard
-// rules forbid. The message names the reason and the remedy, per the troubleshooting rule —
-// it does not say "unsupported".
+// THE SCRATCH DIRECTORY IS USED BY ONE BRANCH ONLY, and that asymmetry is real rather than an
+// oversight: the encrypted implementation needs somewhere to decrypt `Manifest.db` to, and the
+// unencrypted one opens a plain SQLite file in place and writes nothing at all.
 func openFor(v wire.Version, scratchDir string) (vault.Vault, error) {
 	if !v.Encrypted {
-		return nil, fmt.Errorf("%w: this version is not encrypted, and quince cannot browse "+
-			"unencrypted backups yet — it is tracked at ios-backup-crypt#8. Encrypted versions "+
-			"of this device browse normally", errUnencryptedUnsupported)
+		return vault.OpenUnencrypted(v.BrowseRoot)
 	}
 	return vault.OpenEncrypted(v.BrowseRoot, scratchDir)
 }
-
-// errUnencryptedUnsupported is this package's own, not the seam's: the seam has no opinion
-// about which implementations exist.
-var errUnencryptedUnsupported = errors.New("vaultsvc: unencrypted versions are not browsable yet")
 
 func (s *Service) Unlock(versionID, password string) (wire.Session, string, string) {
 	v, ok, err := s.versions.Version(versionID)
@@ -102,9 +95,6 @@ func (s *Service) Unlock(versionID, password string) (wire.Session, string, stri
 	sess, info, err := s.registry.Unlock(context.Background(), sessionID, versionID, password,
 		func(scratchDir string) (vault.Vault, error) { return s.open(v, scratchDir) })
 	if err != nil {
-		if errors.Is(err, errUnencryptedUnsupported) {
-			return wire.Session{}, wire.VaultCodeUnsupportedVersion, err.Error()
-		}
 		return wire.Session{}, vault.Code(err), err.Error()
 	}
 	s.log.Info("vault: session opened", "session", sess.ID, "version", versionID,

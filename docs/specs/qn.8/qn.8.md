@@ -644,11 +644,23 @@ Each is one PR carrying one reviewable claim, **sequenced from `main`, not stack
 | **1** | **this spec** | no |
 | **2** | **the spike** — the standalone harness, the three curves on synthetic manifests, the number for clauses (a) and (b), and stack D4's open paragraph replaced by it (D10). Clause (c) is **not** measurable here (D10.3b) | **yes** (D5, for the generator) |
 | **3** | `vault.Vault` + the conformance suite and its negative control, against the in-process encrypted implementation — quince#184 (D1, D2, D5, G1, G2) | **yes** (D4, D5, D6) |
-| **4** | the unencrypted implementation and the selection on `IsEncrypted` (D7) | yes |
+| **4** | the unencrypted implementation and the selection on `IsEncrypted` (D7) | **yes — TWO, not one** (see below) |
 | **5** | the session registry, `vault.session_ttl_minutes`, teardown and the scratch wipe, plus G3, G5 and **G7 — D10.3 clause (c), the one measurement the spike cannot take** (D6, D9, D10.3b) | no |
 | **6** | the four REST endpoints, the error taxonomy and contracts §4/§2's amendment (D3, D8) — **and incompleteness travels as a FIELD, not through `Code()`, with a test that the surface fires** (D8.1; quince#1348 review) | no |
 | **7** | the UI — unlock dialog, browser, download, the incomplete-file surface (D8.1), **and the Settings control for `vault.session_ttl_minutes`** | no |
 | **8** | design §7 and §6 rewritten to the seam as built, including D11's gate wording, ruled with the number from slice 2 | no |
+
+**SLICE 4 NEEDED TWO `ios-backup-crypt` RELEASES, AND THIS TABLE SAID ONE.** Recorded because the
+correction is cheap here and expensive as a surprise mid-slice. `v0.3.0` exported the file-record
+decoder (`ios-backup-crypt#8`) — `Size` and `MTime` live in an NSKeyedArchiver record, and decoding
+one is Apple-format parsing rather than a decryption step. `v0.4.0` taught the fixture generator to
+build an **unencrypted** backup, which nothing had needed before: canon gates any `vault.Vault` on
+the conformance suite, the suite was already built to take a second implementation
+(`Fixture.Password` — *"empty means the implementation takes none"*), and there was no unencrypted
+backup to run it against. Building that fixture inside quince was rejected for the reason `#8` was
+taken: it would make quince a second WRITER of the record format in the slice that stopped it
+becoming a second reader, and a fixture that builds records slightly wrong makes the suite agree
+with the bug.
 
 **One `ios-backup-crypt` release gates slices 2–4**, and it is one release rather than three: `ios-backup-crypt`
 needs `FileEntry.Size`/`MTime` (D4), an exported fixture generator (D5), and a caller-chosen temp dir

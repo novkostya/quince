@@ -19,7 +19,7 @@ import (
 // unstamped one (LastModified is optional in the format, and absent is the state that gets
 // mishandled), a directory with no content, and two domains so the filter has something to
 // filter.
-func buildFixture(t *testing.T) conformance.Fixture {
+func buildFixture(t *testing.T, plain bool) conformance.Fixture {
 	t.Helper()
 	dir := t.TempDir()
 	backupDir := filepath.Join(dir, "backup")
@@ -38,6 +38,7 @@ func buildFixture(t *testing.T) conformance.Fixture {
 	}
 
 	res, err := fixture.Build(backupDir, fixture.Spec{
+		Unencrypted:    plain,
 		DeviceName:     "conformance-device",
 		ProductVersion: "26.0",
 		Files: []fixture.File{
@@ -79,14 +80,27 @@ func buildFixture(t *testing.T) conformance.Fixture {
 
 	return conformance.Fixture{
 		Open: func(inner conformance.T) vault.Vault {
+			// The SAME golden facts, opened by whichever implementation the version's
+			// encryption selects. That is the point of driving both from one fixture: if the
+			// two implementations ever disagree about an entry's size, its order or its
+			// content, the suite is comparing them against one description rather than
+			// against two that were written to match.
+			if plain {
+				v, err := vault.OpenUnencrypted(backupDir)
+				if err != nil {
+					inner.Fatalf("OpenUnencrypted: %v", err)
+				}
+				return v
+			}
 			v, err := vault.OpenEncrypted(backupDir, scratch)
 			if err != nil {
 				inner.Fatalf("OpenEncrypted: %v", err)
 			}
 			return v
 		},
-		Password:    res.Password,
-		Encrypted:   true,
+		Password:  res.Password,
+		Encrypted: !plain,
+
 		FileCount:   int64(len(entries)),
 		Entries:     entries,
 		FileContent: fileContent,
@@ -96,24 +110,44 @@ func buildFixture(t *testing.T) conformance.Fixture {
 
 // TestInProcessEncryptedConformance is quince#184's gate for the in-process implementation.
 func TestInProcessEncryptedConformance(t *testing.T) {
-	conformance.Run(t, buildFixture(t))
+	conformance.Run(t, buildFixture(t, false))
 }
 
 // TestTheSuiteRejectsAMutant is the gate's own control: an all-pass from a suite nobody has
 // seen fail proves the suite ran, not that the implementation is right.
 func TestTheSuiteRejectsAMutant(t *testing.T) {
-	conformance.RunMutantMustFail(t, buildFixture(t))
+	conformance.RunMutantMustFail(t, buildFixture(t, false))
 }
 
 // TestMutantDetail reports which checks catch which defect — not a gate, a description of
 // what the suite is sensitive to. It fails only if a mutation is caught by NOTHING, which
 // RunMutantMustFail also catches; the value here is the log.
 func TestMutantDetail(t *testing.T) {
-	for m, failures := range conformance.RunMutantDetail(buildFixture(t)) {
+	for m, failures := range conformance.RunMutantDetail(buildFixture(t, false)) {
 		if len(failures) == 0 {
 			t.Errorf("%s was caught by no check", m)
 			continue
 		}
 		t.Logf("%s → caught by %d check(s); first: %s", m, len(failures), failures[0])
 	}
+}
+
+// TestInProcessUnencryptedConformance is quince#184's gate for the PASSWORDLESS
+// implementation (spec D7) — the same suite, the same golden facts, a backup nobody
+// encrypted.
+//
+// IT RUNS THE WHOLE SUITE RATHER THAN A SUBSET, which is the honest reading of canon's
+// "any implementation must pass the golden conformance suite before it can ship". An
+// unencrypted version is a permitted class of version, so browsing one is not a lesser
+// claim than browsing an encrypted one.
+func TestInProcessUnencryptedConformance(t *testing.T) {
+	conformance.Run(t, buildFixture(t, true))
+}
+
+// And its control, for the same reason the encrypted one has one: an all-pass from a suite
+// nobody has seen reject anything proves the suite ran, not that the implementation is
+// right. Without this, a passwordless implementation that returned plausible nonsense would
+// look exactly like one that works.
+func TestTheSuiteRejectsAnUnencryptedMutant(t *testing.T) {
+	conformance.RunMutantMustFail(t, buildFixture(t, true))
 }
