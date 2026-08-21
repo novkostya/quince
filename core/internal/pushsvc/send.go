@@ -104,6 +104,20 @@ func (s *Service) Deliver(ctx context.Context, sender Sender, d notify.Decision,
 		if !receives(row, d) {
 			continue
 		}
+		// AND THE OWNER'S OWN MUTE (slice 10b). Asked here rather than at the decision point,
+		// because the answer differs per principal: the admin muting a device says nothing
+		// about its scoped holder.
+		//
+		// A READ FAILURE SENDS. The switch is a user instruction, and defaulting to silence on
+		// a database fault would be the silent cap the hard rules forbid — a missed backup
+		// notification is the failure this whole subsystem exists to prevent.
+		owner := ""
+		if row.ScopeUDID != nil {
+			owner = *row.ScopeUDID
+		}
+		if on, err := sender.DeviceNotificationsEnabled(d.UDID, owner); err == nil && !on {
+			continue
+		}
 		// THE PAYLOAD IS BUILT PER SUBSCRIPTION, because `navigate` must be ABSOLUTE and each device
 		// knows this quince by its own address. It used to be built once, above the loop, with the
 		// relative path the Decision carries — and Declarative Web Push DROPS a payload that fails

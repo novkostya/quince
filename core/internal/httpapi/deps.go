@@ -236,13 +236,15 @@ type DeviceNotifications interface {
 	// 404 when the UDID is one
 	// quince does not know — an unknown device is not a device that is muted, and answering 200
 	// to a write against nothing is the silent no-op this project forbids.
-	SetNotificationsEnabled(udid string, enabled bool) (stored bool, status int, reason string)
+	// `owner` is "" for the admin and a udid for that device's scoped principal (qn.13 slice 10b).
+	// The same device has one preference row per principal, and they do not interact.
+	SetNotificationsEnabled(udid, owner string, enabled bool) (stored bool, status int, reason string)
 }
 
 // UnavailableDeviceNotifications stands in when nothing is wired: 503, never a silent no-op.
 type UnavailableDeviceNotifications struct{}
 
-func (UnavailableDeviceNotifications) SetNotificationsEnabled(string, bool) (bool, int, string) {
+func (UnavailableDeviceNotifications) SetNotificationsEnabled(string, string, bool) (bool, int, string) {
 	// `false` is not an answer here and is never read: the status is not 200, so the handler
 	// writes an error rather than a body. Naming it is cheaper than a reader wondering whether
 	// an unwired server reports every device as muted.

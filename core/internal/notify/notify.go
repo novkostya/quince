@@ -94,7 +94,18 @@ func ForTerminal(dev wire.Device, state, errorCode string, cfg config.Notificati
 	kind, ok := KindForTerminal(state, errorCode)
 	// THE SUBJECT GATE SITS BESIDE THE CATEGORY GATE, at the decision point, so that ONE place
 	// answers *should this go out* rather than a filter bolted in front of the sender.
-	if !ok || !Enabled(kind, cfg) || !DeviceEnabled(dev) {
+	// THE DEVICE SWITCH IS NO LONGER ASKED HERE — qn.13 slice 10b, Operator 2026-08-21.
+	//
+	// It used to sit beside the category gate, so that ONE place answered *should this go
+	// out*. That was right while quince had one principal. With two, the answer is not one
+	// answer: the admin muting a device says nothing about its scoped holder, and deciding
+	// here produced NO decision at all — so slice 10a's send filter never ran and the holder
+	// received nothing. The ruling would have been inverted by implementing it.
+	//
+	// So the decision is produced regardless and the switch is consulted PER SUBSCRIPTION at
+	// send (`pushsvc.receives`). The category gate stays here because it is quince-wide and
+	// has no owner.
+	if !ok || !Enabled(kind, cfg) {
 		return Decision{}, false
 	}
 	name := deviceName(dev)
@@ -225,12 +236,17 @@ type Reminder struct {
 func Evaluate(dev wire.Device, r Reminder, cfg config.NotificationsConfig, jobRunning bool, now time.Time) (Decision, bool) {
 	// VISIBLE, because a reminder for a phone that is not on the network asks for something that
 	// cannot be done. Presence is muxd-event-driven (design §3); either transport counts.
-	// MUTED IS THE FIRST QUESTION, before presence, the cooldown or the track. A muted device is
-	// not a device whose reminder is not due yet — it is one the user asked not to hear about, and
-	// the cheapest way to keep that true for every rank is to answer it once, here.
-	if !DeviceEnabled(dev) {
-		return Decision{}, false
-	}
+	// THE MUTE IS NOT ASKED HERE EITHER (slice 10b). It used to be the FIRST question, before
+	// presence and the cooldown, so that one answer covered every rank. With a second
+	// principal there is no single answer, and suppressing here would deny a scoped holder a
+	// reminder about their own phone because the admin muted it. Asked per subscription at
+	// send instead.
+	//
+	// THE COOLDOWN IS NOW SPENT ON A MUTED DEVICE, which is the cost of the move and is worth
+	// stating: `push_reminders` advances when a decision is produced, so a device muted by
+	// EVERY principal still consumes its track. That is a wasted evaluation rather than a
+	// wrong notification — nothing is delivered — and the alternative is re-introducing a
+	// principal-blind gate here to save a row update.
 	if dev.Transports.USB == nil && dev.Transports.WiFi == nil {
 		return Decision{}, false
 	}

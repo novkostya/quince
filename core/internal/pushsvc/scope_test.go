@@ -1,6 +1,8 @@
 package pushsvc
 
 import (
+	"context"
+	"net/http"
 	"testing"
 	"time"
 
@@ -62,5 +64,60 @@ func TestAnExpiredSubscriptionIsStillFilteredByLive(t *testing.T) {
 	// loop applies both.
 	if !receives(expired, notify.Decision{UDID: "DEVICE-A"}) {
 		t.Fatal("receives is doing Live's job; the guards must stay separate")
+	}
+}
+
+// THE OTHER HALF OF THE PRECEDENCE PROPERTY (qn.13 slice 10b).
+//
+// The device mute used to be answered in `notify`, beside the category gate, so ONE test could see
+// both. With two principals there is no single answer, so the device half moved here and the two
+// halves are now tested in two packages. `notify.TestCategoryPrecedenceSurvivesTheMove` is the
+// other; neither sees the composition, and that is declared rather than papered over.
+func TestAMutedOwnerReceivesNothing(t *testing.T) {
+	staged := &stagedPush{status: http.StatusCreated}
+	srv := staged.server(t)
+	s, raw := senderWith(t, srv.URL+"/push/token")
+	s = s.WithHTTPClient(srv.Client())
+
+	d := decision()
+	// `senderWith`'s subscription has a NULL scope, so it is the admin's.
+	if err := raw.SetDeviceNotificationsEnabled(d.UDID, "", false); err != nil {
+		t.Fatalf("mute: %v", err)
+	}
+	if err := s.DeliverDecision(context.Background(), d); err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	if staged.got != nil {
+		t.Fatal("a muted owner received the notification — the mute did not survive the move to send")
+	}
+}
+
+// AND THE CONTROL, which is the whole reason the mute moved: one principal's mute must not silence
+// another's.
+func TestAnAdminMuteDoesNotSilenceTheScopedHolder(t *testing.T) {
+	staged := &stagedPush{status: http.StatusCreated}
+	srv := staged.server(t)
+	s, raw := senderWith(t, srv.URL+"/push/token")
+	s = s.WithHTTPClient(srv.Client())
+
+	d := decision()
+	if err := raw.SetDeviceNotificationsEnabled(d.UDID, "", false); err != nil { // the admin's mute
+		t.Fatalf("mute: %v", err)
+	}
+	scope := d.UDID
+	if err := raw.AddPushSubscription(store.PushSubscription{
+		ID: "scoped-sub", Endpoint: srv.URL + "/push/scoped", P256DH: rfcP256DH, Auth: rfcAuth,
+		Label: "household iPhone", Origin: testOrigin, CreatedAt: time.Now().UTC(),
+		ScopeUDID: &scope,
+	}); err != nil {
+		t.Fatalf("seed scoped subscription: %v", err)
+	}
+
+	if err := s.DeliverDecision(context.Background(), d); err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	if staged.got == nil {
+		t.Fatal("the scoped holder received nothing because the ADMIN muted the device — this is " +
+			"the ruling inverted, and the whole reason the mute moved to send")
 	}
 }

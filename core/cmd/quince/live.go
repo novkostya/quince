@@ -229,7 +229,10 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	// which is a suppression the user never asked for and would present as "notifications stopped" with
 	// nothing anywhere saying why. It is logged rather than swallowed.
 	reg.SetNotifyPrefSource(func(udid string) bool {
-		enabled, err := st.DeviceNotificationsEnabled(udid)
+		// THE ADMINS PREFERENCE, which is what a principal-blind device object can carry (qn.13
+		// slice 10b). The registry builds devices with no request in hand, so it cannot know who is
+		// asking; `httpapi` overrides this field for a scoped caller on the read path.
+		enabled, err := st.DeviceNotificationsEnabled(udid, "")
 		if err != nil {
 			log.Warn("device notification preference read failed; notifying", "error", err)
 			return true
