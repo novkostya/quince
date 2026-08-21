@@ -93,7 +93,15 @@ you cannot find by remembering, because the thing to notice is an issue you did 
 
 ```sh
 make stale-refs-report                      # this repo; REPO= for the devlog
+make stale-refs-report GH_CLI=bin/gh-review # ARCHITECT box — the default wrapper refuses there
 ```
+
+**The second line is not optional on the architect box, and its absence used to make this whole
+step unrunnable there** (quince#1407). The target's default is `bin/gh-coder`, which refuses beside
+the reviewer key (devlog#7) — correctly — so `make stale-refs-report` exited `2`, NO VERDICT, for
+one of the two seats that runs `/retire`. **The exit code alone reads as "the tool is broken here";
+the banner names the credential and is what tells you it is the wrapper.** §1 above was written
+wrapper-agnostic for exactly this reason and this step was not.
 
 It lists issues that are **open**, referenced by a **merged** PR that used a non-closing reference,
 with **no comment since that merge**. Exit `0` means it looked, whatever it found; **`2` is NO
