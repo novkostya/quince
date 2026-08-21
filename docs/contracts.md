@@ -506,13 +506,25 @@ Passkeys — management (qn.6k):
 
 ```
 GET    /api/auth/passkeys        → 200 {passkeys: [...], rp_id, supported, has_password}
-       // SESSION REQUIRED. Each row: {id, name, rp_id, created_at, last_used_at|null}. NO public
-       // key and NO credential material — the list exists so a human can recognise a device and
-       // remove it, and sending more would widen what a compromised session can enumerate.
+       // SESSION REQUIRED. Each row: {id, name, rp_id, created_at, last_used_at|null, scope}. NO
+       // public key and NO credential material — the list exists so a human can recognise a device
+       // and remove it, and sending more would widen what a compromised session can enumerate.
        // `rp_id` is what THIS request resolved to and `supported` is whether it can be a relying
        // party at all, so the surface can mark rows bound to another address, and refuse to offer
        // a button on a tier that cannot work, WITHOUT re-deriving the domain in the browser.
        // `has_password` is whether an admin password exists at all (quince#855) — see below.
+       // `scope` IS `null` FOR AN ADMIN CREDENTIAL and `{udid}` for a device-scoped one (qn.13 D9).
+       // The admin has to be able to answer *what have I issued*, and `name` cannot answer it: a
+       // scoped credential's label is DERIVED from its device, but an admin credential may be
+       // called anything, including a device's name. NULL means admin, mirroring the column rather
+       // than adding a second spelling — a client that does not know the field treats every row as
+       // admin, which is the safe direction to be wrong at a surface only the admin reaches.
+       // THE UDID AND NOT A NAME, because `name` is a SNAPSHOT taken at enrolment: renaming a
+       // device does not rewrite credentials already issued for it, so the label can go stale
+       // while the udid cannot. It is what links a row to its device page.
+       // ADMIN-ONLY, so this discloses the shape of the household to the one principal already
+       // entitled to change it, and it authorizes nothing: revocation is the DELETE below, which
+       // checks the caller regardless of what any client believes about this field.
 DELETE /api/auth/passkeys/{id} {current_password?, proof?}  → 204
        // SESSION REQUIRED. 204 WHETHER OR NOT A ROW WENT: removing a credential that is already
        // gone is the state the caller wanted, and a 404 would make a retry, or a second tab, look
