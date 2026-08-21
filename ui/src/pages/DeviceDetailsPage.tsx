@@ -18,6 +18,7 @@ import {
 import { PairDialog } from "@/features/devices/PairDialog";
 import { WifiSyncControl } from "@/features/devices/WifiSyncControl";
 import { DeviceNotificationsControl } from "@/features/devices/DeviceNotificationsControl";
+import { DeviceEnrolment } from "@/features/devices/DeviceEnrolment";
 import { EncryptionDialog, type EncryptionMode } from "@/features/devices/EncryptionDialog";
 import { JobProgressFull } from "@/features/jobs/JobProgress";
 import { JobLogPane } from "@/features/jobs/JobLogPane";
@@ -228,6 +229,17 @@ export function DeviceDetailsPage() {
             <SectionHeading>Backup history</SectionHeading>
             <div className="mt-3">
               <JobHistory jobs={jobs} onRetry={(latest) => void backup.start("auto", { retryOf: latest.id })} />
+            </div>
+          </div>
+
+          <div className="mt-8">
+            {/* THE ENROLMENT SECTION SITS ON THE DEVICE PAGE because that is what it is scoped to
+                — D9's "the admin revokes one scoped credential from the device page it was issued
+                from". It is admin-only at the API; a scoped holder never reaches this page's own
+                admin surface, and the routes refuse them regardless. */}
+            <SectionHeading>Share this device</SectionHeading>
+            <div className="mt-3">
+              <DeviceEnrolment device={device} />
             </div>
           </div>
 
