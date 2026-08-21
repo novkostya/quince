@@ -1317,6 +1317,34 @@ GET  /api/ops/{op_id}                  → Op
      // pair/encryption return 202 {op_id}; the op's narration (e.g. "tap Trust on the
      // phone", "enter the passcode on the device") streams via `op.updated` WS events,
      // with this endpoint as the poll/refresh fallback.
+POST   /api/devices/{udid}/enrolments   → 201 EnrolmentIssued | 404 | 500 | 503
+GET    /api/devices/{udid}/enrolments   → 200 {enrolments: [Enrolment]} | 404 | 503
+DELETE /api/devices/{udid}/enrolments/{id}
+                                        → 204 | 404 | 409 | 503
+     // qn.13 slice 9c, spec D4 and D9 — the admin issues, sees and cancels the QR codes that
+     // enrol a DEVICE-SCOPED passkey.
+     //
+     // ADMIN ONLY, ALL THREE, and not by symmetry with their neighbours: a scoped holder who
+     // could mint a secret for their own device could hand out further credentials to it,
+     // which is delegation quince never granted (D3). The `/api/devices/{udid}/` prefix is
+     // shared with `scopedOwnDevice` routes and is NOT the classification.
+     //
+     // THE SECRET APPEARS EXACTLY ONCE, in the 201. `Enrolment` — what the listing returns —
+     // has no field for it, so a re-read of the device page cannot leak a live credential
+     // into a screenshot, a cache or a log. A client that loses it asks for another.
+     //
+     // THE CLIENT BUILDS THE QR's URL, not quince. The address the admin is currently using
+     // is knowable in the browser and NOT on the server, which may sit behind a proxy that
+     // strips or misreports it — and that one address fixes the rpId, the push origin and
+     // the Home Screen web clip at once (D5), two of which fail silently when wrong.
+     //
+     // THE LISTING IS LIVE ONES ONLY. A spent or expired secret grants nothing, and the
+     // question the page answers is *what authority is outstanding*.
+     //
+     // 409 ON DELETE DISTINGUISHES ALREADY-USED FROM ALREADY-CANCELLED (`enrolment_spent`
+     // vs `enrolment_revoked`), and 404 means no such id. Cancelling a USED link is not a
+     // tidy no-op: the credential it minted exists, so the refusal names the passkey list as
+     // the real remedy instead of reporting a cancellation that did nothing.
 ```
 
 ### Jobs

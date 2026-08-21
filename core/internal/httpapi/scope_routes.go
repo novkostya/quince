@@ -93,11 +93,18 @@ var routeScope = map[string]scopeClass{
 	"POST /api/devices/{udid}/reset-working": scopedOwnDevice,
 	"POST /api/devices/{udid}/wifi-sync":     scopedOwnDevice,
 	"PUT /api/devices/{udid}/notifications":  scopedOwnDevice,
-	"GET /api/jobs/{id}":                     scopedOwnDevice,
-	"GET /api/jobs/{id}/log":                 scopedOwnDevice,
-	"POST /api/jobs/{id}/cancel":             scopedOwnDevice,
-	"GET /api/ops/{op_id}":                   scopedOwnDevice,
-	"DELETE /api/versions/{id}":              adminOnly, // D3: deleting a version is NOT theirs
+	// ISSUING CREDENTIALS IS THE ADMIN'S (spec D3), and not by symmetry: a scoped holder who
+	// could mint an enrolment secret for their own device could hand out further credentials to
+	// it, which is delegation quince never granted. These sit under `/api/devices/{udid}/` and
+	// are still adminOnly — the prefix is not the classification.
+	"POST /api/devices/{udid}/enrolments":        adminOnly,
+	"GET /api/devices/{udid}/enrolments":         adminOnly,
+	"DELETE /api/devices/{udid}/enrolments/{id}": adminOnly,
+	"GET /api/jobs/{id}":                         scopedOwnDevice,
+	"GET /api/jobs/{id}/log":                     scopedOwnDevice,
+	"POST /api/jobs/{id}/cancel":                 scopedOwnDevice,
+	"GET /api/ops/{op_id}":                       scopedOwnDevice,
+	"DELETE /api/versions/{id}":                  adminOnly, // D3: deleting a version is NOT theirs
 
 	// `POST /api/jobs` NAMES ITS DEVICE IN THE BODY, not the path — the fourth shape, and the one
 	// most easily missed because it looks like a plain create.
