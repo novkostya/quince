@@ -8,7 +8,7 @@ import { removePasskey } from "@/lib/auth";
 import { acceptsOf, onlyPasskey, proveWithPasskey, type Factor, type Present } from "@/lib/reauth";
 import { ReauthChallenge } from "@/features/auth/ReauthChallenge";
 import { AddPasskeyRow } from "./AddPasskeyRow";
-import { forgetPasskey } from "@/lib/passkeyHint";
+import { forgetPasskey, passkeyHintCredentialID } from "@/lib/passkeyHint";
 import { webauthnAvailable } from "@/lib/webauthn";
 import { RelativeTime } from "@/components/RelativeTime";
 
@@ -150,12 +150,24 @@ export function Passkeys() {
   const remove = useMutation({
     mutationFn: ({ id, present }: { id: string; present?: Present }) => removePasskey(id, present),
     onSuccess: (_data, { id }) => {
-      // REMOVING THE LAST ONE STOPS THE UNPROMPTED SHEET. Otherwise the next visit fires a sheet
-      // with nothing to offer — the exact wrong-guess the hint exists to prevent, caused by us.
+      // REMOVING THE REMEMBERED ONE, OR THE LAST ONE, STOPS THIS BROWSER OFFERING IT. Otherwise the
+      // next visit fires a sheet with nothing to offer — the exact wrong-guess the hint exists to
+      // prevent, caused by us.
       //
-      // Only when it was the last: with others left, a passkey can still work in this browser, and
-      // the removed one may not even have been this device's.
-      if (rows.length <= 1 && rows.some((p) => p.id === id)) forgetPasskey();
+      // TWO CASES SINCE qn.13, because the hint went from a boolean to a credential id (D2.2):
+      //
+      //   - the LAST credential — nothing can work in this browser any more, which is qn.6k's case
+      //     and is unchanged;
+      //   - the REMEMBERED credential, even with others left — `allowCredentials` would name a
+      //     credential the platform can no longer find, and the sheet reports no passkey available.
+      //
+      // The second is what the admin does on the device page when they revoke a household member's
+      // passkey, so it is the ordinary path rather than an edge. `webauthn.ts` falls back to the
+      // discoverable flow if it happens anyway on some OTHER browser — this only spares THIS one
+      // the wasted ceremony, which is why both exist and neither is redundant.
+      if ((rows.length <= 1 && rows.some((p) => p.id === id)) || passkeyHintCredentialID() === id) {
+        forgetPasskey();
+      }
       setChallenge(null);
       invalidate();
     },

@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { APIError } from "@/lib/api";
 import { signInWithPasskey, webauthnAvailable } from "@/lib/webauthn";
+import { passkeyHintCredentialID } from "@/lib/passkeyHint";
 import { AuthPage, type AuthVariant } from "./AuthPage";
 
 // Shared password form for first-run setup and login. The BOX it sits in is `AuthPage`'s (qn.6m
@@ -76,6 +77,14 @@ export function PasswordForm({
   // connection — so it is the one that has to offer somewhere else to go.
   const [error, setError] = useState<{ message: string; code?: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  // WHETHER THIS BROWSER REMEMBERS A PARTICULAR CREDENTIAL, read ONCE (qn.13 D2.2). It decides
+  // whether *Use a different passkey* is offered at all: with nothing remembered the ceremony is
+  // already discoverable, so the control would ask for what is already happening.
+  //
+  // A LAZY INITIALISER, NOT A RENDER-TIME READ. `localStorage` is not reactive and the value can
+  // change under the component — `signInWithPasskey` clears it on a rejected assertion — so reading
+  // it during render would give two renders two different answers with no re-render between them.
+  const [hasCredentialHint] = useState(() => passkeyHintCredentialID() !== "");
 
   // THE EXPLICIT PASSKEY BUTTON — Operator-raised, and it is what makes the feature findable.
   //
@@ -92,7 +101,9 @@ export function PasswordForm({
   // It also gets its own user activation, which the conditional path cannot share: iOS 16+ grants
   // exactly ONE gesture-free `credentials.get()` per page load, and arming conditional mediation on
   // mount consumes it. The click is a second, fresh one.
-  async function passkeySignIn() {
+  // `forgetHint` is the *change user* path (D2.2): run the ceremony as if this browser remembered
+  // nothing, which is the discoverable flow rather than a separate mode.
+  async function passkeySignIn(forgetHint = false) {
     setBusy(true);
     setError(null);
     try {
@@ -104,7 +115,7 @@ export function PasswordForm({
         await passkeyProof.run();
         return;
       }
-      await signInWithPasskey({ conditional: false });
+      await signInWithPasskey({ conditional: false, forgetHint });
       await onPasskey?.();
     } catch (err) {
       if (err instanceof APIError) {
@@ -279,10 +290,34 @@ export function PasswordForm({
             variant="outline"
             className="mt-2 w-full"
             disabled={busy}
-            onClick={passkeySignIn}
+            // AN ARROW, NOT THE BARE REFERENCE. `onClick={passkeySignIn}` would hand React's click
+            // event to `forgetHint`, and an event object is truthy — so every press of the ordinary
+            // button would take the *change user* path and discard the hint silently.
+            onClick={() => passkeySignIn()}
           >
             {passkeyProof ? passkeyProof.cta : "Sign in with a passkey"}
           </Button>
+        ) : null}
+
+        {/* *USE A DIFFERENT PASSKEY* — D2.2's *change user*, and it is DELIBERATELY SUBTLE. The
+            common case is one person with one credential, for whom this control is noise; the case
+            it exists for is a phone holding both the admin's passkey and a device-scoped one, where
+            the button above now offers the remembered one directly and there would otherwise be no
+            way back to the chooser.
+
+            OFFERED ONLY WHERE IT DOES SOMETHING. With no remembered credential the ceremony is
+            already discoverable, so this would be a control that changes nothing — and on the reauth
+            path (`passkeyProof`) the ceremony is an authorization whose allow-list is the server's,
+            where widening it is exactly what must not happen. */}
+        {passkeys && webauthnAvailable() && !passkeyProof && hasCredentialHint ? (
+          <button
+            type="button"
+            className="mt-3 w-full text-sm text-muted underline underline-offset-2 disabled:opacity-50"
+            disabled={busy}
+            onClick={() => passkeySignIn(true)}
+          >
+            Use a different passkey
+          </button>
         ) : null}
 
         {/* SAID ONCE, IN PLACE OF THE BUTTON — not in addition to it. A reader on a LAN address

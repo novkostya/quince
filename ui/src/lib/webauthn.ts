@@ -1,5 +1,5 @@
 import { api, APIError } from "@/lib/api";
-import { forgetPasskey, rememberPasskey } from "@/lib/passkeyHint";
+import { forgetPasskey, passkeyHintCredentialID, rememberPasskey } from "@/lib/passkeyHint";
 // RE-EXPORTED so the many existing importers of these helpers keep working — the split in
 // `webauthnWire.ts` is structural and is not worth a rename sweep across the UI.
 export {
@@ -170,10 +170,11 @@ export async function registerPasskey(
       },
     },
   );
-  rememberPasskey();
+  // THE ID THIS CEREMONY JUST CREATED, so the next sign-in on this browser offers exactly it
+  // rather than asking the platform to choose (qn.13 D2.2).
+  rememberPasskey(cred.id);
   return true;
 }
-
 
 /**
  * signInWithPasskey runs the assertion ceremony and resolves the authenticated status.
@@ -189,12 +190,55 @@ export async function registerPasskey(
  *
  * ONE SHARED CEREMONY FOR BOTH, deliberately. The registration path already cost a bug that only
  * one of three copies would have carried; assertion is not getting three either.
+ *
+ * `forgetHint` runs the ceremony as if this browser remembered nothing — the *change user* path
+ * (qn.13 D2.2). It is deliberately not a separate mode: what it asks for is the discoverable flow,
+ * which is what quince did before this rung and what it still does for a browser with no hint.
  */
 export async function signInWithPasskey(opts: {
   conditional: boolean;
   signal?: AbortSignal;
+  forgetHint?: boolean;
 }): Promise<unknown> {
-  const begin = await api.post<BeginAssertion>("/api/auth/passkeys/login/begin", {});
+  const hint = opts.forgetHint ? "" : passkeyHintCredentialID();
+  try {
+    return await assertOnce(opts, hint);
+  } catch (err) {
+    // A REMEMBERED CREDENTIAL THAT NO LONGER EXISTS MUST FALL BACK, NOT DEAD-END (D2.2, G8). The
+    // admin revoked it, or the authenticator dropped it, and `allowCredentials` then names one
+    // thing the platform cannot find — so it reports no passkey available and the user is stuck on
+    // a page that should have worked.
+    //
+    // ONLY WHEN A HINT WAS SENT, and only once. With no hint the ceremony was already discoverable,
+    // so a retry would run the identical request and turn one refusal into two sheets.
+    //
+    // AND NOT FOR AN `APIError`, which is the server having REJECTED the assertion rather than the
+    // platform failing to produce one. Retrying that is asking a question already answered; the
+    // catch below has already forgotten the hint for exactly that case.
+    if (hint !== "" && !(err instanceof APIError)) {
+      forgetPasskey();
+      return await assertOnce(opts, "");
+    }
+    throw err;
+  }
+}
+
+/**
+ * assertOnce runs one assertion ceremony, offering `hint` when it is non-empty.
+ *
+ * SPLIT OUT SO THE FALLBACK IS A SECOND CALL RATHER THAN A FLAG. The retry must repeat the whole
+ * ceremony — a new `begin`, a new challenge, a new ceremony key — because the first one was spent:
+ * the server takes the key single-use, so reusing it answers `no_ceremony`. Writing it as one
+ * function with a loop hid that; two calls make it obvious that the second is a full round trip.
+ */
+async function assertOnce(
+  opts: { conditional: boolean; signal?: AbortSignal },
+  hint: string,
+): Promise<unknown> {
+  const begin = await api.post<BeginAssertion>(
+    "/api/auth/passkeys/login/begin",
+    hint === "" ? {} : { credential_id: hint },
+  );
   const pk = begin.options.publicKey;
 
   const cred = (await navigator.credentials.get({
@@ -203,7 +247,16 @@ export async function signInWithPasskey(opts: {
     publicKey: {
       ...pk,
       challenge: b64urlToBytes(pk.challenge as unknown as string),
-      allowCredentials: [],
+      // THE SERVER'S LIST, NOT AN EMPTY ONE. This read `allowCredentials: []` until qn.13 — a
+      // hardcoded "platform, you choose" that would have discarded the offer even once the server
+      // began sending one, and silently, because an empty list is also the valid discoverable case.
+      //
+      // The ids arrive base64url in JSON and `navigator.credentials.get` wants bytes, which is the
+      // same undoing `challenge` needs one line up.
+      allowCredentials: (pk.allowCredentials ?? []).map((c) => ({
+        ...c,
+        id: b64urlToBytes(c.id as unknown as string),
+      })),
     },
   })) as PublicKeyCredential | null;
   if (!cred) throw new Error("no credential");
@@ -224,9 +277,14 @@ export async function signInWithPasskey(opts: {
         },
       },
     );
-    // A passkey worked HERE. This is the case registration alone would miss: an iCloud-synced
-    // credential created on a phone is usable on a Mac that never registered anything.
-    rememberPasskey();
+    // A passkey worked HERE, and now WHICH one. This is the case registration alone would miss: an
+    // iCloud-synced credential created on a phone is usable on a Mac that never registered
+    // anything, and after this the Mac offers that credential directly.
+    //
+    // `cred.id` IS THE ASSERTED CREDENTIAL, not the one that was offered — so a discoverable
+    // ceremony teaches the browser an id it did not have, which is how the hint becomes specific
+    // without anybody choosing an account.
+    rememberPasskey(cred.id);
     return out;
   } catch (err) {
     // THE SERVER REJECTED IT — so stop firing the sheet unprompted and let the button be the way
