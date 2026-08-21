@@ -166,6 +166,13 @@ streams."* **That is true of the post-unlock tier and false of the pre-unlock on
 `Status.plist` are parsed nowhere in either library today, so reading them is new work. Not large,
 and not free.
 
+**One version's encryption state does not generalise to its device.** Measured on the Operator's iPad:
+`IsEncrypted=false` on the head, `true` with a wrapped 44-byte `ManifestKey` on twelve older snapshots.
+So a single device's version list can hold a version this tier serves **without a password** beside
+twelve that need one — and `Info.Encrypted` is already the per-version field that says which
+(`qn.8` D7). Named here because a tier that reads encryption off the DEVICE rather than off the
+VERSION would be right on most stands and wrong on this one, which is the stand the rung gate uses.
+
 ### D2 — The pre-unlock tier is THREE reads at three costs, and it is built cheapest-first
 
 | step | source | cost | what it adds |
@@ -235,9 +242,10 @@ two bodies.
 
 **1.1 s is not "instant" and the surface must not pretend otherwise.** Overview renders the device
 summary and the app list from D2 immediately, and per-app **sizes** arrive when the aggregate lands,
-with an explicit pending state. **The budget: the aggregate must complete within 3 s on the
-reference backup**, and the D4 harness is the regression check. If it regresses, that is a gate
-failure and not a slow afternoon.
+with an explicit pending state. **What is gated is the SHAPE, not the clock: one pass, asserted by
+counting** (G5). A wall-clock budget stood here and was withdrawn before any code was written — it
+would have passed a change that reintroduced pagination but happened to land inside it, which is the
+exact regression D4 exists to prevent. G5b keeps the number visible at a catastrophic-case bound.
 
 ### D5 — `FileCount`'s ambiguity is fixed in the LIBRARY
 
@@ -379,6 +387,9 @@ renders many.
 6. I lock, and nothing derived from the version's content survives — including the capability report.
 7. A locked version reports its file count as **unknown**, never as `0`.
 8. I can still reach the file browser and download any single file.
+9. A device whose history holds **both** encrypted and unencrypted versions renders correctly across
+   the list: the unencrypted one needs no password and its neighbours do, and the pre-unlock tier
+   looks the same on all of them.
 
 ## Gates
 
@@ -390,8 +401,19 @@ Beyond `make gates`:
 - **G3** — story 4: per-app + remainder == total, asserted over a fixture with domains in every class.
 - **G4** — story 5: three distinguishable outcomes, one fixture per state, including a domain built
   with a deliberately unrecognisable schema and one simply absent.
-- **G5** — **the D4 budget**: the aggregate completes within **3 s** on a 100,000-row fixture, and the
-  test fails rather than warns. quince#1444's fixture is the same shape and the two should share it.
+- **G5** — **D4's claim, asserted STRUCTURALLY**: the aggregate visits each row **once** and never
+  walks the paginated path. Counted, not timed. **A wall-clock budget was specified here and
+  withdrawn before any code was written** (architect, quince#1445): D4's claim is about control flow
+  — one unordered pass instead of 51–203 index-less sorts — and a clock encodes it as a fact about a
+  machine. The clock is the weaker gate as well as the flakier one, because **it can pass while the
+  regression is present**: a change that reintroduced pagination but happened to land inside the
+  budget would be waved through by the timer and caught by the pass count. Precedent for the flake
+  half is quince#1372.
+- **G5b** — wall-clock as a **reported number with a catastrophic-case bound**, failing only at
+  **10×** the reference measurement (1.1 s on the real backup, so a bound of 11 s). It exists to
+  catch an order-of-magnitude regression that is somehow still one pass, and it is labelled as that
+  rather than as the budget. **The reference figure is from the staging stand; CI hardware is not
+  pinned**, which is precisely why it is a loose backstop and not the gate.
 - **G6** — story 6: after lock, the session's capability report and scratch are gone; the existing
   `qn.8` teardown assertion is extended rather than duplicated.
 - **G7** — **owed to the Operator, and named as owed**: M7's rung gate — overview renders the real
@@ -401,7 +423,15 @@ Beyond `make gates`:
 ## Fixtures
 
 - A **large** fixture — 100,000 rows, ~1,200 domains — for G5. Generated, not captured; shared with
-  quince#1444.
+  quince#1444. **BLOCKED, and not on this rung:** the generator inserts each row in its own implicit
+  transaction, so this fixture costs **15 m 20 s** to build today — measured, and a 300,000-row build
+  exceeded a 40-minute timeout without reaching the measurement it was for. One `BEGIN`/`COMMIT`
+  makes it ~1.3 s (**776×**, measured). That is `novkostya/ios-backup-crypt#11`, it is test-support
+  only, and until it lands neither G5 nor quince#1444 can run their fixture in CI.
+- **A version history holding BOTH encrypted and unencrypted versions of one device** — story 9.
+  Not invented: measured on the Operator's iPad, whose head reads `IsEncrypted=false` while twelve
+  older snapshots read `true` with a wrapped `ManifestKey`. It is the fixture shape most likely to
+  catch a tier that assumes a device is uniformly one or the other.
 - One fixture per D6 state: a readable domain, an unrecognisable one, an absent one.
 - Pre-unlock fixtures **blocked on D8's upstream work** for `Info.plist` / `Status.plist`; D2(a)'s are
   buildable today.
@@ -421,7 +451,7 @@ Beyond `make gates`:
 | **Don't improvise architecture** | The three ruled questions are transcribed at D1, D5, D6. Rung-local calls — `Known bool` over an error, "apps" meaning the 21, three capability states, D10's default view — are recorded here, in the spec, which is the cheapest durable home. **D4 touches a contract surface**, so it is written into contracts in the same PR rather than decided in code. |
 | **Secrets discipline** | The backup password reaches `Unlock` and nothing else; overview never logs it and the pre-unlock route never receives one. Fixture password stays `test`. |
 | **Every hardware bug becomes a replay fixture** | quince#1444 came out of this rung's measurement and carries that requirement; G5's fixture is the shape that expresses it. |
-| **Config tidiness** | No new config key. D6's cache is the `qn.8` session's lifetime; D4's budget is a gate constant, not a setting. |
+| **Config tidiness** | No new config key. D6's cache is the `qn.8` session's lifetime; D4 gates a shape (one pass), not a duration; G5b's bound is a gate constant, not a setting. |
 
 **Near-miss, declared:** D2(c) reads `IMEI` / `ICCID` / `Phone Number`. Under D1 that is in scope and
 not a privacy breach on the Operator's own screen, but it is one file-write away from being one, which
