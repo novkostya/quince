@@ -148,7 +148,7 @@ func TestFinishEnrolmentRereadsTheSecretAndRefusesARevokedOne(t *testing.T) {
 		t.Fatalf("Revoke: %v", err)
 	}
 
-	_, _, _, err = svc.FinishEnrolment(cer, enr, key, "phone", rpHome, tok, nil, time.Now().UTC(), "")
+	_, _, _, err = svc.FinishEnrolment(cer, enr, key, "phone", rpHome, tok, nil, time.Now().UTC(), "", "10.0.0.2")
 	if !errors.Is(err, ErrEnrolmentRevoked) {
 		t.Fatalf("got %v, want ErrEnrolmentRevoked", err)
 	}
@@ -179,5 +179,85 @@ func TestBeginEnrolmentIsRateLimited(t *testing.T) {
 	// by the first one's retries.
 	if _, _, err := svc.BeginEnrolment(NewPasskeyCeremonies(), enr, rpHome, tok, "10.0.0.10"); err != nil {
 		t.Fatalf("a different address was refused: %v", err)
+	}
+}
+
+// FINISH IS METERED TOO, and this is the twin the review asked for (quince#1426).
+//
+// Begin's limiter claimed to bound guessing at the secret. It did not while this door took the same
+// secret unmetered — an attacker would have used this one, and it does MORE work per request: a full
+// attestation verification runs before anything can refuse.
+func TestFinishEnrolmentIsRateLimited(t *testing.T) {
+	svc, enr, _ := enrolService(t)
+	tok, _ := mintFor(t, enr, enrolDevice)
+
+	// THE CONTROL: one call from a fresh address is NOT rate-limited. It fails for a ceremony
+	// reason instead, which is what proves the limiter is not simply refusing everything.
+	_, _, _, err := svc.FinishEnrolment(NewPasskeyCeremonies(), enr, "no-such-ceremony", "phone",
+		rpHome, tok, nil, time.Now().UTC(), "", "10.0.0.20")
+	if errors.Is(err, ErrRateLimited) {
+		t.Fatalf("control: the first call from a fresh address was rate-limited")
+	}
+
+	var lastErr error
+	for range 10 {
+		_, _, _, lastErr = svc.FinishEnrolment(NewPasskeyCeremonies(), enr, "no-such-ceremony", "phone",
+			rpHome, tok, nil, time.Now().UTC(), "", "10.0.0.21")
+	}
+	if !errors.Is(lastErr, ErrRateLimited) {
+		t.Fatalf("got %v after ten attempts from one address, want ErrRateLimited", lastErr)
+	}
+}
+
+// THE CEREMONY'S SCOPE IS COMPARED AT FINISH, so a registration begun for one device cannot be
+// finished for another (quince#1426 review).
+//
+// UNREACHABLE THROUGH ANY SHIPPED CALLER, and that is stated rather than hidden: both call sites
+// resolve the scope identically, so this refusal fires for nobody today. It exists so a third
+// caller cannot mint a credential confined to a device its ceremony was never begun for — the same
+// shape as `store.Scope` and `Disclosure`, which also cost a line and remove a class of mistake.
+func TestARegistrationCannotBeFinishedUnderADifferentScope(t *testing.T) {
+	svc, _, _ := enrolService(t)
+	const other = "DEVICE-B"
+	if err := svc.store.UpsertDeviceIdentity(store.DeviceIdentityRow{
+		UDID: other, Name: "Other iPhone", UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// THE CONTROL: finishing under the SAME scope gets past this guard, and fails later on the
+	// authenticator response — which is the point, since there is no authenticator here.
+	cer := NewPasskeyCeremonies()
+	_, key, err := BeginPasskeyRegistration(svc.store, cer, rpHome, store.DeviceScope(enrolDevice), DiscloseNothing())
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	_, err = FinishPasskeyRegistration(svc.store, cer, key, "phone", rpHome, nil, time.Now().UTC(),
+		store.DeviceScope(enrolDevice))
+	if errors.Is(err, ErrScopeMismatch) {
+		t.Fatalf("control: the matching scope was refused as a mismatch")
+	}
+
+	cer2 := NewPasskeyCeremonies()
+	_, key2, err := BeginPasskeyRegistration(svc.store, cer2, rpHome, store.DeviceScope(enrolDevice), DiscloseNothing())
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	_, err = FinishPasskeyRegistration(svc.store, cer2, key2, "phone", rpHome, nil, time.Now().UTC(),
+		store.DeviceScope(other))
+	if !errors.Is(err, ErrScopeMismatch) {
+		t.Fatalf("got %v, want ErrScopeMismatch — a ceremony begun for one device was finished for another", err)
+	}
+	// AND THE ADMIN DIRECTION, which is the one with teeth: a scoped ceremony must not be
+	// completable as an admin credential.
+	cer3 := NewPasskeyCeremonies()
+	_, key3, err := BeginPasskeyRegistration(svc.store, cer3, rpHome, store.DeviceScope(enrolDevice), DiscloseNothing())
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	_, err = FinishPasskeyRegistration(svc.store, cer3, key3, "phone", rpHome, nil, time.Now().UTC(),
+		store.AdminScope())
+	if !errors.Is(err, ErrScopeMismatch) {
+		t.Fatalf("got %v, want ErrScopeMismatch — a scoped ceremony was finishable as ADMIN", err)
 	}
 }

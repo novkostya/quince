@@ -54,3 +54,13 @@ func DiscloseNothing() Disclosure { return Disclosure{set: true} }
 
 // excludes reports whether this ceremony sends the exclusion list.
 func (d Disclosure) excludes() bool { return d.exclude }
+
+// ErrScopeMismatch — a registration ceremony was begun for one confinement and finished for another.
+//
+// UNREACHABLE BY ANY CALLER TODAY, AND THAT IS THE POINT. Both call sites resolve the scope the same
+// way, so this refusal fires for nobody — it exists so that a THIRD caller, written later by
+// somebody who has not read D4, cannot mint a credential confined to a device its ceremony was never
+// begun for. The rung's other structural guards (`store.Scope`, `Disclosure`) are the same shape:
+// they cost a line and remove a whole class of mistake from the space of writable programs.
+var ErrScopeMismatch = errors.New(
+	"auth: this ceremony was begun for a different device — start the registration again")

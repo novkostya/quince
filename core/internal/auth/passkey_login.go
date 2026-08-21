@@ -36,7 +36,10 @@ func (s *Service) BeginPasskeyAssertion(cer *PasskeyCeremonies, rpID, clientIP s
 	if err != nil {
 		return nil, "", err
 	}
-	key, err := cer.put(session, rpID, ceremonyAssert)
+	// AN ASSERTION CARRIES NO SCOPE. Scope resolves from `credential_id` AFTER the assertion (D2),
+	// so a login ceremony has nothing to record and nothing to compare — `AdminScope()` here would
+	// be a claim, not a fact. The zero value says "not applicable", and only registration compares.
+	key, err := cer.put(session, rpID, ceremonyAssert, store.Scope{})
 	if err != nil {
 		return nil, "", err
 	}
