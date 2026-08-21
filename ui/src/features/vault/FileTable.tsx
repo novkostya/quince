@@ -78,7 +78,33 @@ export function FileTable({ entries, sessionID }: { entries: VaultFileEntry[]; s
                 authority beside the header, and the two could disagree.
 
                 OFFERED ON FILES ONLY. `Open` on a directory or a symlink answers `not_a_file`
-                (story 7), so a control here would be a button whose only outcome is a refusal. */}
+                (story 7), so a control here would be a button whose only outcome is a refusal.
+                A PLAIN NAVIGATION, WITH NO `target`, AND THAT IS A DECISION RATHER THAN A DEFAULT
+                (review, quince#1425). On success `Content-Disposition: attachment` means the
+                browser downloads and this page survives. **On a FAILURE there is no such header**,
+                so the browser renders the JSON body and the browse page is gone — list, filter and
+                session with it. The reachable case is a session that expired between load and
+                click, which is the one case this page otherwise handles well.
+
+                `target="_blank" rel="noopener"` would keep the page and put the failure in a tab
+                the user closes. It is NOT taken, for two reasons and one absence:
+
+                  - the cost lands on the COMMON path. Every successful download opens a tab, and
+                    on some engines it stays blank. This product is read on a phone, so that is a
+                    certain repeated annoyance traded against an occasional one;
+                  - the failure is RECOVERABLE. Back returns here, and a fresh mount holds no
+                    session, so the reader lands on the locked panel with an Open button — the
+                    same place an expiry sends them anyway;
+                  - and WHICH engines leave the tab blank is not measured. quince#1405 is exactly
+                    that measurement — `Content-Disposition` rendering across Chrome, Firefox and
+                    WebKit — and it is blocked on the e2e rig being chromium-only. Choosing
+                    `_blank` today would be choosing on a guess about the browser this product is
+                    mostly used in.
+
+                What is genuinely poor here is the raw JSON error document; it is a surface no
+                other part of this page would accept. If quince#1405 lands and shows the tab is
+                closed cleanly on WebKit, revisit this.
+            */}
             {e.kind === "file" ? (
               <a
                 href={`/api/sessions/${sessionID}/file/${e.file_id}`}
