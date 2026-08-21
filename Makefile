@@ -243,9 +243,28 @@ privacy-check: ## Sweep for Operator-private strings (REF=<range> whole-branch, 
 closing-refs-check: ## Find bare closing keywords that auto-close an issue (REF=<range>, TEXT=<file>); 0 none · 1 found · 2 DID NOT LOOK
 	@bin/closing-refs-check $(if $(REF),--ref $(REF)) $(if $(TEXT),--text $(TEXT))
 
+# THE WRAPPER MUST BE OVERRIDABLE, BECAUSE THE SEAT THAT RUNS THIS CANNOT ALWAYS USE THE DEFAULT
+# (quince#1407). `bin/stale-refs-report` takes `--gh` and defaults to `bin/gh-coder` beside itself;
+# this recipe passed `--repo`, `--prs` and `--issues` through and not that one. On the ARCHITECT box
+# `gh-coder` refuses on sight of the reviewer key (devlog#7) — correctly — so the target exited 2,
+# NO VERDICT, for the seat whose `/retire` §2 prescribes it. Measured there 2026-08-21.
+#
+# THE SCRIPT WAS NEVER THE PROBLEM. It is seat-agnostic already, which is why the fix is a
+# passthrough rather than a resolution: the escape existed and `make` was the only thing hiding it.
+#
+# `GH_CLI` IS THE NAME ALREADY IN THIS FILE and `pr-title-check` reads it too (`PR_TITLE_GH`,
+# below). quince#1407 proposed `GH=`; taking that spelling would leave this Makefile answering one
+# question under two names, which is the drift this project files issues about.
+#
+# NO DEFAULT CHAIN HERE, DELIBERATELY. `PR_TITLE_GH` resolves one because `bin/pr-title-refs` falls
+# back to bare `gh`, which is unauthenticated everywhere. This script falls back to `bin/gh-coder`,
+# which is right on the box that opens pull requests — so an unset `GH_CLI` must reach the script as
+# nothing at all, rather than as a make-time guess about which seat is calling. A make-time test
+# cannot discriminate seats: the discriminator is which CREDENTIAL is present at run time, not which
+# file is checked in (quince#1241 review, same reasoning, one target down).
 .PHONY: stale-refs-report
-stale-refs-report: ## Open issues whose fix merged under Refs and which nobody closed (REPO=, PRS=, ISSUES=); 0 looked · 2 NO VERDICT
-	@bin/stale-refs-report $(if $(REPO),--repo $(REPO)) $(if $(PRS),--prs $(PRS)) $(if $(ISSUES),--issues $(ISSUES))
+stale-refs-report: ## Open issues whose fix merged under Refs and which nobody closed (REPO=, PRS=, ISSUES=, GH_CLI=); 0 looked · 2 NO VERDICT
+	@bin/stale-refs-report $(if $(REPO),--repo $(REPO)) $(if $(GH_CLI),--gh $(GH_CLI)) $(if $(PRS),--prs $(PRS)) $(if $(ISSUES),--issues $(ISSUES))
 
 .PHONY: gap-heading-check
 gap-heading-check: ## Find a `PROPOSED (gap)` block whose own body says RULED; 0 none · 1 found · 2 DID NOT RUN
