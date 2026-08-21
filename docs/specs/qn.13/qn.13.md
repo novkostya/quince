@@ -142,6 +142,17 @@ different authority. The constant stays correct for admin credentials and only f
 **It also disarms the measurement's defect.** Two credentials with different usernames do not
 collapse, so the unselectable single row cannot arise even on a phone holding both.
 
+**A DEVICE NAMED `quince-admin` IS DELIBERATELY NOT REFUSED** — Operator, 2026-08-21, given in
+session and relayed here; **it is not on the forge, and this paragraph is the whole of its
+provenance.** Such a device would collide with the admin credential's username and collapse exactly
+as two same-named devices do, and it is refused nowhere. Asked whether to guard it: *"I'd do nothing,
+I don't think it's worth our attention."*
+
+**Written down because the absence is the kind a later reader corrects.** `scopeUsername` refuses two
+devices sharing a name a few lines earlier, so the obvious next thought is that the admin anchor
+belongs in that set — and adding it would be undoing a ruling rather than closing a hole. The same
+note sits at the code.
+
 ### D2.2 — quince chooses which credential is offered; the platform stops choosing
 
 The measurement showed iOS selecting a credential with no way for the user to intervene. The fix is
@@ -624,9 +635,11 @@ Each is one PR carrying one reviewable claim, **sequenced from `main`, not stack
 | **5** | quince#1001, and quince#1259's reachable-and-scope-aware `ErrLastCredential` (D9) | no |
 | **6** | the credential username: scoped rows carry their device, admin rows keep `quince-admin` (D2.1, G7) | no |
 | **7** | the remembered principal and the subtle *change user* — `passkeyHint` holds a credential id, login sends `allowCredentials` (D2.2, G8) | no |
-| **7b** | **the socket: a principal, and a send-time scope filter** (D8.1, G9) — landed FIRST of the confinement work because it is the only surface that leaks with nobody acting | no |
-| **8** | authorization at every route, and the shell's shape (D3, D8, G3) — **four shapes, not one check**: refuse · resource-check · response-filter · a body-check for `POST /api/jobs`, whose device is in the payload rather than the path. Slice further before building | no |
-| **9** | the enrolment ceremony and the QR, against fact 8's precedent, excluding nothing (D4, D4.1, D5, G4) — **AFTER slice 8; see the ordering rule below** | no |
+| **7b** | **the socket: a principal, and a send-time scope filter** (D8.1, G9) — **merged**, quince#1380. Landed FIRST of the confinement work because it is the only surface that leaks with nobody acting | — |
+| **8a** | every route carries a scope decision; `adminOnly` refuses (D3, D8) — quince#1384 | no |
+| **8b** | the resource-check: a scoped principal reaches only its OWN device, including `POST /api/jobs`, whose device is in the body rather than the path | no |
+| **8c** | the response filter: `GET /api/jobs` and `GET /api/versions` narrowed to their device; the shell's shape (G3) | no |
+| **9** | the enrolment ceremony and the QR, against fact 8's precedent, excluding nothing (D4, D4.1, D5, G4) — **AFTER 8a/8b/8c; see the ordering rule below** | no |
 | **10** | the send-path filter and the preference's owner column, backfilled admin-owned (D7, G5) | no |
 | **11** | the admin's view: marked rows, listed secrets, revocation from the device page (D9) | no |
 

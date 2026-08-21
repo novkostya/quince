@@ -497,6 +497,17 @@ func scopeUsername(st *store.Store, scope store.Scope) (string, error) {
 			return "", ErrAmbiguousScopeDevice{Name: match}
 		}
 	}
+	// A DEVICE NAMED `quince-admin` IS DELIBERATELY NOT REFUSED — Operator, 2026-08-21, given in
+	// session and relayed here; it is not on the forge, and this comment is the whole of its
+	// provenance.
+	//
+	// It would collide with the admin credential's username and collapse the same way two same-named
+	// devices do. It is refused nowhere, and that is a DECISION rather than the gap it looks like:
+	// "I'd do nothing, I don't think it's worth our attention."
+	//
+	// Recorded because the absence is the kind a later reader corrects. The ambiguity check directly
+	// above refuses two devices sharing a name, so the obvious next thought is that the admin anchor
+	// should be in that set — and adding it would be undoing a ruling, not closing a hole.
 	return match, nil
 }
 
