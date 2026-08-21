@@ -35,6 +35,14 @@ type PushSubscription struct {
 	CreatedAt  time.Time
 	ExpiredAt  *time.Time // non-nil once the push service answered 410/404
 	LastSentAt *time.Time
+
+	// ScopeUDID is the device whose notifications this subscription may receive, or nil for
+	// the admin, who receives every device's (0017_push_subscription_scope.sql).
+	//
+	// IT IS READ AT SEND, NOT ACTED ON AT SUBSCRIBE (spec D7). A scope can change and a
+	// credential can be revoked after a subscription exists, so narrowing once at subscribe
+	// would keep delivering under authority that has since gone.
+	ScopeUDID *string
 }
 
 // Live reports whether this subscription can still receive.
@@ -65,9 +73,10 @@ func (s *Store) AddPushSubscription(p PushSubscription) error {
 		return nil
 	}
 	_, err = s.db.Exec(
-		`INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, label, origin, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Endpoint, p.P256DH, p.Auth, p.Label, p.Origin, p.CreatedAt.UTC().Format(time.RFC3339))
+		`INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, label, origin, created_at, scope_udid)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Endpoint, p.P256DH, p.Auth, p.Label, p.Origin, p.CreatedAt.UTC().Format(time.RFC3339),
+		p.ScopeUDID)
 	if err != nil {
 		return fmt.Errorf("store: add subscription: %w", err)
 	}
@@ -81,7 +90,7 @@ func (s *Store) AddPushSubscription(p PushSubscription) error {
 // silent-fallback this rung is written against.
 func (s *Store) PushSubscriptions() ([]PushSubscription, error) {
 	rows, err := s.db.Query(
-		`SELECT id, endpoint, p256dh, auth, label, origin, created_at, expired_at, last_sent_at
+		`SELECT id, endpoint, p256dh, auth, label, origin, created_at, expired_at, last_sent_at, scope_udid
 		   FROM push_subscriptions ORDER BY created_at DESC, id DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list subscriptions: %w", err)
@@ -92,12 +101,15 @@ func (s *Store) PushSubscriptions() ([]PushSubscription, error) {
 	for rows.Next() {
 		var p PushSubscription
 		var created string
-		var origin, expired, lastSent sql.NullString
-		if err := rows.Scan(&p.ID, &p.Endpoint, &p.P256DH, &p.Auth, &p.Label, &origin, &created, &expired, &lastSent); err != nil {
+		var origin, expired, lastSent, scopeUDID sql.NullString
+		if err := rows.Scan(&p.ID, &p.Endpoint, &p.P256DH, &p.Auth, &p.Label, &origin, &created, &expired, &lastSent, &scopeUDID); err != nil {
 			return nil, fmt.Errorf("store: scan subscription: %w", err)
 		}
 		p.CreatedAt, _ = time.Parse(time.RFC3339, created)
 		p.Origin = origin.String
+		if scopeUDID.Valid {
+			p.ScopeUDID = &scopeUDID.String
+		}
 		if expired.Valid {
 			if t, err := time.Parse(time.RFC3339, expired.String); err == nil {
 				p.ExpiredAt = &t
