@@ -194,7 +194,7 @@ func TestBeginRegistrationOnAFreshBox(t *testing.T) {
 	st := newResetStore(t)
 	cer := NewPasskeyCeremonies()
 
-	options, key, err := BeginPasskeyRegistration(st, cer, rpHome, store.AdminScope())
+	options, key, err := BeginPasskeyRegistration(st, cer, rpHome, store.AdminScope(), ExcludeRegistered())
 	if err != nil {
 		t.Fatalf("BeginPasskeyRegistration: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestBeginRegistrationRefusesAnIPAddress(t *testing.T) {
 	st := newResetStore(t)
 	cer := NewPasskeyCeremonies()
 
-	_, _, err := BeginPasskeyRegistration(st, cer, "192.0.2.10", store.AdminScope())
+	_, _, err := BeginPasskeyRegistration(st, cer, "192.0.2.10", store.AdminScope(), ExcludeRegistered())
 
 	var un ErrUnsupportedRPID
 	if !errors.As(err, &un) {
@@ -231,7 +231,7 @@ func TestFinishRefusesACeremonyFromAnotherDomain(t *testing.T) {
 	st := newResetStore(t)
 	cer := NewPasskeyCeremonies()
 
-	_, key, err := BeginPasskeyRegistration(st, cer, rpHome, store.AdminScope())
+	_, key, err := BeginPasskeyRegistration(st, cer, rpHome, store.AdminScope(), ExcludeRegistered())
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestRegistrationRequiresADiscoverableCredential(t *testing.T) {
 	st := newResetStore(t)
 	cer := NewPasskeyCeremonies()
 
-	options, _, err := BeginPasskeyRegistration(st, cer, rpHome, store.AdminScope())
+	options, _, err := BeginPasskeyRegistration(st, cer, rpHome, store.AdminScope(), ExcludeRegistered())
 	if err != nil {
 		t.Fatalf("BeginPasskeyRegistration: %v", err)
 	}

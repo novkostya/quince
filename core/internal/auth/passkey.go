@@ -274,8 +274,14 @@ func relyingParty(rpID string) (*webauthn.WebAuthn, error) {
 // argument for the same reason `store.InsertPasskey`'s is: a ceremony that forgot it would
 // label a household member's phone `quince-admin`, and a forgotten argument is a compile error
 // where a forgotten field is a silent wrong answer.
+//
+// The `disclose` argument decides whether the exclusion list is sent, and is positional for the
+// same reason again — see `Disclosure`, and spec D4.1 for why the two ceremonies differ.
 func BeginPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, rpID string,
-	scope store.Scope) (any, string, error) {
+	scope store.Scope, disclose Disclosure) (any, string, error) {
+	if !disclose.set {
+		return nil, "", ErrDisclosureUnset
+	}
 	wa, err := relyingParty(rpID)
 	if err != nil {
 		return nil, "", err
@@ -296,12 +302,17 @@ func BeginPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, rpID stri
 		return nil, "", err
 	}
 
-	// EXCLUDE WHAT IS ALREADY REGISTERED, so a second attempt on the same authenticator is refused
-	// by the device with "you already have a passkey here" instead of silently minting a duplicate
-	// the user cannot tell apart in the list.
+	// EXCLUDE WHAT IS ALREADY REGISTERED — or deliberately do not. See `Disclosure` and spec D4.1:
+	// for the admin's own path this stops a duplicate the user cannot tell apart in the list; for
+	// the pre-auth enrolment ceremony it would disclose every admin credential id to whoever
+	// scanned the QR.
+	opts := []webauthn.RegistrationOption{}
+	if disclose.excludes() {
+		opts = append(opts, webauthn.WithExclusions(credentialDescriptors(existing)))
+	}
 	creation, session, err := wa.BeginRegistration(
 		passkeyUser{handle: handle, creds: existing, name: username},
-		webauthn.WithExclusions(credentialDescriptors(existing)),
+		opts...,
 	)
 	if err != nil {
 		return nil, "", err

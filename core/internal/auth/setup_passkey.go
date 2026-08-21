@@ -52,7 +52,7 @@ func (s *Service) BeginSetupPasskey(cer *PasskeyCeremonies, rpID, clientIP strin
 		return nil, "", ErrAlreadyConfigured
 	}
 	// First run creates the ADMIN credential, and says so rather than defaulting to it.
-	return BeginPasskeyRegistration(s.store, cer, rpID, store.AdminScope())
+	return BeginPasskeyRegistration(s.store, cer, rpID, store.AdminScope(), ExcludeRegistered())
 }
 
 // FinishSetupPasskey completes a first-run registration and ISSUES A SESSION, exactly as
