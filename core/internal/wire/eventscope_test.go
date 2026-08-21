@@ -79,26 +79,79 @@ func TestGlobalEventsAreNotDeviceScoped(t *testing.T) {
 }
 
 func TestDeviceEventsCarryTheirDevice(t *testing.T) {
-	cases := []struct {
-		typ  string
-		data any
-	}{
-		{EventDeviceAttached, DeviceEvent{Device: Device{UDID: "DEV-A"}}},
-		{EventDeviceUpdated, Device{UDID: "DEV-A"}},
-		{EventJobUpdated, Job{UDID: "DEV-A"}},
-		{EventJobLog, JobLogChunk{JobID: "j1", UDID: "DEV-A"}},
-		{EventOpUpdated, Op{UDID: "DEV-A"}},
-		{EventVersionCreated, Version{UDID: "DEV-A"}},
+	// KEYED BY THE CONSTANT'S VALUE, and checked for completeness against the parsed set below.
+	//
+	// The first version of this test was six literal cases against eight device-bearing constants —
+	// `device.detached` and `version.deleted` were missing (quince#1380 review). Neither had a live
+	// defect, but the property this test exists to hold was unheld for them: if either later carried
+	// a lighter payload, `udidOf` would return "", a scoped holder would silently stop receiving
+	// their own device's events, and this test would still pass. **A guard against hand-kept lists
+	// that is itself a hand-kept list**, one layer in.
+	cases := map[string]any{
+		EventDeviceAttached: DeviceEvent{Device: Device{UDID: "DEV-A"}},
+		EventDeviceDetached: DeviceEvent{Device: Device{UDID: "DEV-A"}},
+		EventDeviceUpdated:  Device{UDID: "DEV-A"},
+		EventJobUpdated:     Job{UDID: "DEV-A"},
+		EventJobLog:         JobLogChunk{JobID: "j1", UDID: "DEV-A"},
+		EventOpUpdated:      Op{UDID: "DEV-A"},
+		EventVersionCreated: Version{UDID: "DEV-A"},
+		EventVersionDeleted: Version{UDID: "DEV-A"},
 	}
-	for _, c := range cases {
-		udid, scoped := EventDevice(Envelope{Type: c.typ, Data: c.data})
+
+	// COMPLETENESS, DERIVED. Every constant the classifier calls device-bearing must have a case, so
+	// a ninth one cannot be added without either a payload here or a failure naming it.
+	for _, value := range declaredEventValues(t) {
+		if _, scoped := EventDevice(Envelope{Type: value}); !scoped {
+			continue
+		}
+		if _, ok := cases[value]; !ok {
+			t.Errorf("%q is device-bearing and has no case here — the property that it carries its "+
+				"device is unheld for it", value)
+		}
+	}
+
+	for typ, data := range cases {
+		udid, scoped := EventDevice(Envelope{Type: typ, Data: data})
 		if !scoped {
-			t.Errorf("%s reported as global — a scoped holder would receive every device's", c.typ)
+			t.Errorf("%s reported as global — a scoped holder would receive every device's", typ)
 		}
 		if udid != "DEV-A" {
-			t.Errorf("%s: got udid %q want DEV-A", c.typ, udid)
+			t.Errorf("%s: got udid %q want DEV-A", typ, udid)
 		}
 	}
+}
+
+// declaredEventValues returns the string VALUE of every Event* constant, parsed from source.
+//
+// Values rather than names, because the classifier switches on the value. The parse is shared with
+// the totality gate so both tests see the same set.
+func declaredEventValues(t *testing.T) []string {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "envelope.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse envelope.go: %v", err)
+	}
+	var out []string
+	ast.Inspect(f, func(n ast.Node) bool {
+		vs, ok := n.(*ast.ValueSpec)
+		if !ok || len(vs.Names) == 0 || len(vs.Values) == 0 {
+			return true
+		}
+		if !strings.HasPrefix(vs.Names[0].Name, "Event") {
+			return true
+		}
+		lit, ok := vs.Values[0].(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return true
+		}
+		out = append(out, strings.Trim(lit.Value, `"`))
+		return true
+	})
+	if len(out) < 10 {
+		t.Fatalf("parsed only %d event values; the parse is not seeing them", len(out))
+	}
+	return out
 }
 
 // AN UNKNOWN TYPE FAILS CLOSED. It is unreachable while the totality gate passes; this asserts the

@@ -2,12 +2,14 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -138,3 +140,61 @@ func TestWSUnauthenticatedRejected(t *testing.T) {
 		}
 	}
 }
+
+// THE SOCKET ENDS WHEN ITS SESSION DOES (quince#1380 review, finding 1).
+//
+// `authFn` used to run once, pre-upgrade, so a client that logged out — or whose session
+// quince#1001 deleted when its credential was removed — kept receiving every frame until it
+// disconnected on its own. That was true before qn.13 and nobody had cause to notice; it becomes a
+// confinement hole the moment a principal can be revoked.
+//
+// It also bounds how stale a scope may be: the re-resolve is the same tick as the ping, so a scope
+// change takes effect within one interval rather than lasting the connection.
+func TestSocketClosesWhenTheSessionEnds(t *testing.T) {
+	// Shrink the beat rather than waiting a real 30 seconds; restored on exit so no other test
+	// inherits it. Set BEFORE the handler is built, because the ticker is created at dial time.
+	defer func(v time.Duration) { pingInterval = v }(pingInterval)
+	pingInterval = 50 * time.Millisecond
+
+	b := bus.New()
+	var live atomic.Bool
+	live.Store(true)
+	authFn := func(string) (Principal, error) {
+		if !live.Load() {
+			return Principal{}, errGone
+		}
+		return AdminPrincipal(), nil
+	}
+
+	srv := httptest.NewServer(Handler(b, authFn, "1.2.3", nil,
+		slog.New(slog.NewTextHandler(io.Discard, nil))))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"),
+		&websocket.DialOptions{HTTPHeader: http.Header{"Origin": {srv.URL}}})
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+	// hello arrives while the session is live — the control, so a socket that closed immediately
+	// could not pass this test.
+	if _, _, err := conn.Read(ctx); err != nil {
+		t.Fatalf("hello: %v", err)
+	}
+
+	live.Store(false) // the session ends under the socket
+	// Shrink the beat rather than waiting a real 30 seconds; restored on exit so no other test
+	// inherits it.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, _, err := conn.Read(ctx); err != nil {
+			return // closed, which is the assertion
+		}
+	}
+	t.Fatal("the socket outlived its session — a revoked client kept receiving")
+}
+
+var errGone = errors.New("session gone")
