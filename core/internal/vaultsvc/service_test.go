@@ -237,3 +237,36 @@ func TestABrowseDuringADownloadIsRefused(t *testing.T) {
 		t.Errorf("browse during a stream = %q, want busy", code)
 	}
 }
+
+// codeFor must not answer "" for a FAILURE, and this is the one gap the vocabulary cannot
+// see: the enumeration in wire is total over the codes, and "" is deliberately not one of
+// them.
+//
+// The hazard is the handler shape. `if code != ""` takes the SUCCESS branch, so an error
+// path that reaches Browse or OpenFile with an empty code writes 200 with a zero-valued page
+// or entry — a failure rendered as an empty success, which no status-table test can catch
+// because no status is involved.
+//
+// ErrIncompleteFile is the deliberate exception and is pinned here rather than excluded
+// silently: it is NOT a failure — every byte the backup holds was delivered — and it travels
+// as a field (D8.1). It is unreachable on these paths today because it is the terminal error
+// of the STREAM, arriving after OpenStream has already returned, where WatchIncomplete
+// surfaces it. Pinning it is what makes a future change that routes it through codeFor into
+// a test failure rather than a silent 200. (quince#1378 review.)
+func TestCodeForNeverAnswersEmptyForAFailure(t *testing.T) {
+	for _, err := range []error{
+		vault.ErrNoSession, vault.ErrSessionBusy, vault.ErrBadPassword, vault.ErrCorruptManifest,
+		vault.ErrFileNotFound, vault.ErrNotAFile, vault.ErrLocked, vault.ErrNoCanary,
+		errors.New("something below fell over"),
+	} {
+		if got := codeFor(err); got == "" {
+			t.Errorf("codeFor(%v) = \"\", which the handlers read as SUCCESS: the caller would "+
+				"get 200 and an empty body for a failed request", err)
+		}
+	}
+
+	if got := codeFor(vault.ErrIncompleteFile); got != "" {
+		t.Errorf("codeFor(ErrIncompleteFile) = %q, want \"\": it is not a failure, and routing it "+
+			"through a code would report an I/O error on a read that delivered every byte", got)
+	}
+}
