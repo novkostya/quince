@@ -21,6 +21,7 @@ type fakeVault struct {
 	mu        sync.Mutex
 	closed    int
 	unlockErr error
+	statErr   error
 
 	// blockOpen, when non-nil, holds Open until it is closed — so a test can have an
 	// operation genuinely in flight while it tries to tear the session down.
@@ -33,9 +34,14 @@ func (f *fakeVault) Unlock(context.Context, string) (Info, error) {
 	}
 	return Info{DeviceName: "test-device", IOSVersion: "26.0", FileCount: 3, Encrypted: true}, nil
 }
-func (f *fakeVault) List(context.Context, Query) (Page, error)       { return Page{}, nil }
-func (f *fakeVault) Stat(context.Context, string) (FileEntry, error) { return FileEntry{}, nil }
-func (f *fakeVault) VerifyCanary(context.Context) error              { return nil }
+func (f *fakeVault) List(context.Context, Query) (Page, error) { return Page{}, nil }
+func (f *fakeVault) Stat(context.Context, string) (FileEntry, error) {
+	if f.statErr != nil {
+		return FileEntry{}, f.statErr
+	}
+	return FileEntry{FileID: "f1", Kind: KindFile, Size: 7}, nil
+}
+func (f *fakeVault) VerifyCanary(context.Context) error { return nil }
 
 func (f *fakeVault) Open(context.Context, string) (io.ReadCloser, error) {
 	if f.blockOpen != nil {
@@ -377,5 +383,101 @@ func TestTTLFromMinutes(t *testing.T) {
 		if got := TTLFromMinutes(tc.minutes); got != tc.want {
 			t.Errorf("TTLFromMinutes(%d) = %v, want %v", tc.minutes, got, tc.want)
 		}
+	}
+}
+
+// The streaming guarantee is UNCONDITIONAL: teardown must not close the vault or wipe the
+// scratch tree while a stream handed OUT of the call is still open.
+//
+// This is the shape that tore before OpenStream existed — take the reader, return, then
+// lock — and the natural way to write an HTTP download.
+func TestTeardownWaitsForAStreamHandedOutOfTheCall(t *testing.T) {
+	r, _, _ := newTestRegistry(t, time.Hour)
+	fv, s := unlockOne(t, r, "s1")
+
+	rc, _, err := r.OpenStream(context.Background(), s.ID, "f1")
+	if err != nil {
+		t.Fatalf("OpenStream: %v", err)
+	}
+
+	// The reader is open and the call that produced it has returned — exactly the case
+	// `With` could not protect.
+	lockReturned := make(chan struct{})
+	go func() { _ = r.Lock(s.ID); close(lockReturned) }()
+
+	select {
+	case <-lockReturned:
+		t.Fatal("Lock returned while a stream was still open — the vault would close under the reader")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	if fv.closeCount() != 0 {
+		t.Errorf("the vault was closed with a stream open (Close called %d times)", fv.closeCount())
+	}
+	if _, err := os.Stat(fv.scratch); err != nil {
+		t.Errorf("scratch was wiped with a stream open: %v", err)
+	}
+
+	if err := rc.Close(); err != nil {
+		t.Fatalf("closing the stream: %v", err)
+	}
+	<-lockReturned
+
+	if fv.closeCount() != 1 {
+		t.Errorf("after the stream closed, Close called %d times, want 1", fv.closeCount())
+	}
+}
+
+// A second operation is refused while a stream is open — the stream holds the session, so
+// the busy rule applies to it exactly as it does to a call.
+func TestAnOpenStreamMakesTheSessionBusy(t *testing.T) {
+	r, _, _ := newTestRegistry(t, time.Hour)
+	_, s := unlockOne(t, r, "s1")
+
+	rc, _, err := r.OpenStream(context.Background(), s.ID, "f1")
+	if err != nil {
+		t.Fatalf("OpenStream: %v", err)
+	}
+	defer func() { _ = rc.Close() }()
+
+	if err := r.With(s.ID, func(Vault) error { return nil }); !errors.Is(err, ErrSessionBusy) {
+		t.Errorf("With during a stream = %v, want ErrSessionBusy", err)
+	}
+}
+
+// Closing twice is ordinary in HTTP handling — a defer plus an explicit close on an error
+// path — and releasing a mutex twice panics. The hold must absorb it.
+func TestClosingAStreamTwiceIsSafe(t *testing.T) {
+	r, _, _ := newTestRegistry(t, time.Hour)
+	_, s := unlockOne(t, r, "s1")
+
+	rc, _, err := r.OpenStream(context.Background(), s.ID, "f1")
+	if err != nil {
+		t.Fatalf("OpenStream: %v", err)
+	}
+	if err := rc.Close(); err != nil {
+		t.Fatalf("first Close: %v", err)
+	}
+	if err := rc.Close(); err != nil {
+		t.Errorf("second Close: %v", err)
+	}
+	// And the session is usable again rather than wedged.
+	if err := r.With(s.ID, func(Vault) error { return nil }); err != nil {
+		t.Errorf("session should be free after the stream closed, got %v", err)
+	}
+}
+
+// A failure to open releases the lock rather than wedging the session — the path where the
+// reader that would have carried the lock never exists.
+func TestAFailedOpenStreamDoesNotWedgeTheSession(t *testing.T) {
+	r, _, _ := newTestRegistry(t, time.Hour)
+	fv, s := unlockOne(t, r, "s1")
+	fv.statErr = ErrFileNotFound
+
+	if _, _, err := r.OpenStream(context.Background(), s.ID, "missing"); !errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("OpenStream = %v, want ErrFileNotFound", err)
+	}
+	if err := r.With(s.ID, func(Vault) error { return nil }); err != nil {
+		t.Errorf("the session is wedged after a failed open: %v", err)
 	}
 }

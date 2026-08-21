@@ -50,6 +50,10 @@ type Vault interface {
 	// Open returns the decrypted content of one file. The caller MUST Close the reader:
 	// for an RPC implementation that is what unlinks the materialized scratch copy.
 	//
+	// CANCELLATION IS Close's JOB. ctx bounds the OPENING of the file; the read that follows
+	// ends when the file ends or the reader is Closed. Cancelling ctx afterwards does not stop
+	// a decrypt already in flight — the parameter would otherwise suggest it does.
+	//
 	// A read may end in ErrIncompleteFile AFTER delivering every byte the backup holds —
 	// see that error. Directories and symlinks answer ErrNotAFile, never ErrFileNotFound:
 	// the entry exists, and "there is no such file" is a different remedy.
