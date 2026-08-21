@@ -200,3 +200,53 @@ func TestACancelledSecretLeavesTheListing(t *testing.T) {
 		t.Fatalf("a cancelled secret is still listed as outstanding: %s", body)
 	}
 }
+
+// THE PATH'S DEVICE IS CHECKED, NOT DECORATIVE (quince#1430 review).
+//
+// `DELETE /api/devices/DEVICE-A/enrolments/<a-secret-issued-for-DEVICE-B>` used to answer **204**:
+// truthful about the id, false about the device, and a wrong SUCCESS rather than a wrong refusal.
+// Not an escalation — the route is admin-only — but a green tick on the wrong household member's
+// QR is what *no silent no-op* is about.
+//
+// EVERY OTHER TEST IN THIS FILE USES ONE DEVICE for both the path and the secret, which is why none
+// of them could see it. This is the case that has two.
+func TestRevokingThroughAnotherDevicesPathIsRefused(t *testing.T) {
+	d, enr := enrolDeps(t)
+	d.Devices = stubDevices{list: []wire.Device{
+		{UDID: "DEVICE-A", Name: "Household iPhone"},
+		{UDID: "DEVICE-B", Name: "Other iPhone"},
+	}}
+	srv := httptest.NewServer(NewRouter(d))
+	t.Cleanup(srv.Close)
+	c := authedClient(t, srv)
+
+	forB := postCSRF(t, c, srv, "/api/devices/DEVICE-B/enrolments", "{}")
+	var issued wire.EnrolmentIssued
+	if err := json.NewDecoder(forB.Body).Decode(&issued); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	_ = forB.Body.Close()
+
+	// THE WRONG PATH IS REFUSED.
+	wrong := deleteCSRF(t, c, srv, "/api/devices/DEVICE-A/enrolments/"+issued.ID)
+	_ = wrong.Body.Close()
+	if wrong.StatusCode != http.StatusNotFound {
+		t.Fatalf("cancelling B's secret through A's path: status = %d, want 404", wrong.StatusCode)
+	}
+
+	// AND IT REALLY IS STILL LIVE — a refusal that had cancelled it anyway would be worse than the
+	// defect. This is the assertion the status code alone does not make.
+	if live := enr.List("DEVICE-B"); len(live) != 1 || live[0].ID != issued.ID {
+		t.Fatalf("B's secret did not survive a refused cross-device revoke: %+v", live)
+	}
+
+	// THE CONTROL: the right path cancels it.
+	right := deleteCSRF(t, c, srv, "/api/devices/DEVICE-B/enrolments/"+issued.ID)
+	_ = right.Body.Close()
+	if right.StatusCode != http.StatusNoContent {
+		t.Fatalf("cancelling through B's own path: status = %d, want 204", right.StatusCode)
+	}
+	if live := enr.List("DEVICE-B"); len(live) != 0 {
+		t.Fatalf("B's secret survived its own revoke: %+v", live)
+	}
+}

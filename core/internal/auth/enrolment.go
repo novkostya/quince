@@ -103,6 +103,12 @@ var (
 	// is a decision rather than a default.
 	ErrEnrolmentAdminScope = errors.New("auth: an enrolment link cannot carry admin scope")
 
+	// ErrEnrolmentWrongDevice — the id names a live secret, but for a DIFFERENT device than the one
+	// the caller addressed. Reported as not-found-for-this-device rather than as its own kind of
+	// failure: from the caller's position the id names nothing this device has, and saying more would
+	// make the route an oracle for ids belonging to devices the path did not name.
+	ErrEnrolmentWrongDevice = errors.New("auth: no enrolment link with that id for this device")
+
 	// ErrEnrolmentNotFound — Revoke was given an id that names nothing live.
 	ErrEnrolmentNotFound = errors.New("auth: no live enrolment link with that id")
 )
@@ -213,12 +219,28 @@ func (e *Enrolments) Spend(token string) (Enrolment, error) {
 	return rec.public(key), nil
 }
 
-// Revoke cancels an unused secret, by the id the admin sees.
+// Revoke cancels an unused secret, by the DEVICE it belongs to and the id the admin sees.
+//
+// THE UDID IS A PARAMETER BECAUSE THE ROUTE'S PATH CLAIMS IT (quince#1430 review). `DELETE
+// /api/devices/{udid}/enrolments/{id}` asserts a relationship, and while this took an id alone the
+// handler could not check it even if it tried — the signature could not express the question. So
+// cancelling DEVICE-B's secret through DEVICE-A's path answered 204: truthful about the id, false
+// about the device, and a wrong SUCCESS rather than a wrong refusal.
+//
+// It is not an escalation — the route is admin-only and an admin can revoke any secret through the
+// right path — but a green tick on the wrong household member's QR is exactly what *no silent
+// no-op* is about. This is the same fix, at the same kind of seam, as `store.Scope`'s unexported
+// `set`, `Disclosure`'s invalid zero value, and `pendingCeremony.scope`: put the check where it
+// cannot be restated wrongly.
+//
+// A MISMATCH IS NOT-FOUND-FOR-THIS-DEVICE, not a separate kind of failure. From the caller's
+// position the id names nothing this device has, which is what the message says — and it keeps the
+// route from becoming an oracle for ids belonging to devices the path did not name.
 //
 // BEFORE USE ONLY, and a spent one reports ErrEnrolmentSpent rather than pretending to cancel
 // something that has already happened. Revoking a spent secret would be a no-op wearing the shape of
 // a remedy — the credential it minted is what needs removing, and that is the passkey list's job.
-func (e *Enrolments) Revoke(enrolmentID string) error {
+func (e *Enrolments) Revoke(udid, enrolmentID string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	now := e.now()
@@ -227,6 +249,9 @@ func (e *Enrolments) Revoke(enrolmentID string) error {
 	rec, ok := e.in[enrolmentID]
 	if !ok {
 		return ErrEnrolmentNotFound
+	}
+	if rec.scope != udid {
+		return ErrEnrolmentWrongDevice
 	}
 	if err := rec.usable(now); err != nil {
 		return err

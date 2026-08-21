@@ -96,7 +96,7 @@ func TestBeginEnrolmentRefusesEveryDeadSecret(t *testing.T) {
 			*clock = clock.Add(enrolmentTTL + time.Second)
 		}, ErrEnrolmentExpired},
 		{"revoked", func(t *testing.T, enr *Enrolments, _ string, en Enrolment, _ *time.Time) {
-			if err := enr.Revoke(en.ID); err != nil {
+			if err := enr.Revoke(enrolDevice, en.ID); err != nil {
 				t.Fatalf("Revoke: %v", err)
 			}
 		}, ErrEnrolmentRevoked},
@@ -144,7 +144,7 @@ func TestFinishEnrolmentRereadsTheSecretAndRefusesARevokedOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginEnrolment: %v", err)
 	}
-	if err := enr.Revoke(en.ID); err != nil {
+	if err := enr.Revoke(enrolDevice, en.ID); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
 
