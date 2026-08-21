@@ -251,6 +251,19 @@ RUNNER_DIR="${RUNNER_DIR:-/root/quince}"
 # a suite: on a real box `/usr/local/bin/gh-coder` exists AND works, so without this seam the
 # no-usable-credential path could never be exercised anywhere it matters.
 LAYER_WRAPPER_DIRS="${QUINCE_WRAPPER_DIRS:-/usr/local/bin $RUNNER_DIR/bin}"
+# `gh-analyst` IS IN THIS LIST SINCE quince#1262, AND IT IS THE ROLE'S WHOLE POINT. `--role
+# supervisor` landed in quince#1249, and this loop still asked only the other two — both of which
+# REFUSE on that box, correctly, because the analyst key is the one credential there (quince#377,
+# quince#387). So `LAYER_WRAPPER` came back empty and provision printed *"this box holds no
+# supervisor credential yet"* about a box holding exactly that. Measured on it:
+#
+#   gh-coder    exit 1   an ANALYST APP KEY is present at …quince-analyst.pem
+#   gh-review   exit 1   an ANALYST APP KEY is present at …quince-analyst.pem
+#   gh-analyst  exit 0
+#
+# The refusals are the boundary working. The defect was that the loop never asked the third wrapper,
+# so the role existed and the thing the role exists to do could not happen.
+#
 # `gh-review` IS IN THIS LIST AND `gh-arch` IS GONE FROM IT (quince#674, then quince#676). The arch
 # box has no `gh-coder` by design (`decisions/0007`: the box that approves must not hold the identity
 # that authors), so this loop used to fall through to `gh-arch` — the PAT the Operator DELETED on
@@ -270,7 +283,7 @@ LAYER_WRAPPER_DIRS="${QUINCE_WRAPPER_DIRS:-/usr/local/bin $RUNNER_DIR/bin}"
 # an ordering is now simply the list — and a box that still holds that token gets it ignored rather
 # than preferred, which is the same outcome the ordering bought.
 layer_wrapper() {
-	for _lw_n in gh-coder gh-review; do
+	for _lw_n in gh-coder gh-review gh-analyst; do
 		for _lw_d in $LAYER_WRAPPER_DIRS; do
 			_lw_p="$_lw_d/$_lw_n"
 			[ -x "$_lw_p" ] || continue
@@ -285,9 +298,11 @@ layer_wrapper() {
 LAYER_WRAPPER=$(layer_wrapper || true)
 # `x-access-token` for an App installation token, the login for a PAT. Keyed on WHICH WRAPPER can
 # act rather than on the role, so the username cannot disagree with the credential actually used.
-# BOTH APPS TAKE `x-access-token`, and the arm is shared rather than duplicated because the rule is
-# about the CREDENTIAL KIND, not the seat: an installation token authenticates as that user whichever
-# App minted it.
+# ALL THREE APPS TAKE `x-access-token`, and the arm is shared rather than duplicated because the rule
+# is about the CREDENTIAL KIND, not the seat: an installation token authenticates as that user
+# whichever App minted it. `gh-analyst` was missing here as well as from the loop above, so a
+# supervisor box that got past the search would then have authenticated as `novkostya` — the PAT
+# username — which is the second half of quince#1262 and the one no search fix would have caught.
 #
 # THE DEFAULT ARM NOW COVERS NOTHING THIS SCRIPT CAN SELECT, and it is kept anyway (quince#676).
 # `gh-arch` was the last PAT and it is deleted, so `layer_wrapper` can only ever return an App —
@@ -296,7 +311,7 @@ LAYER_WRAPPER=$(layer_wrapper || true)
 # wrapper silently inherit `x-access-token` and authenticate as the wrong user. An unreachable
 # default that is correct costs a line; a missing one costs a debugging session.
 case ${LAYER_WRAPPER##*/} in
-gh-coder | gh-review) LAYER_USER=x-access-token ;;
+gh-coder | gh-review | gh-analyst) LAYER_USER=x-access-token ;;
 *) LAYER_USER=novkostya ;;
 esac
 
@@ -318,7 +333,7 @@ if [ -z "$LAYER_WRAPPER" ] && [ -n "$_have_own" ]; then
 	die "a $ROLE credential is present but NO wrapper could authenticate with it, so the private
     layer could not be placed or kept current. Refusing before touching this box.
       credential(s) present: $_have_own
-      wrappers tried:        gh-coder, gh-review — in /usr/local/bin, then $RUNNER_DIR/bin
+      wrappers tried:        gh-coder, gh-review, gh-analyst — in /usr/local/bin, then $RUNNER_DIR/bin
     Causes, in the order worth checking: the credential is invalid or unreadable; the identity moved
     and this box still holds the old one; the forge is unreachable from here.
     This is a REFUSAL rather than a note because 'no credential yet' and 'the identity moved' want

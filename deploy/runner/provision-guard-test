@@ -146,7 +146,12 @@ rc_of() {
 	printf '%s' "$?"
 }
 
-clear_creds() { rm -f "$BOT" "$CODER" "$ARCH" "$REVIEW"; }
+# ALL FIVE, AND `$ANALYST` WAS MISSING UNTIL quince#1262. It was harmless only because no case had
+# ever PLACED an analyst key through this helper — the three later cases that need one do their own
+# explicit `rm -f … "$ANALYST"`, which is the workaround this gap produced rather than a style. The
+# first case to place one and rely on `clear_creds` (c4) leaked it into every case after it, and the
+# symptom is three unrelated failures with the two-seats-one-machine refusal in their output.
+clear_creds() { rm -f "$BOT" "$CODER" "$ARCH" "$REVIEW" "$ANALYST"; }
 place() { printf 'a credential\n' >"$1"; }
 
 # --- 1. THE OTHER SEAT'S APP KEY IS THE OTHER SEAT (quince#234 problem 2) ----------------------
@@ -346,7 +351,7 @@ else
 	printf '       %s\n' "$LAYER_OUT" | head -n 3
 fi
 if printf '%s\n' "$LAYER_OUT" | grep -q "$CODER" &&
-	printf '%s\n' "$LAYER_OUT" | grep -q 'gh-coder, gh-review'; then
+	printf '%s\n' "$LAYER_OUT" | grep -q 'gh-coder, gh-review, gh-analyst'; then
 	ok "the refusal names the credential found and the wrappers tried"
 else
 	bad "the refusal does not say what it found or what it tried"
@@ -410,6 +415,34 @@ if printf '%s\n' "$LAYER_OUT" | grep -q 'username x-access-token' &&
 	ok "the arch box's real shape — only gh-review usable — selects it, as an App"
 else
 	bad "gh-review was the only usable wrapper and was not selected; the private layer stays frozen"
+	printf '       %s\n' "$LAYER_OUT" | head -n 4
+fi
+
+
+# (c4) THE SUPERVISOR BOX AS IT ACTUALLY IS — quince#1262, and the row THIS change exists for. The
+# exact mirror of (c2), one seat over.
+#
+# Only `gh-analyst` is usable: the other two refuse on sight of the analyst key, which is the
+# boundary quince#377 and quince#387 built. Before this change `layer_wrapper` searched two wrappers,
+# found neither usable, and provision reported *"this box holds no supervisor credential yet"* about
+# a box holding exactly that — so `--role supervisor` existed since quince#1249 and the thing the
+# role exists to do could not happen.
+#
+# THE USERNAME HALF IS ASSERTED HERE TOO, and it is not redundant with (c). `gh-analyst` fell through
+# to `*) LAYER_USER=novkostya`, which is the PAT username — wrong for an App installation token. A
+# fix to the SEARCH alone would satisfy every other row in this file and still authenticate as the
+# wrong user, which is why both halves are one assertion.
+clear_creds
+place "$ANALYST"
+mkwrapper gh-coder 1
+mkwrapper gh-review 1
+mkwrapper gh-analyst 0
+runl supervisor
+if printf '%s\n' "$LAYER_OUT" | grep -q 'username x-access-token' &&
+	printf '%s\n' "$LAYER_OUT" | grep -q 'gh-analyst'; then
+	ok "the supervisor box's real shape — only gh-analyst usable — selects it, as an App"
+else
+	bad "gh-analyst was the only usable wrapper and was not selected; --role supervisor cannot place the layer"
 	printf '       %s\n' "$LAYER_OUT" | head -n 4
 fi
 
