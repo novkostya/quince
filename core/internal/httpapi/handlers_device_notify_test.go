@@ -24,7 +24,7 @@ type stubDeviceNotifs struct {
 	recEnable bool
 }
 
-func (s *stubDeviceNotifs) SetNotificationsEnabled(udid string, enabled bool) (bool, int, string) {
+func (s *stubDeviceNotifs) SetNotificationsEnabled(udid, owner string, enabled bool) (bool, int, string) {
 	s.called, s.recUDID, s.recEnable = true, udid, enabled
 	if s.stored != nil {
 		return *s.stored, s.status, s.reason

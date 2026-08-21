@@ -30,7 +30,16 @@ func (d Deps) handleDeviceNotifications() http.HandlerFunc {
 				"enabled is required and must be true or false")
 			return
 		}
-		stored, status, reason := d.DeviceNotifs.SetNotificationsEnabled(r.PathValue("udid"), *req.Enabled)
+		// THE CALLERS OWN PREFERENCE, not the installs (qn.13 slice 10b). This route is
+		// `scopedOwnDevice`, so a scoped principal reaches it only for its own device — and the
+		// row it writes is its own, leaving the admins untouched.
+		owner, refuse := listUDID(d, r)
+		if refuse {
+			writeError(w, d.Log, http.StatusUnauthorized, "unauthorized", "authentication required")
+			return
+		}
+		stored, status, reason := d.DeviceNotifs.SetNotificationsEnabled(
+			r.PathValue("udid"), owner, *req.Enabled)
 		if status != http.StatusOK {
 			writeError(w, d.Log, status, statusCode(status), reason)
 			return

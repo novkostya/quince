@@ -10,7 +10,7 @@ import "testing"
 func TestDeviceNotificationsEnabledRoundTrip(t *testing.T) {
 	st := openTemp(t)
 
-	enabled, err := st.DeviceNotificationsEnabled("UDID-NEVER-ASKED")
+	enabled, err := st.DeviceNotificationsEnabled("UDID-NEVER-ASKED", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -18,10 +18,10 @@ func TestDeviceNotificationsEnabledRoundTrip(t *testing.T) {
 		t.Fatalf("a device with no stored preference reads muted; absence must mean enabled")
 	}
 
-	if err := st.SetDeviceNotificationsEnabled("UDID-A", false); err != nil {
+	if err := st.SetDeviceNotificationsEnabled("UDID-A", "", false); err != nil {
 		t.Fatal(err)
 	}
-	enabled, err = st.DeviceNotificationsEnabled("UDID-A")
+	enabled, err = st.DeviceNotificationsEnabled("UDID-A", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,10 +30,10 @@ func TestDeviceNotificationsEnabledRoundTrip(t *testing.T) {
 	}
 
 	// The switch goes back, and it goes back on the SAME row — an upsert, not a second insert.
-	if err := st.SetDeviceNotificationsEnabled("UDID-A", true); err != nil {
+	if err := st.SetDeviceNotificationsEnabled("UDID-A", "", true); err != nil {
 		t.Fatal(err)
 	}
-	enabled, err = st.DeviceNotificationsEnabled("UDID-A")
+	enabled, err = st.DeviceNotificationsEnabled("UDID-A", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,10 +42,10 @@ func TestDeviceNotificationsEnabledRoundTrip(t *testing.T) {
 	}
 
 	// MUTING ONE DEVICE MUTES ONE DEVICE. The row is keyed by UDID and this is what says so.
-	if err := st.SetDeviceNotificationsEnabled("UDID-B", false); err != nil {
+	if err := st.SetDeviceNotificationsEnabled("UDID-B", "", false); err != nil {
 		t.Fatal(err)
 	}
-	if enabled, err := st.DeviceNotificationsEnabled("UDID-A"); err != nil || !enabled {
+	if enabled, err := st.DeviceNotificationsEnabled("UDID-A", ""); err != nil || !enabled {
 		t.Fatalf("muting UDID-B changed UDID-A: enabled=%v err=%v", enabled, err)
 	}
 }
@@ -56,7 +56,7 @@ func TestDeviceNotificationsEnabledRoundTrip(t *testing.T) {
 // and there is no reconstructing afterwards which devices the user had actually been asked about.
 func TestUnmutingWritesARowRatherThanDeletingOne(t *testing.T) {
 	st := openTemp(t)
-	if err := st.SetDeviceNotificationsEnabled("UDID-A", true); err != nil {
+	if err := st.SetDeviceNotificationsEnabled("UDID-A", "", true); err != nil {
 		t.Fatal(err)
 	}
 	var n int

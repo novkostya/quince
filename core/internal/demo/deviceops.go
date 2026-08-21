@@ -259,7 +259,9 @@ func (p *Provider) flipDevice(udid string, mutate func(*wire.Device)) {
 //
 // The demo world holds no DB, so the value lives on the device itself — which is exactly what the
 // real registry serves it as, so the wire shape and the announcement match production.
-func (p *Provider) SetNotificationsEnabled(udid string, enabled bool) (bool, int, string) {
+// The demo has one principal, so `owner` is accepted and ignored — stated rather than silently
+// dropped, because a demo that behaved differently from the product here would hide slice 10b.
+func (p *Provider) SetNotificationsEnabled(udid, owner string, enabled bool) (bool, int, string) {
 	p.mu.RLock()
 	_, ok := p.devices[udid]
 	p.mu.RUnlock()
