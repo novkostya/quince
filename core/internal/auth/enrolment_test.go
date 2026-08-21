@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"sort"
 	"testing"
 	"time"
 
@@ -155,6 +156,11 @@ func TestEnrolmentRevokeUnknownID(t *testing.T) {
 
 // THE ESCALATION HAS NO REPRESENTATION TO TRAVEL IN (D4). An admin-scoped enrolment cannot be
 // minted, so no later code path can be handed one.
+//
+// AND AN UNSET SCOPE IS A DIFFERENT REFUSAL. This test pinned the collapse until quince#1411's
+// review: a caller who forgot to state a scope was told "an enrolment link cannot carry admin
+// scope", a claim about a decision they did not make. `store.Scope` keeps unset and admin apart on
+// purpose, and so does this now.
 func TestEnrolmentRefusesAdminScope(t *testing.T) {
 	e, _ := newEnrolments(t)
 
@@ -164,10 +170,57 @@ func TestEnrolmentRefusesAdminScope(t *testing.T) {
 	if _, _, err := e.Mint(store.AdminScope()); !errors.Is(err, ErrEnrolmentAdminScope) {
 		t.Fatalf("admin scope: got %v, want ErrEnrolmentAdminScope", err)
 	}
-	// An UNSET scope is the zero value, and it must not fall through to anything. store.Scope's
-	// own contract is that its zero value is invalid; this asserts that contract holds here too.
-	if _, _, err := e.Mint(store.Scope{}); !errors.Is(err, ErrEnrolmentAdminScope) {
-		t.Fatalf("unset scope: got %v, want ErrEnrolmentAdminScope", err)
+
+	_, _, err := e.Mint(store.Scope{})
+	if !errors.Is(err, ErrEnrolmentScopeUnset) {
+		t.Fatalf("unset scope: got %v, want ErrEnrolmentScopeUnset", err)
+	}
+	// AND IT IS THE SAME CONDITION `store` NAMES, so one errors.Is answers "scope not stated"
+	// wherever it was refused. A parallel error with its own identity would need two checks.
+	if !errors.Is(err, store.ErrScopeUnset) {
+		t.Fatalf("unset scope: does not wrap store.ErrScopeUnset: %v", err)
+	}
+	// The two refusals must not be confusable in EITHER direction — this is the assertion that
+	// fails if somebody folds them back together.
+	if errors.Is(err, ErrEnrolmentAdminScope) {
+		t.Fatal("an unset scope still reports as an admin scope")
+	}
+}
+
+// THE LISTING IS ORDERED, and this is the failure a happy-path test cannot see: Go randomises map
+// iteration, so a List over more than one live secret returned a different order each call, and the
+// admin's page renders rows that jump while they decide which to cancel (quince#1411 review).
+func TestEnrolmentListIsStablyOrderedOldestFirst(t *testing.T) {
+	e, now := newEnrolments(t)
+
+	// Three at DISTINCT times, so CreatedAt alone decides the order.
+	var want []string
+	for range 3 {
+		_, en := mustMintEnrolment(t, e, enrolDevice)
+		want = append(want, en.ID)
+		*now = now.Add(time.Minute)
+	}
+	// And two at the SAME instant, which is what the id tie-break is for — without it these two
+	// fall back to map order and this test flakes rather than fails.
+	_, a := mustMintEnrolment(t, e, enrolDevice)
+	_, b := mustMintEnrolment(t, e, enrolDevice)
+	tie := []string{a.ID, b.ID}
+	sort.Strings(tie)
+	want = append(want, tie...)
+
+	// REPEATED, because a single call can agree with a random order by luck. Five calls agreeing
+	// with each other AND with the expected order is what makes this an assertion about sorting.
+	for i := range 5 {
+		got := e.List(enrolDevice)
+		if len(got) != len(want) {
+			t.Fatalf("call %d: List = %d entries, want %d", i+1, len(got), len(want))
+		}
+		for j := range got {
+			if got[j].ID != want[j] {
+				t.Fatalf("call %d: position %d = %q, want %q — the list is not stably ordered",
+					i+1, j, got[j].ID, want[j])
+			}
+		}
 	}
 }
 
