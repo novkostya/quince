@@ -479,6 +479,17 @@ func (w *incompleteWatcher) Read(p []byte) (int, error) {
 		// overruns Content-Length and the HTTP layer sees an ordinary success — the user gets
 		// a truncated file and every signal agrees (quince#1379).
 		w.onceLong.Do(w.markLong)
+		// AND THEN IT IS SWALLOWED, because at the HTTP layer nothing DID fail: the body is
+		// exactly the declared Content-Length, so the transfer is a complete success. Passing
+		// the error on makes the handler log a failure that did not happen — measured on the
+		// stand, it logged "file stream ended early … holds FEWER bytes" about a file with too
+		// MANY, which is quince#1381's own defect arriving from the other side.
+		//
+		// Nothing is lost by swallowing it: the condition is recorded on the session one line
+		// above and travels as the `overlong` FIELD, which is the report (contracts §2). The
+		// SEAM still returns ErrOverlongFile — this is the registry wrapper, whose job is
+		// exactly to convert that error into the session note, and having done so it is done.
+		return n, io.EOF
 	}
 	return n, err
 }

@@ -481,3 +481,48 @@ func TestAFailedOpenStreamDoesNotWedgeTheSession(t *testing.T) {
 		t.Errorf("the session is wedged after a failed open: %v", err)
 	}
 }
+
+// THE WRAPPER SWALLOWS ErrOverlongFile AFTER RECORDING IT, and that is not tidiness — it is
+// what stops the HTTP layer logging a failure that did not happen.
+//
+// Measured on the stand before this: the error reached `io.Copy`, fell to the handler's
+// default arm, and logged "file stream ended early — the backup holds FEWER bytes than its
+// index records" about a file with too MANY. That is quince#1381's own defect arriving from
+// the other side, reintroduced by the fix for quince#1379.
+//
+// The transfer genuinely succeeded: the body is exactly the declared Content-Length. So the
+// stream ends in io.EOF, and the CONDITION travels as the `overlong` field instead.
+func TestOverlongIsRecordedThenSwallowedSoTheTransferReadsAsTheSuccessItIs(t *testing.T) {
+	r, _, _ := newTestRegistry(t, time.Hour)
+	_, sess := unlockOne(t, r, "S1")
+
+	rc := r.WatchIncomplete(sess.ID, "f1", io.NopCloser(&overlongReader{}))
+	n, readErr := io.ReadAll(rc)
+
+	if string(n) != "abcd" {
+		t.Errorf("delivered %q, want %q — every byte the record promises must arrive", n, "abcd")
+	}
+	// io.ReadAll treats io.EOF as normal termination, so a nil error here IS the claim: the
+	// handler sees an ordinary success and logs nothing.
+	if readErr != nil {
+		t.Errorf("read returned %v, want nil — the body is exactly Content-Length, so nothing "+
+			"failed and a handler that logs on error would report a failure that did not happen",
+			readErr)
+	}
+	if !r.OverlongIn(sess.ID)["f1"] {
+		t.Error("the condition was swallowed WITHOUT being recorded — that is the silent " +
+			"truncation this whole path exists to prevent")
+	}
+}
+
+// overlongReader delivers the recorded bytes and then reports that the backup holds more,
+// which is what boundedFile does when it finds a byte past the record.
+type overlongReader struct{ done bool }
+
+func (o *overlongReader) Read(p []byte) (int, error) {
+	if o.done {
+		return 0, ErrOverlongFile
+	}
+	o.done = true
+	return copy(p, []byte("abcd")), nil
+}
