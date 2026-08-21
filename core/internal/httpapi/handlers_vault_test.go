@@ -472,3 +472,101 @@ func (s *stubVault) SessionVersion(string) (string, bool) {
 	}
 	return s.session.VersionID, true
 }
+
+// A RELATIVE PATH IS DEVICE CONTENT AND IT REACHES A RESPONSE HEADER. Header splitting must be
+// impossible where the value is BUILT — not caught later by an HTTP writer that may or may not
+// be looking, and whose behaviour is not this package's to rely on (quince#1397 ruling).
+func TestContentDispositionCannotSplitTheHeader(t *testing.T) {
+	for _, name := range []string{
+		"Library/ok\r\nX-Injected: yes",
+		"Library/ok\nSet-Cookie: a=b",
+		"Library/quote\"name.txt",
+		"Library/back\\slash.txt",
+		"Library/nul\x00byte.txt",
+		"Library/bell\x07.txt",
+	} {
+		got := contentDisposition(name)
+		for _, bad := range []string{"\r", "\n", "\x00"} {
+			if strings.Contains(got, bad) {
+				t.Errorf("contentDisposition(%q) contains %q — a header this value can terminate "+
+					"is a header-splitting vector", name, bad)
+			}
+		}
+		// The ASCII fallback is quoted, so a bare quote inside it would close the parameter
+		// early and hand the rest of the name to the parser as syntax.
+		if strings.Count(got, `"`) != 2 {
+			t.Errorf("contentDisposition(%q) = %s — the quoted fallback must contain exactly the "+
+				"two delimiting quotes", name, got)
+		}
+	}
+}
+
+// THE BASENAME, ALWAYS — never the path, and never conditionally on collisions. A name that
+// depends on what else you have downloaded is not a property anyone can reason about.
+func TestContentDispositionUsesTheBasename(t *testing.T) {
+	got := contentDisposition("Library/Preferences/com.apple.example.plist")
+	if !strings.Contains(got, `filename="com.apple.example.plist"`) {
+		t.Errorf("got %s, want the basename in the ASCII fallback", got)
+	}
+	if strings.Contains(got, "Library") {
+		t.Errorf("got %s — the path leaked into the filename; the domain and path belong in the "+
+			"browse row", got)
+	}
+}
+
+// NON-ASCII SURVIVES IN filename*, WHICH IS THE WHOLE REASON IT IS THERE. The fallback loses
+// it, deliberately — a fallback is a best effort and an unambiguous `_` beats an encoding a
+// client might mis-parse.
+func TestContentDispositionCarriesNonASCIIInFilenameStar(t *testing.T) {
+	got := contentDisposition("Media/фото.jpg")
+	if !strings.Contains(got, "filename*=UTF-8''") {
+		t.Fatalf("got %s, want an RFC 5987 filename*", got)
+	}
+	// UTF-8 for `ф` is D1 84; the extension must survive unescaped.
+	if !strings.Contains(got, "%D1%84") || !strings.Contains(got, ".jpg") {
+		t.Errorf("got %s — the encoded name must round-trip the non-ASCII bytes and keep .jpg", got)
+	}
+	if !strings.Contains(got, `filename="`) {
+		t.Errorf("got %s — an ASCII fallback must still be present for clients without RFC 5987", got)
+	}
+}
+
+// ALWAYS `attachment`. `inline` would render backup content — HTML, SVG — inside quince's own
+// origin with the session cookie in scope, which is stored XSS reachable by anyone who can put
+// a file on the device. This asserts it because the Content-Type control and this one must not
+// drift apart.
+func TestContentDispositionIsAlwaysAttachment(t *testing.T) {
+	for _, name := range []string{"a.html", "b.svg", "c.jpg", ""} {
+		if got := contentDisposition(name); !strings.HasPrefix(got, "attachment;") {
+			t.Errorf("contentDisposition(%q) = %s, want attachment", name, got)
+		}
+	}
+}
+
+// A record with no usable basename still downloads as SOMETHING, and that something is not the
+// file id — the id is not a name, and using it here would reproduce the defect this fixes.
+func TestContentDispositionFallsBackToAPlaceholderNotTheID(t *testing.T) {
+	for _, name := range []string{"", "/", "."} {
+		if got := contentDisposition(name); !strings.Contains(got, `filename="file"`) {
+			t.Errorf("contentDisposition(%q) = %s, want the `file` placeholder", name, got)
+		}
+	}
+}
+
+// And the header actually reaches the response, which none of the above proves.
+func TestVaultFileResponseCarriesTheDisposition(t *testing.T) {
+	sv := &stubVault{
+		entry:   wire.FileEntry{FileID: "f1", RelativePath: "Media/DCIM/IMG_0001.HEIC", Size: 5},
+		content: "hello",
+	}
+	srv, client := vaultServer(t, sv)
+	resp, err := client.Get(srv.URL + "/api/sessions/s1/file/f1")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if got := resp.Header.Get("Content-Disposition"); !strings.Contains(got, `filename="IMG_0001.HEIC"`) {
+		t.Errorf("Content-Disposition = %q, want the basename", got)
+	}
+}
