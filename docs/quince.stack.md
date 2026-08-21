@@ -383,9 +383,12 @@ differently (Operator ruling: no hardlink games under ZFS):
      and rejected (with `snapdir=hidden` rclone never sees them; with
      `snapdir=visible` it would walk EVERY snapshot at full size).
    A version IS a `zfs snapshot <parent>/<udid>@quince-<YYYY-MM-DDTHH-MM>-<ULID>`, taken **only after
-   structural verification passes** AND the verified tree is exchanged into `latest/` (qn.5b: the
-   snapshot captures `latest/` = the version), browsed read-only via `.zfs/snapshot/<snap>/latest`.
-   Seed clones `latest/` → `working/<udid>`; Discard keeps the dirty `working/` for a retry;
+   structural verification passes** on the child dataset root, which since qn.6h IS the backup tree —
+   quince writes into it in place, so the snapshot captures the head = the version. Browsed read-only
+   at `.zfs/snapshot/<snap>/`, **the snapshot root with no trailing component** (qn.6h D7);
+   pre-qn.6h snapshots hold their content at `<snap>/latest/`, are not browsable, and are skipped
+   with a log line. There is no seed and no `working/`; `rollback` discards a dirty head and is for
+   **abandon only** — a failed job KEEPS the head so a retry resumes without re-transferring;
    retention = destroying our own snapshots. **Only quince-created snapshots count** — host auto-snapshot tooling is
    never relied on, created, or classified. Host-side ops go through a
    constrained hook (forced-command SSH key allowing only: `snapshot`/`destroy`/`list`
@@ -441,21 +444,19 @@ live mounted filesystems and uploads whatever is there. The rule:
 > **The live namespace always presents a consistent last-verified backup per device;
 > working areas are excluded by one static filter rule.**
 
-- `zfs`: rclone includes `<udid>/latest/` (the verified mirror — and with reflink
-  builds, a backup running concurrently in `working/` cannot perturb it) and excludes
-  the mutable/local trees with **anchored** filter rules, e.g. syncing `/rpool/userdata`:
-
-  **THE PARENTHESIS IS RULED TO STOP HOLDING FOR THIS BACKEND, AND IT IS THE ARGUMENT THE WHOLE
-  CHANNEL RESTS ON** (Operator, 2026-08-04, quince#591; design §5, end of section; **not built**).
-  Under in-place writes there is no `working/` to run concurrently *in*: the backup writes into
-  `latest/`, so `latest/` is torn mid-backup and a walk can capture a half-transferred tree. The
-  rule above — *the live namespace always presents a consistent last-verified backup per device* —
-  is what fails, and it fails for `zfs` alone; the namespace backends keep it, because they keep
-  `working/` and the exchange. Offsite on zfs must read a snapshot mount instead, and quince must be
-  excluded from a general whole-host rclone job and handled separately. **The Operator accepted this
-  explicitly**: the tolerance requirement *"is probably not worth the complexity it brought to
-  users."* **Building the snapshot-sourced path is NOT the ruling and is tracked on quince#735** —
-  which also records that nothing else tracked it, so an accepted cost had no owner.
+- `zfs`: **rclone can no longer include a live tree on this backend, and that is the ruling rather
+  than a gap** (Operator, 2026-08-04, quince#591; qn.6h D1, **built**). The old rule included
+  `<udid>/latest/` and rested on a parenthesis — *a backup running concurrently in `working/` cannot
+  perturb it* — and under in-place writes there is no `working/` to run concurrently *in*: the
+  backup writes into the dataset root, so the head is torn mid-backup and a walk can capture a
+  half-transferred tree. **The rule above — *the live namespace always presents a consistent
+  last-verified backup per device* — fails for `zfs` alone**; the namespace backends keep it,
+  because they keep `working/` and the exchange. Offsite on zfs must read a snapshot mount, and
+  quince must be excluded from a general whole-host rclone job and handled separately. **The
+  Operator accepted this explicitly**: the tolerance requirement *"is probably not worth the
+  complexity it brought to users."* **Building the snapshot-sourced path is NOT the ruling and is
+  tracked on quince#735** — which also records that nothing else tracked it, so an accepted cost had
+  no owner.
 
   ```
   --filter "- /iphone-backup/*/working/**"
@@ -469,9 +470,11 @@ live mounted filesystems and uploads whatever is there. The rule:
   deploy docs ship the exact filter block; `versions/` is excluded because rclone has
   no reflink/hardlink awareness and would upload every version at full size — local
   history stays local, remote history comes from B2 bucket versioning or
-  `--backup-dir`. The operator's flow is literally
-  `zfs snapshot -r … && rclone sync /rpool/userdata b2:…` — the snapshot for local
-  restore points, `latest/` guaranteeing the upload is never torn.
+  `--backup-dir`. **The filter block and this whole flow are the NAMESPACE backends'** —
+  the operator's flow is literally `zfs snapshot -r … && rclone sync /rpool/userdata b2:…`,
+  the snapshot for local restore points and `latest/` guaranteeing the upload is never torn.
+  **On zfs the second half of that no longer holds** (qn.6h): there is no `latest/`, the head is
+  torn mid-backup, and the `rclone sync` arm must be pointed at a snapshot mount or dropped.
 
   > **RESOLVED by qn.5b (built 2026-07-24; the gap was Operator-found 2026-07-22).** The
   > swap is now **atomic**: `latest/` changes only by a single `renameat2(RENAME_EXCHANGE)`
@@ -490,13 +493,22 @@ live mounted filesystems and uploads whatever is there. The rule:
   > `IsFullBackup`. D5's two version models collapse toward one. Full scope: qn.5b spec +
   > decisions log (cg)/(co).
 
+  **SUPERSEDED FOR `zfs` BY qn.6h (built).** Everything in the block above still describes the
+  namespace backends exactly. On zfs there is no `working/`, no seed, no exchange and no `latest/`:
+  the dataset root is the tree, `browse_root` is `…/.zfs/snapshot/<snap>` with no trailing
+  component, and between backups the dataset holds the tree itself. The qn.5b record is kept because
+  it is what the namespace lifecycle still is, and because a reader meeting `<snap>/latest` in an
+  old snapshot needs to know where it came from.
+
   Push-style alternative: the post-commit hook (parked) runs rclone
   right after each verified commit.
 - `reflink`/`hardlink`/`copy`: `latest/` is a real immutable-between-commits directory —
   same include rule, same anchored filter block (minus `working/`).
-- Snapshot-stream replication (syncoid) of zfs datasets is also safe at any instant: a
-  mid-backup pass ships a dirty `working/` *plus* every `quince-*` restore point and a
-  consistent `latest/`.
+- Snapshot-stream replication (syncoid) of zfs datasets is still safe at any instant, and it is now
+  the ONLY safe whole-tree route on this backend: a mid-backup pass ships the dirty head *plus*
+  every `quince-*` restore point, and each of those snapshots is a complete verified version. What
+  it no longer ships is a consistent live tree — since qn.6h there is no `latest/`, so a consumer
+  must read a snapshot rather than the dataset root.
 
 Restore/browse never read `working/`. A torn `working/` normally needs no repair — the
 lab showed MobileBackup2 continues from torn state, and every result re-passes full

@@ -2327,13 +2327,20 @@ Version: {
   "zfs_snapshot": "rpool/.../<udid>@quince-2026-07-18T02-30-01J..." | null,   // zfs backend only
   // qn.5b: snapshot name is quince-<YYYY-MM-DDTHH-MM>-<ULID> (date-first for readable `zfs list`
   // ordering; the ULID == version id is the collision-free tail, decisions (co)).
-  "browse_root": "/backups/<udid>/.zfs/snapshot/quince-2026-07-18T02-30-01J.../latest"  // zfs
+  "browse_root": "/backups/<udid>/.zfs/snapshot/quince-2026-07-18T02-30-01J..."  // zfs — SNAPSHOT ROOT
               |  "/backups/<udid>/latest"                                // namespace backends, newest
-              |  "/backups/<udid>/versions/2026-07-18T02-30-11Z",        // namespace, rotated-out
-  // qn.5b: on zfs, browse_root goes through .zfs/snapshot/<snap>/LATEST (was /working) — the
-  // commit atomically exchanges the verified tree into latest/ before snapshotting, so the
-  // snapshot IS latest/ = the version. browse_root is computed per request on namespace backends:
-  // a version moves from latest/ to versions/<ts>/ when the next commit rotates it.
+              |  "/backups/<udid>/versions/2026-07-18T02-30-11Z"         // namespace, rotated-out
+              |  "",                                                     // zfs row with no snapshot: UNBROWSABLE
+  // qn.6h D7: on zfs browse_root is the SNAPSHOT ROOT — .zfs/snapshot/<snap>, with NO trailing
+  // component. The dataset root is the backup tree and quince writes into it in place, so a
+  // snapshot of it IS the version. Pre-qn.6h snapshots hold their content at <snap>/latest/ and
+  // pre-qn.5b at <snap>/working/; there is NO dual-read fallback — those versions are surfaced as
+  // unbrowsable and the skip is logged.
+  // AND ON zfs browse_root NEVER RESOLVES TO THE LIVE HEAD, whatever the row holds: in place the
+  // head is the tree being written, so a zfs row without a snapshot yields no browse root rather
+  // than a half-transferred tree presented as a version.
+  // browse_root is computed per request on namespace backends: a version moves from latest/ to
+  // versions/<ts>/ when the next commit rotates it.
   "created_at": "...", "job_id": "..." | null,
   // job_id null = adopted: a quince-format version found on disk/in snapshots without
   // a DB record (e.g. dataset replicated/restored to a fresh host; reconciliation
