@@ -100,6 +100,16 @@ function renderPage(v: Version | null = ver()) {
 //
 // So the wait is also an assertion: the dialog really does close after a successful unlock, which
 // nothing else here checks.
+
+// domainOptions reads what the `<datalist>` is offering. The box stays a free-text `<input>` — the
+// options only SUGGEST — so this deliberately reads the options rather than anything about what can
+// be typed.
+function domainOptions(): string[] {
+  return Array.from(document.querySelectorAll("#browse-domains option")).map(
+    (o) => (o as HTMLOptionElement).value,
+  );
+}
+
 async function openAndUnlock() {
   fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
   fireEvent.submit(document.querySelector("form") as HTMLFormElement);
@@ -328,7 +338,7 @@ describe("VaultBrowsePage", () => {
     // of these is a walk of the manifest on the daemon.
     expect(get).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: /^filter$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^filter$/i }));
     await waitFor(() =>
       expect(get).toHaveBeenLastCalledWith("/api/sessions/S1/browse?domain=MediaDomain&prefix=DCIM%2F"),
     );
@@ -351,7 +361,7 @@ describe("VaultBrowsePage", () => {
     await screen.findByText("Library/Notes/notes.sqlite");
 
     fireEvent.change(screen.getByLabelText("Domain"), { target: { value: "HomeDomian" } });
-    fireEvent.click(screen.getByRole("button", { name: /^filter$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^filter$/i }));
 
     expect(await screen.findByText(/match that domain and path/i)).toBeTruthy();
     expect(screen.queryByText(/this backup holds no files/i)).toBeNull();
@@ -398,7 +408,7 @@ describe("VaultBrowsePage", () => {
     await screen.findByText("Library/Notes/notes.sqlite");
 
     fireEvent.change(screen.getByLabelText("Domain"), { target: { value: "MediaDomain" } });
-    fireEvent.click(screen.getByRole("button", { name: /^filter$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^filter$/i }));
     expect(await screen.findByText("Media/DCIM/a.jpg")).toBeTruthy();
     expect(screen.queryByText("Library/Notes/notes.sqlite")).toBeNull();
     expect(get).toHaveBeenLastCalledWith("/api/sessions/S1/browse?domain=MediaDomain");
@@ -469,6 +479,89 @@ describe("VaultBrowsePage", () => {
     expect(options).toEqual(["HomeDomain", "MediaDomain"]);
   });
 
+  // quince#1420. THE HALF THAT WAS NOT TESTED, and the accumulator exists ONLY for this half.
+  //
+  // The test above asserts the options in the UNFILTERED state, which is the one state where the
+  // broken derivation — `Array.from(new Set(entries.map(e => e.domain)))` — was also correct. So
+  // every test in this file passed against the bug, and a reasonable-looking simplification back to
+  // that one line would pass them all again.
+  //
+  // THE PROPERTY IS NOT TRUE BY CONSTRUCTION. It is true because of one ref, and the whole point of
+  // that ref is invisible from any state where the filter is empty. `entries` is the FILTERED
+  // result, so deriving from it means the box forgets every domain the moment it is used — filter
+  // to one and it offers exactly that one, and the way back to the full set is to clear the filter,
+  // which is the state the user was trying to leave.
+  it("keeps offering the domains it has seen AFTER a filter narrows the rows", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      id: "S1",
+      version_id: "V1",
+      expires_at: "2026-08-20T00:15:00Z",
+    });
+    const get = vi.spyOn(api, "get").mockResolvedValueOnce({
+      entries: [
+        entry(),
+        entry({ file_id: "F2", domain: "MediaDomain", relative_path: "DCIM/a.jpg" }),
+        entry({ file_id: "F3", domain: "CameraRollDomain", relative_path: "DCIM/b.jpg" }),
+      ],
+    });
+
+    renderPage();
+    await openAndUnlock();
+    await screen.findByText("Library/Notes/notes.sqlite");
+    expect(domainOptions()).toEqual(["CameraRollDomain", "HomeDomain", "MediaDomain"]);
+
+    // Narrow to ONE domain. The server answers with that domain's rows only, which is what makes
+    // the derived version collapse — the filtered page is the only thing it could see.
+    get.mockResolvedValue({
+      entries: [entry({ file_id: "F2", domain: "MediaDomain", relative_path: "DCIM/a.jpg" })],
+    });
+    // AWAITED, NOT SYNCHRONOUS. A row landing does not prove the chrome rendered: the filter form
+    // arrives in a later pass than the rows it sits above, and a synchronous query races that gap.
+    // The rule is quince#1421's and it binds whether or not today's timing realises the race.
+    fireEvent.change(await screen.findByLabelText("Domain"), { target: { value: "MediaDomain" } });
+    fireEvent.click(await screen.findByRole("button", { name: /^filter$/i }));
+    await screen.findByText("DCIM/a.jpg");
+    expect(screen.queryByText("Library/Notes/notes.sqlite")).toBeNull();
+
+    // ALL THREE, not the one on screen. This is the assertion the file did not have.
+    expect(domainOptions()).toEqual(["CameraRollDomain", "HomeDomain", "MediaDomain"]);
+  });
+
+  // AND THEY DO NOT CROSS SESSIONS. A different backup has different domains, so carrying them over
+  // would suggest names that are not in the thing being browsed — the mirror of the bug above, and
+  // the reason the ref is keyed on the session rather than being a plain Set.
+  it("forgets the domains when a new session opens", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      id: "S1",
+      version_id: "V1",
+      expires_at: "2026-08-20T00:15:00Z",
+    });
+    const get = vi.spyOn(api, "get").mockResolvedValue({
+      entries: [entry({ file_id: "F2", domain: "MediaDomain", relative_path: "DCIM/a.jpg" })],
+    });
+
+    renderPage();
+    await openAndUnlock();
+    await screen.findByText("DCIM/a.jpg");
+    expect(domainOptions()).toEqual(["MediaDomain"]);
+
+    // A second unlock mints a new session id, which is what the ref is keyed on.
+    vi.spyOn(api, "post").mockResolvedValue({
+      id: "S2",
+      version_id: "V1",
+      expires_at: "2026-08-20T00:30:00Z",
+    });
+    get.mockResolvedValue({
+      entries: [entry({ file_id: "F9", domain: "CameraRollDomain", relative_path: "DCIM/c.jpg" })],
+    });
+    fireEvent.click(await screen.findByRole("button", { name: /^lock$/i }));
+    await screen.findByText(/this backup is locked/i);
+    await openAndUnlock();
+    await screen.findByText("DCIM/c.jpg");
+
+    expect(domainOptions()).toEqual(["CameraRollDomain"]);
+  });
+
   // FOUND ON HARDWARE, NOT IN A FIXTURE. The first page of a real encrypted iPad version is 500
   // rows of which 99 carry an EMPTY `relative_path` — one per domain, every one a `dir` of size 0.
   // The row rendered a blank line for each of them. A fixture author writes the rows they are
@@ -535,7 +628,7 @@ describe("VaultBrowsePage", () => {
     expect(heldForSession(qc, "S1")).toBeGreaterThan(0);
 
     post.mockResolvedValueOnce(undefined as never);
-    fireEvent.click(screen.getByRole("button", { name: /^lock$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^lock$/i }));
     await screen.findByText(/this backup is locked/i);
     expect(heldForSession(qc, "S1")).toBe(0);
   });
