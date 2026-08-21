@@ -24,6 +24,14 @@ type Store interface {
 	PushSubscriptions() ([]store.PushSubscription, error)
 	AddPushSubscription(store.PushSubscription) error
 	DeletePushSubscription(id string) (bool, error)
+
+	// DeviceNotificationsEnabled answers the per-device mute for ONE owner (qn.13 slice 10b).
+	//
+	// The send loop needs it because the mute moved here from the decision point: with two
+	// principals there is no single answer to *should this go out*, and deciding upstream
+	// produced no decision at all, so a scoped holder lost reminders about their own phone
+	// because the admin muted it (Operator, 2026-08-21).
+	DeviceNotificationsEnabled(udid, owner string) (bool, error)
 }
 
 // IDFunc mints a subscription id. Injected so tests are deterministic.

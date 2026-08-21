@@ -162,13 +162,13 @@ func TestDemoSetNotificationsEnabled(t *testing.T) {
 	// The RETURNED value is asserted, not only the read-back: the handler echoes it, so a
 	// implementation that wrote correctly and reported the wrong thing would put a wrong
 	// answer in the response body (quince#1281 review).
-	if stored, status, reason := p.SetNotificationsEnabled(udid, false); status != 200 || stored {
+	if stored, status, reason := p.SetNotificationsEnabled(udid, "", false); status != 200 || stored {
 		t.Fatalf("muting a known device = stored:%v %d %q, want stored:false 200", stored, status, reason)
 	}
 	if d, ok := p.Device(udid); !ok || d.NotificationsEnabled {
 		t.Fatalf("device reads notifications_enabled=%v after being muted", d.NotificationsEnabled)
 	}
-	if stored, status, _ := p.SetNotificationsEnabled(udid, true); status != 200 || !stored {
+	if stored, status, _ := p.SetNotificationsEnabled(udid, "", true); status != 200 || !stored {
 		t.Fatalf("unmuting = stored:%v %d, want stored:true 200", stored, status)
 	}
 	if d, ok := p.Device(udid); !ok || !d.NotificationsEnabled {
@@ -176,7 +176,7 @@ func TestDemoSetNotificationsEnabled(t *testing.T) {
 	}
 
 	// AN UNKNOWN DEVICE IS NOT A MUTED ONE. 200 here would be a write against nothing.
-	if _, status, _ := p.SetNotificationsEnabled("NO-SUCH-UDID", false); status != 404 {
+	if _, status, _ := p.SetNotificationsEnabled("NO-SUCH-UDID", "", false); status != 404 {
 		t.Fatalf("unknown udid = %d, want 404", status)
 	}
 }

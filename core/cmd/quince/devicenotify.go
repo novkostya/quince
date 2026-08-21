@@ -36,11 +36,11 @@ type deviceNotifications struct {
 // `notifications_enabled` through the source wired in live.go, so re-reading is what makes the
 // published device the same object `GET /api/devices` would serve. Building one here would be a
 // second construction of a device, which is the drift quince#361 was.
-func (n deviceNotifications) SetNotificationsEnabled(udid string, enabled bool) (bool, int, string) {
+func (n deviceNotifications) SetNotificationsEnabled(udid, owner string, enabled bool) (bool, int, string) {
 	if _, ok := n.devices.Device(udid); !ok {
 		return false, http.StatusNotFound, "no such device"
 	}
-	if err := n.store.SetDeviceNotificationsEnabled(udid, enabled); err != nil {
+	if err := n.store.SetDeviceNotificationsEnabled(udid, owner, enabled); err != nil {
 		n.log.Error("device notification preference write failed", "error", err)
 		return false, http.StatusInternalServerError, "the preference could not be saved"
 	}

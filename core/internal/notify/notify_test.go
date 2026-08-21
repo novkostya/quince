@@ -244,98 +244,75 @@ func TestACategorySwitchSuppressesOnlyItsOwnKind(t *testing.T) {
 	}
 }
 
-// --- the per-device notifications switch, quince#1270 ---
+// --- the per-device notifications switch, quince#1270, MOVED BY qn.13 slice 10b ---
 
-// PRECEDENCE IS AND, over all four cells, and this is the table that says so.
+// THE DEVICE SWITCH IS NO LONGER ASKED IN THIS PACKAGE, and these tests record where it went.
 //
-// The alternative — a per-device switch that OVERRIDES a category the user turned off — was
-// considered and rejected: it resurrects the double-notification problem D5 was built to prevent,
-// and it makes the global switches mean something different depending on which screen you read them
-// from. So the only cell that sends is (category on, device on).
-func TestPrecedenceIsAND(t *testing.T) {
+// Operator ruling, 2026-08-21: with two principals there is no single answer to *should this go
+// out*. The admin muting a device says nothing about its scoped holder — and deciding here produced
+// NO decision at all, so the send-path filter never ran and the holder received nothing. The
+// suppression moved to `pushsvc`, per subscription owner.
+//
+// WHAT WAS LOST AND IS DECLARED RATHER THAN QUIETLY DROPPED: precedence used to be testable in ONE
+// place, because both gates sat here. It is now AND across two layers — category at the decision,
+// device at the send — and no single test sees both. `TestCategoryPrecedenceSurvivesTheMove` below
+// covers this half; `pushsvc.TestAMutedOwnerReceivesNothing` covers the other.
+
+// THE CATEGORY GATE STAYS HERE, because it is quince-wide and has no owner. Half of the old
+// precedence table, and the half this package can still answer.
+func TestCategoryPrecedenceSurvivesTheMove(t *testing.T) {
 	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
 	last := now.Add(-40 * 24 * time.Hour) // well past overdue_days
 	for _, tc := range []struct {
 		name       string
 		categoryOn bool
-		deviceOn   bool
 		want       bool
 	}{
-		{"both on", true, true, true},
-		{"category off, device on", false, true, false},
-		{"category on, device off", true, false, false},
-		{"both off", false, false, false},
+		{"category on", true, true},
+		{"category off", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := defaults()
 			cfg.BackupOverdue = tc.categoryOn
-			dev := device("phone", &last, now)
-			dev.NotificationsEnabled = tc.deviceOn
-			_, got := Evaluate(dev, Reminder{}, cfg, false, now)
+			_, got := Evaluate(device("phone", &last, now), Reminder{}, cfg, false, now)
 			if got != tc.want {
-				t.Fatalf("Evaluate sent=%v, want %v (category=%v device=%v)",
-					got, tc.want, tc.categoryOn, tc.deviceOn)
+				t.Fatalf("Evaluate sent=%v, want %v (category=%v)", got, tc.want, tc.categoryOn)
 			}
 		})
 	}
 }
 
-// THE CASE THAT PROMPTED THE FEATURE, and it is the acceptance quince#1270 names.
+// A MUTED DEVICE NOW PRODUCES A DECISION, which is the change and the thing most likely to look
+// like a regression to a reader who knew the old behaviour.
 //
-// A paired device the user does not intend to back up produces `Never Backed Up` every
-// `reminder_cooldown_hours`, indefinitely, for as long as it is on the network. Turning
-// `backup_available` off globally would silence the invitation for the devices the user DOES want
-// backed up, which is the whole gap. So: a muted, visible, never-backed-up device produces nothing,
-// and an unmuted one beside it still invites.
-func TestAMutedNeverBackedUpDeviceIsNotInvitedAndItsNeighbourStillIs(t *testing.T) {
+// Nothing is delivered — `pushsvc` drops it for every owner who muted the device — but the decision
+// exists, so a scoped holder who did NOT mute it still receives.
+func TestAMutedDeviceStillProducesADecision(t *testing.T) {
 	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
-	cfg := defaults()
-
 	drawer := device("drawer-iphone", nil, now)
-	drawer.NotificationsEnabled = false
-	if d, send := Evaluate(drawer, Reminder{}, cfg, false, now); send {
-		t.Fatalf("a muted never-backed-up device was still invited: %q / %q", d.Title, d.Body)
-	}
+	drawer.NotificationsEnabled = false // the admin's mute, and it no longer gates here
 
-	wanted := device("family-iphone", nil, now)
-	d, send := Evaluate(wanted, Reminder{}, cfg, false, now)
+	d, send := Evaluate(drawer, Reminder{}, defaults(), false, now)
 	if !send {
-		t.Fatalf("muting one device silenced its unmuted neighbour")
+		t.Fatal("a muted device produced no decision — the admin's mute is still gating the " +
+			"decision point, which denies a scoped holder reminders about their own phone")
 	}
 	if d.Kind != KindBackupAvailable {
-		t.Fatalf("neighbour got kind %q, want %q", d.Kind, KindBackupAvailable)
+		t.Fatalf("kind %q, want %q", d.Kind, KindBackupAvailable)
 	}
 }
 
-// THE SWITCH IS THE SUBJECT AXIS, SO IT COVERS EVERY KIND — including the failures.
-//
-// "Notifications about this device: on or off" is the whole of it. A per-kind reading is the
-// per-(device × category) matrix quince#1270 deliberately defers, and half-implementing it here
-// would ship a switch whose label cannot be written truthfully.
-func TestMutingCoversTheTerminalKindsToo(t *testing.T) {
+// THE COOLDOWN IS SPENT ON A MUTED DEVICE, which is the cost of the move. Asserted rather than
+// discovered: `push_reminders` advances when a decision is produced, so a device muted by every
+// principal still consumes its track. Nothing is delivered, so this is a wasted evaluation rather
+// than a wrong notification — but a reader wondering why the ledger moved deserves to find this.
+func TestAMutedDeviceStillAdvancesTheReminderTrack(t *testing.T) {
 	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
-	cfg := defaults()
-	cfg.BackupCompleted = true
-
-	for _, tc := range []struct {
-		name      string
-		state     string
-		errorCode string
-	}{
-		{"succeeded", backup.StateSucceeded, ""},
-		{"needs the phone", backup.StateFailed, backup.ErrNotPaired},
-		{"quince's own failure", backup.StateFailed, backup.ErrDiskLow},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dev := device("phone", nil, now)
-			if _, send := ForTerminal(dev, tc.state, tc.errorCode, cfg); !send {
-				t.Fatalf("unmuted device sent nothing for %s/%s; the fixture proves nothing",
-					tc.state, tc.errorCode)
-			}
-			dev.NotificationsEnabled = false
-			if d, send := ForTerminal(dev, tc.state, tc.errorCode, cfg); send {
-				t.Fatalf("a muted device was still told %q / %q", d.Title, d.Body)
-			}
-		})
+	dev := device("drawer-iphone", nil, now)
+	dev.NotificationsEnabled = false
+	if _, send := Evaluate(dev, Reminder{}, defaults(), false, now); !send {
+		t.Fatal("fixture: a muted device should still decide")
 	}
+	// The caller advances the track on `send`, so this documents the consequence rather than the
+	// mechanism, which lives in the runner.
 }
