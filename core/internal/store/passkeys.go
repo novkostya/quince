@@ -86,18 +86,41 @@ func (s *Store) CountPasskeys() (int, error) {
 	return n, err
 }
 
-// DeleteAllPasskeys removes every passkey credential and returns how many rows went.
+// DeleteAllPasskeys removes every passkey credential and returns how many rows went, and how many of
+// those were DEVICE-SCOPED (qn.13 D9).
 //
 // EVERY one, not a selection, and that is the ruled behaviour rather than a simplification: a
 // credential list the locked-out user cannot reach is not recovery. Leaving them would leave the box
 // authenticatable by the phone that is, by hypothesis, the thing that was lost.
-func (s *Store) DeleteAllPasskeys() (int, error) {
-	res, err := s.db.Exec(`DELETE FROM passkeys`)
+//
+// THE SCOPED COUNT IS TAKEN IN THE SAME TRANSACTION AS THE DELETE, and that is not fastidiousness
+// about a CLI. Counting outside one gives a number that can disagree with what was removed — and the
+// number's whole job is to tell an admin how many OTHER PEOPLE this just cut off, so a figure that
+// can be wrong is worse than no figure. The transaction is also what makes "the subset" true by
+// construction rather than by two queries agreeing.
+func (s *Store) DeleteAllPasskeys() (total int, scoped int, err error) {
+	tx, err := s.db.Begin()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM passkeys WHERE scope_udid IS NOT NULL`).
+		Scan(&scoped); err != nil {
+		return 0, 0, err
+	}
+	res, err := tx.Exec(`DELETE FROM passkeys`)
+	if err != nil {
+		return 0, 0, err
 	}
 	n, err := res.RowsAffected()
-	return int(n), err
+	if err != nil {
+		return 0, 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, err
+	}
+	return int(n), scoped, nil
 }
 
 // scanPasskey reads one row. The nullable columns are the ones with a genuine "not yet" state —

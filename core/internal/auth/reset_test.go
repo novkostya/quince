@@ -320,3 +320,73 @@ func TestResetIsRecoverableByRunningItAgain(t *testing.T) {
 		t.Fatal("the install is still claimed after a completed reset")
 	}
 }
+
+// qn.13 D9 — `quince auth reset` CLEARS SCOPED CREDENTIALS, and the count says how many.
+//
+// TWO CLAUSES, AND THEY ARE DIFFERENT CLAIMS. D9 asks that the clearing be "confirmed at build" and
+// that "the screen say so". This file is the first: the delete is unfiltered, so a device-scoped
+// credential goes with the admin's. `resetSummary` is the second.
+//
+// THE COUNT EXISTS BECAUSE A RESET IS A RECOVERY ACT WITH A CONSEQUENCE FOR OTHER PEOPLE. The admin
+// lost their phone; what a flat total does not tell them is that every household member's access to
+// their own device went too, and they find that out from the household member instead.
+//
+// SYNTHETIC UDIDS — a real one is Operator-private and never enters a fixture.
+func TestResetClearsScopedCredentialsAndCountsThem(t *testing.T) {
+	st := seedReset(t) // one ADMIN credential, a password, a session
+	now := time.Now().UTC()
+	for i, udid := range []string{"udid-fixture-0001", "udid-fixture-0002"} {
+		if err := st.InsertPasskey(store.Passkey{
+			CredentialID: "scoped-" + udid,
+			PublicKey:    []byte("cose"),
+			RPID:         "example.com",
+			Name:         "shared device",
+			CreatedAt:    now.Add(time.Duration(i) * time.Second),
+		}, store.DeviceScope(udid)); err != nil {
+			t.Fatalf("seed scoped passkey %d: %v", i, err)
+		}
+	}
+
+	out, err := Reset(st)
+	if err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+
+	if out.Passkeys != 3 {
+		t.Fatalf("Passkeys = %d, want 3 — the delete must not spare a scoped credential, or a "+
+			"locked-out admin's reset leaves the box reachable by somebody else's phone", out.Passkeys)
+	}
+	if out.ScopedPasskeys != 2 {
+		t.Fatalf("ScopedPasskeys = %d, want 2 — the admin is not told how many other people this "+
+			"just cut off", out.ScopedPasskeys)
+	}
+
+	// AND THE ROWS ARE ACTUALLY GONE, not merely counted. A count is what the screen reads; the
+	// list is what the box authenticates against, and only the second one is the recovery claim.
+	rows, err := st.ListPasskeys()
+	if err != nil {
+		t.Fatalf("ListPasskeys: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("%d credential(s) survived the reset: %+v", len(rows), rows)
+	}
+}
+
+// THE SUBSET IS A SUBSET. `ScopedPasskeys` must never exceed `Passkeys`, and on an install that
+// never shared a device it is zero rather than absent — which is what lets the summary drop the
+// clause entirely instead of printing "(0 of them ...)" at every admin who never used the feature.
+func TestResetReportsNoScopedCredentialsOnAnInstallThatNeverSharedOne(t *testing.T) {
+	st := seedReset(t)
+
+	out, err := Reset(st)
+	if err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+
+	if out.Passkeys != 1 {
+		t.Fatalf("Passkeys = %d, want 1", out.Passkeys)
+	}
+	if out.ScopedPasskeys != 0 {
+		t.Fatalf("ScopedPasskeys = %d, want 0 — nothing was ever shared", out.ScopedPasskeys)
+	}
+}

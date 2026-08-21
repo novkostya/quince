@@ -185,10 +185,26 @@ func authCmd(args []string) error {
 // resetSummary says what actually happened in counts, never "done". A reset that removed 2 passkeys
 // tells the operator this box had credentials; one that removed 0 tells them it did not. Both are
 // facts they did not have before, and neither survives being summarised.
+//
+// AND IT NAMES THE DEVICE-SCOPED ONES SEPARATELY (qn.13 D9). A reset is a RECOVERY act — the admin
+// lost their phone and is getting back in — and its consequence for other people is invisible in a
+// flat total: "3 passkey(s) removed" does not tell them that two household members can no longer
+// reach the devices they were given. They find out from the household member instead, which is the
+// *state honesty* rule failing at the one moment it is load-bearing.
+//
+// SAID ONLY WHEN THERE WERE ANY. On an install that has never shared a device the clause is noise,
+// and a parenthetical about a feature nobody used is how a summary stops being read.
 func resetSummary(r auth.ResetResult) string {
 	pw := "no password was set"
 	if r.HadPassword {
 		pw = "password cleared"
 	}
-	return fmt.Sprintf("%s, %d passkey(s) removed, %d session(s) invalidated", pw, r.Passkeys, r.Sessions)
+	pk := fmt.Sprintf("%d passkey(s) removed", r.Passkeys)
+	if r.ScopedPasskeys > 0 {
+		// PLAIN ABOUT WHO IT AFFECTS rather than about the schema. "device-scoped" is quince's word
+		// for it; the admin's question is who just lost access, so the sentence answers that.
+		pk = fmt.Sprintf("%s (%d of them shared a single device with someone — that access is gone too)",
+			pk, r.ScopedPasskeys)
+	}
+	return fmt.Sprintf("%s, %s, %d session(s) invalidated", pw, pk, r.Sessions)
 }
