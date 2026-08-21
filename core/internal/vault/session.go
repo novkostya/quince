@@ -44,7 +44,12 @@ type Session struct {
 type registryEntry struct {
 	session Session
 	vault   Vault
-	scratch string
+
+	// incomplete remembers files this session read short — D8.1a. Guarded by the REGISTRY
+	// mutex, not by busy: a browse may read it while a stream is still running, which is the
+	// whole point of remembering.
+	incomplete map[string]bool
+	scratch    string
 
 	// busy guards the Vault, which is not required to be concurrency-safe. TryLock rather
 	// than Lock — see ErrSessionBusy.
@@ -396,4 +401,68 @@ func (s *streamHold) Close() error {
 	// own Close is idempotent by the io.Closer convention; the release must be made so.
 	s.once.Do(s.release)
 	return err
+}
+
+// WatchIncomplete wraps a stream so that a read ending in ErrIncompleteFile is REMEMBERED on
+// the session, and returns the wrapped reader.
+//
+// THIS IS WHERE D8.1a's PROMISE IS KEPT. An incomplete file is a successful read of an
+// incomplete artifact: every recovered byte is delivered, and a retry cannot change it. It
+// cannot be known before the file is read — the index records a size and only decrypting the
+// blob shows fewer bytes are there — so the browse listing can only mark it AFTERWARDS, and
+// something has to remember. The session does, for its own lifetime and no longer: nothing
+// derived from backup content is persisted (design §7).
+//
+// AN UNKNOWN SESSION IS NOT AN ERROR HERE. The stream is already open and the caller is about
+// to read it; refusing would break a live download to record a note. The note is simply lost,
+// which is the right trade for a session that is ending anyway.
+func (r *Registry) WatchIncomplete(sessionID, fileID string, rc io.ReadCloser) io.ReadCloser {
+	return &incompleteWatcher{ReadCloser: rc, mark: func() { r.markIncomplete(sessionID, fileID) }}
+}
+
+// IncompleteIn reports which files this session has read short. The map is a COPY: a caller
+// rendering a page must not hold a reference into the session's own state.
+func (r *Registry) IncompleteIn(sessionID string) map[string]bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e, ok := r.sessions[sessionID]
+	if !ok || len(e.incomplete) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(e.incomplete))
+	for k, v := range e.incomplete {
+		out[k] = v
+	}
+	return out
+}
+
+func (r *Registry) markIncomplete(sessionID, fileID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e, ok := r.sessions[sessionID]
+	if !ok {
+		return
+	}
+	if e.incomplete == nil {
+		e.incomplete = make(map[string]bool)
+	}
+	e.incomplete[fileID] = true
+}
+
+// incompleteWatcher records the one error that is not a failure.
+type incompleteWatcher struct {
+	io.ReadCloser
+	mark func()
+	once sync.Once
+}
+
+func (w *incompleteWatcher) Read(p []byte) (int, error) {
+	n, err := w.ReadCloser.Read(p)
+	// ErrIncompleteFile arrives as the terminal error of the stream, AFTER the bytes. It is
+	// checked before io.EOF rather than after, because an incomplete read ends in this rather
+	// than in EOF — testing for EOF first would skip it.
+	if err != nil && errors.Is(err, ErrIncompleteFile) {
+		w.once.Do(w.mark)
+	}
+	return n, err
 }

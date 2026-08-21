@@ -18,6 +18,7 @@ import (
 	"github.com/novkostya/quince/core/internal/muxd"
 	"github.com/novkostya/quince/core/internal/storage"
 	"github.com/novkostya/quince/core/internal/store"
+	"github.com/novkostya/quince/core/internal/vaultsvc"
 	"github.com/novkostya/quince/core/internal/version"
 	"github.com/novkostya/quince/core/internal/wire"
 )
@@ -29,10 +30,14 @@ type liveStack struct {
 	jobControl   httpapi.JobControl
 	versions     httpapi.VersionReader
 	versionAdmin httpapi.VersionAdmin
-	storages     httpapi.StorageReader
-	muxer        httpapi.MuxerControl
-	ops          httpapi.DeviceOps
-	engine       *backup.Engine
+	// vaultVersions is the SAME *storage.Manager, typed for the one consumer that needs a
+	// version BY ID. httpapi.VersionReader lists per device, which is the browse surface; a vault
+	// session starts from an id and nothing else.
+	vaultVersions vaultsvc.Versions
+	storages      httpapi.StorageReader
+	muxer         httpapi.MuxerControl
+	ops           httpapi.DeviceOps
+	engine        *backup.Engine
 	// reconcile is the qn.6i runner, non-nil only when the scan was DEFERRED (serve). The CLIs get
 	// nil because they ran the scan synchronously and have nothing left to report about.
 	reconcile *storage.Runner
@@ -165,6 +170,7 @@ func buildLiveStack(ctx context.Context, bootstrap config.Bootstrap, cfgSvc *con
 	}
 	ls.versions = storageMgr
 	ls.versionAdmin = storageMgr
+	ls.vaultVersions = storageMgr
 	ls.storages = storageMgr
 	ls.reconcile = runner
 

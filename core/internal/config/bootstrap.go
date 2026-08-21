@@ -201,3 +201,11 @@ func splitList(v string) []string {
 	}
 	return out
 }
+
+// ScratchRoot is where vault sessions decrypt — contracts §5's `/cache/scratch/<session_id>/`,
+// under the cache dir because that is what the cache dir is for: "derived caches + session
+// scratch", and because wiping it whole is always safe.
+//
+// A METHOD RATHER THAN A CONSTANT AT THE CALL SITE, so the one place that knows the layout is
+// the one place that already knows every other path.
+func (b Bootstrap) ScratchRoot() string { return filepath.Join(b.Cache, "scratch") }

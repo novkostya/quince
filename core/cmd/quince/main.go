@@ -38,6 +38,8 @@ import (
 	"github.com/novkostya/quince/core/internal/pushsvc"
 	"github.com/novkostya/quince/core/internal/store"
 	"github.com/novkostya/quince/core/internal/tlsx"
+	"github.com/novkostya/quince/core/internal/vault"
+	"github.com/novkostya/quince/core/internal/vaultsvc"
 	"github.com/novkostya/quince/core/internal/version"
 	"github.com/novkostya/quince/core/internal/webui"
 )
@@ -179,6 +181,10 @@ func serve(args []string) error {
 	var jobControl httpapi.JobControl  // nil in demo → router serves 503 on the command surface
 	var versions httpapi.VersionReader // assigned in both branches (demo → provider, else → storage)
 	var versionAdmin httpapi.VersionAdmin
+	// nil in demo AND when no storage is wired → the router serves 503 on all four vault routes.
+	// Deliberately NOT given a demo provider: --demo fabricates devices and jobs, and a fabricated
+	// BACKUP would be a fixture of somebody's file tree. Refusing is the honest demo answer.
+	var vaultBrowse httpapi.VaultBrowse
 	var storages httpapi.StorageReader // assigned in both branches (demo → provider, else → storage)
 	var muxer httpapi.MuxerControl = httpapi.UnmanagedMuxer{}
 	var ops httpapi.DeviceOps                    // assigned in both branches below (demo → provider, else → manager)
@@ -327,6 +333,29 @@ func serve(args []string) error {
 		deviceNotifs = deviceNotifications{log: log, store: st, devices: ls.devices, bus: eventBus}
 		versions, versionAdmin, muxer, ops = ls.versions, ls.versionAdmin, ls.muxer, ls.ops
 		storages = ls.storages
+		// The vault surface (qn.8). Built here rather than inside buildLiveStack because it is the
+		// seam between storage, the vault registry and four routes — the same reason
+		// deviceNotifications is built here.
+		//
+		// A FAILURE TO BUILD IT IS NOT FATAL. It wipes and creates a scratch directory, and a cache
+		// dir that cannot be written is already a DEGRADED MODE rather than a refusal
+		// (bootstrap.ValidateDirs). So the daemon serves, and the four routes answer 503 with the
+		// reason — which is better than refusing to start a backup server because browsing is
+		// unavailable. Backing up is the product; browsing is a feature of it.
+		if vs, err := vaultsvc.New(ls.vaultVersions, bootstrap.ScratchRoot(),
+			vault.TTLFromMinutes(cfgSvc.Current().Vault.SessionTTLMinutes), log); err != nil {
+			log.Error("vault: browsing is unavailable — the four session routes will answer 503",
+				"scratch", bootstrap.ScratchRoot(), "error", err)
+		} else {
+			vaultBrowse = vs
+			startVaultSweeper(ctx, vs.Registry(), log)
+			// LIVE, and narrowly so: a new TTL governs the NEXT session and never moves one already
+			// running, because ExpiresAt is stamped at unlock (contracts §6).
+			cfgSvc.Subscribe("vault", func(_, next config.Config) []config.Warning {
+				vs.Registry().SetTTL(vault.TTLFromMinutes(next.Vault.SessionTTLMinutes))
+				return nil
+			})
+		}
 		if ls.reconcile != nil {
 			// TRIGGERED BEFORE THE ROUTER IS BUILT so `reconciling` is already true on the FIRST
 			// request anybody can make. Trigger sets the flag synchronously; the pass itself runs on
@@ -373,7 +402,7 @@ func serve(args []string) error {
 		Devices: devices, Jobs: jobs, JobControl: jobControl, Versions: versions,
 		VersionAdmin: versionAdmin, Muxer: muxer, Ops: ops, WorkingReset: workingReset,
 		DeviceNotifs: deviceNotifs,
-		Storages:     storages, Reconcile: reconcileReporter,
+		Storages:     storages, Reconcile: reconcileReporter, VaultBrowse: vaultBrowse,
 		// THE SAME Keeper `subscribeTLS` FEEDS, and the certificate trial points it at a pair
 		// WITHOUT writing `config.yml` (quince#908 slice 5). One Keeper, two ways in: the applier,
 		// for a config edit, and the trial, for a certificate nobody has proved yet. The second
@@ -1084,4 +1113,41 @@ func engineJobs(e *backup.Engine) notify.Jobs {
 		return nil
 	}
 	return e
+}
+
+// startVaultSweeper ends expired vault sessions on a ticker, and tears every session down when
+// the context ends.
+//
+// A TICKER RATHER THAN A TIMER PER SESSION. Sessions are few and short; one goroutine that
+// sweeps beats N that each hold a reference to the thing they are waiting to destroy.
+//
+// THE INTERVAL IS NOT CONFIGURABLE, deliberately. It is a bound on how late an expiry is
+// noticed, not a policy — `vault.session_ttl_minutes` is the policy, and a second knob
+// governing when the first one is enforced is a setting whose only effect is to make the first
+// one lie. Thirty seconds against a fifteen-minute default is under a third of a percent.
+//
+// AN EXPIRED SESSION IS ALSO REFUSED ON ARRIVAL (vault.Registry.With), so the sweep is hygiene
+// rather than the guarantee: nothing is served from an expired session even between ticks.
+func startVaultSweeper(ctx context.Context, reg *vault.Registry, log *slog.Logger) {
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				// EVERY SESSION ENDS WHEN THE PROCESS DOES, through the same teardown as a lock:
+				// keys dropped, scratch wiped. Without this, a shutdown would leave decrypted
+				// indexes on disk until the next start wiped the root — true but later, and "later"
+				// is a window on somebody's file tree.
+				if err := reg.CloseAll(); err != nil {
+					log.Error("vault: closing sessions at shutdown", "error", err)
+				}
+				return
+			case <-t.C:
+				if n := reg.Sweep(); n > 0 {
+					log.Info("vault: expired sessions swept", "count", n)
+				}
+			}
+		}
+	}()
 }
