@@ -53,6 +53,19 @@ function entry(over: Record<string, unknown> = {}) {
   };
 }
 
+// heldForSession counts what the cache holds under a session id, PREFIX-MATCHED rather than looked
+// up by exact key — which is the invariant `removeQueries` actually enforces, and the one worth
+// asserting.
+//
+// AN EXACT `getQueryData(["vault-browse", id])` BROKE THE MOMENT THE KEY GREW. Slice 7's filters
+// appended `filter.domain` and `filter.prefix`, so the real key became
+// `["vault-browse", id, "", ""]` and the lookup started returning `undefined` for a page that was
+// very much still held. The production code was right throughout — `removeQueries` prefix-matches
+// by default — so the test was pinned to the key's SHAPE where the claim is about its OWNER.
+function heldForSession(qc: QueryClient, id: string): number {
+  return qc.getQueryCache().findAll({ queryKey: ["vault-browse", id] }).length;
+}
+
 function renderPage(v: Version | null = ver()) {
   if (v) useVersionsStore.getState().replaceAll([v]);
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -254,6 +267,167 @@ describe("VaultBrowsePage", () => {
     expect(anchor.getAttribute("autocomplete")).toBe("username");
   });
 
+  // STORY 3's OTHER HALF. Both fields go TO THE SERVER — a client-side filter over the pages
+  // already loaded would narrow a sample and present it as the answer, which is the same silent cap
+  // as offering a closed list of the domains seen so far.
+  it("filters at the server, on domain and prefix together", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      id: "S1",
+      version_id: "V1",
+      expires_at: "2026-08-20T00:15:00Z",
+    });
+    const get = vi.spyOn(api, "get").mockResolvedValue({ entries: [entry()] });
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
+    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await screen.findByText("Library/Notes/notes.sqlite");
+
+    fireEvent.change(screen.getByLabelText("Domain"), { target: { value: "MediaDomain" } });
+    fireEvent.change(screen.getByLabelText(/path starts with/i), { target: { value: "DCIM/" } });
+    // TYPING IS NOT ASKING. Six keystrokes above; the request happens on submit, because every one
+    // of these is a walk of the manifest on the daemon.
+    expect(get).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /^filter$/i }));
+    await waitFor(() =>
+      expect(get).toHaveBeenLastCalledWith("/api/sessions/S1/browse?domain=MediaDomain&prefix=DCIM%2F"),
+    );
+  });
+
+  // A FILTERED MISS IS NOT AN EMPTY BACKUP. Collapsing the two is quince#940's defect exactly: both
+  // sentences are true of an empty list and only one of them names something the reader can act on.
+  it("says a filter matched nothing, rather than that the backup is empty", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      id: "S1",
+      version_id: "V1",
+      expires_at: "2026-08-20T00:15:00Z",
+    });
+    vi.spyOn(api, "get")
+      .mockResolvedValueOnce({ entries: [entry()] })
+      .mockResolvedValueOnce({ entries: [] });
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
+    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await screen.findByText("Library/Notes/notes.sqlite");
+
+    fireEvent.change(screen.getByLabelText("Domain"), { target: { value: "HomeDomian" } });
+    fireEvent.click(screen.getByRole("button", { name: /^filter$/i }));
+
+    expect(await screen.findByText(/match that domain and path/i)).toBeTruthy();
+    expect(screen.queryByText(/this backup holds no files/i)).toBeNull();
+  });
+
+  // THE UNFILTERED CONTROL for the case above: the same empty page, no filter, and the OTHER
+  // sentence. Without this the test above passes against a component that only ever says one thing.
+  it("says the backup is empty when it is, and no filter is set", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      id: "S1",
+      version_id: "V1",
+      expires_at: "2026-08-20T00:15:00Z",
+    });
+    vi.spyOn(api, "get").mockResolvedValue({ entries: [] });
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
+    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+
+    expect(await screen.findByText(/this backup holds no files/i)).toBeTruthy();
+    expect(screen.queryByText(/match that domain and path/i)).toBeNull();
+  });
+
+  // Clearing must reach the LIST, not just the boxes. A Clear that emptied the inputs and left the
+  // narrowed rows on screen would be a filter you cannot get out of.
+  //
+  // ASSERTED ON THE SCREEN RATHER THAN ON THE NETWORK, and the first version of this test got that
+  // wrong: it expected a request for the unfiltered page and there is none, because react-query
+  // still holds it under its own key. That is the cache being right — going back to the whole list
+  // costs no second decrypt of a manifest already read — and a test that demanded the fetch would
+  // have been pinning a waste.
+  it("clears back to the whole backup", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      id: "S1",
+      version_id: "V1",
+      expires_at: "2026-08-20T00:15:00Z",
+    });
+    const get = vi
+      .spyOn(api, "get")
+      .mockResolvedValue({ entries: [entry({ file_id: "F9", relative_path: "Media/DCIM/a.jpg" })] })
+      .mockResolvedValueOnce({ entries: [entry()] });
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
+    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await screen.findByText("Library/Notes/notes.sqlite");
+
+    fireEvent.change(screen.getByLabelText("Domain"), { target: { value: "MediaDomain" } });
+    fireEvent.click(screen.getByRole("button", { name: /^filter$/i }));
+    expect(await screen.findByText("Media/DCIM/a.jpg")).toBeTruthy();
+    expect(screen.queryByText("Library/Notes/notes.sqlite")).toBeNull();
+    expect(get).toHaveBeenLastCalledWith("/api/sessions/S1/browse?domain=MediaDomain");
+
+    fireEvent.click(screen.getByRole("button", { name: /^clear$/i }));
+    expect(await screen.findByText("Library/Notes/notes.sqlite")).toBeTruthy();
+    expect(screen.queryByText("Media/DCIM/a.jpg")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^clear$/i })).toBeNull();
+  });
+
+  // STORY 4's UI HALF. `effective_limit` is *"no silent caps or fallbacks as a wire field"*, and a
+  // client that reads it and renders nothing is where that guarantee dies quietly.
+  //
+  // BOTH DIRECTIONS, because the field is PRESENT ONLY WHEN THE SERVER CLAMPED. A test that only
+  // proves the notice appears would pass just as happily against a component that shows it always,
+  // which would report a clamp on every ordinary page.
+  it("discloses a clamped page size, and stays silent when nothing was clamped", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      id: "S1",
+      version_id: "V1",
+      expires_at: "2026-08-20T00:15:00Z",
+    });
+    const get = vi.spyOn(api, "get").mockResolvedValue({ entries: [entry()] });
+
+    const { unmount } = renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
+    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await screen.findByText("Library/Notes/notes.sqlite");
+    expect(screen.queryByText(/reduced the page size/i)).toBeNull();
+    unmount();
+
+    get.mockResolvedValue({ entries: [entry()], effective_limit: 2000 });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
+    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    expect(await screen.findByText(/reduced the page size/i)).toBeTruthy();
+    expect(screen.getByText(/at most 2000 files per page/i)).toBeTruthy();
+  });
+
+  // THE SUGGESTIONS ARE SUGGESTIONS. Nothing on the wire enumerates a backup's domains, so a
+  // `<select>` built from loaded pages would omit exactly the domain you have not reached yet — a
+  // silent cap wearing a helpful face. The input stays free text and the datalist only hints.
+  it("suggests the domains it has seen without closing the list", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      id: "S1",
+      version_id: "V1",
+      expires_at: "2026-08-20T00:15:00Z",
+    });
+    vi.spyOn(api, "get").mockResolvedValue({
+      entries: [entry(), entry({ file_id: "F2", domain: "MediaDomain", relative_path: "DCIM/a.jpg" })],
+    });
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
+    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await screen.findByText("Library/Notes/notes.sqlite");
+
+    const box = screen.getByLabelText("Domain") as HTMLInputElement;
+    expect(box.tagName).toBe("INPUT");
+    const options = Array.from(document.querySelectorAll("#browse-domains option")).map(
+      (o) => (o as HTMLOptionElement).value,
+    );
+    expect(options).toEqual(["HomeDomain", "MediaDomain"]);
+  });
+
   // FOUND ON HARDWARE, NOT IN A FIXTURE. The first page of a real encrypted iPad version is 500
   // rows of which 99 carry an EMPTY `relative_path` — one per domain, every one a `dir` of size 0.
   // The row rendered a blank line for each of them. A fixture author writes the rows they are
@@ -319,12 +493,12 @@ describe("VaultBrowsePage", () => {
     fireEvent.submit(document.querySelector("form") as HTMLFormElement);
     await screen.findByText("Library/Notes/notes.sqlite");
     // The control: it really is held before the lock, so the assertion after it can fail.
-    expect(qc.getQueryData(["vault-browse", "S1"])).toBeDefined();
+    expect(heldForSession(qc, "S1")).toBeGreaterThan(0);
 
     post.mockResolvedValueOnce(undefined as never);
     fireEvent.click(screen.getByRole("button", { name: /^lock$/i }));
     await screen.findByText(/this backup is locked/i);
-    expect(qc.getQueryData(["vault-browse", "S1"])).toBeUndefined();
+    expect(heldForSession(qc, "S1")).toBe(0);
   });
 
   // A session that ended WITHOUT a lock leaves pages just as dead, and the polite route is not the
@@ -342,12 +516,12 @@ describe("VaultBrowsePage", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
     fireEvent.submit(document.querySelector("form") as HTMLFormElement);
     await screen.findByText("Library/Notes/notes.sqlite");
-    expect(qc.getQueryData(["vault-browse", "S1"])).toBeDefined();
+    expect(heldForSession(qc, "S1")).toBeGreaterThan(0);
 
     get.mockRejectedValue(new APIError(409, "locked", "vault: no such session"));
     fireEvent.click(screen.getByRole("button", { name: /show more/i }));
     await screen.findByText(/no longer open/i);
-    expect(qc.getQueryData(["vault-browse", "S1"])).toBeUndefined();
+    expect(heldForSession(qc, "S1")).toBe(0);
   });
 
   // REVIEW FINDING, quince#1410. The header refuses to invent a total (quince#1408) and the footer
