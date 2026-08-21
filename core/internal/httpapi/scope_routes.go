@@ -168,6 +168,9 @@ func scopeGuardFor(d Deps, pattern string, next http.HandlerFunc) http.HandlerFu
 			writeError(w, d.Log, http.StatusForbidden, "forbidden", "this route has no scope decision")
 		}
 	}
+	if class == scopedOwnDevice {
+		return scopedResourceGuard(d, pattern, next)
+	}
 	if !class.refusesScoped() {
 		return next
 	}
