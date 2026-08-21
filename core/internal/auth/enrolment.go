@@ -3,6 +3,8 @@ package auth
 import (
 	"crypto/subtle"
 	"errors"
+	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -83,6 +85,15 @@ var (
 	// ErrEnrolmentRevoked — the admin cancelled it before anyone used it.
 	ErrEnrolmentRevoked = errors.New("auth: this enrolment link was cancelled")
 
+	// ErrEnrolmentScopeUnset — Mint was called with the ZERO `store.Scope`, which is a caller that
+	// forgot rather than one that asked for something forbidden.
+	//
+	// IT WRAPS store.ErrScopeUnset, so one `errors.Is` answers "scope not stated" whether the
+	// caller reached `InsertPasskey` or this. A parallel error with its own identity would make
+	// the same condition need two checks, which is how the two drift apart.
+	ErrEnrolmentScopeUnset = fmt.Errorf(
+		"auth: an enrolment link needs a stated device scope: %w", store.ErrScopeUnset)
+
 	// ErrEnrolmentAdminScope — refused at MINT. Nothing in this rung issues an admin credential by
 	// QR, and D4 requires that a scoped enrolment can never mint an admin one. Making the store
 	// unable to hold an admin-scoped secret is that requirement as a structural fact rather than a
@@ -148,8 +159,17 @@ func NewEnrolments() *Enrolments {
 // THE SCOPE IS BAKED IN AT GENERATION (D4): *a token whose scope is chosen by the scanner is not a
 // scoped token*. The scanner sends no scope and cannot; the ceremony reads it off the record.
 func (e *Enrolments) Mint(scope store.Scope) (string, Enrolment, error) {
-	if scope.IsAdmin() || scope.UDID() == "" {
+	// TWO REFUSALS, NOT ONE, and the difference is a decision somebody made versus one they did
+	// not (quince#1411 review). `store.Scope` carries an unexported `set` precisely so the zero
+	// value is distinguishable — `IsAdmin()` is `set && udid == ""` — and telling a caller who
+	// forgot to state a scope that "an enrolment link cannot carry admin scope" is a claim about
+	// a choice they never made. This file argues four paragraphs down that the scanner's four
+	// refusals must not collapse; quince can tell these two apart just as easily.
+	if scope.IsAdmin() {
 		return "", Enrolment{}, ErrEnrolmentAdminScope
+	}
+	if scope.UDID() == "" {
+		return "", Enrolment{}, ErrEnrolmentScopeUnset
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -235,6 +255,22 @@ func (e *Enrolments) List(udid string) []Enrolment {
 		}
 		out = append(out, rec.public(key))
 	}
+	// SORTED, BECAUSE MAP ITERATION IS RANDOMISED (quince#1411 review). Two consecutive calls with
+	// more than one live secret would otherwise return different orders, and a page polling this
+	// renders rows that jump under the admin's cursor while they are deciding which to cancel.
+	//
+	// OLDEST FIRST: the one closest to expiring is the one most likely to be stale, and a list
+	// whose order matches the order things happened is the one a reader can reason about.
+	//
+	// TIE-BROKEN ON ID, which is not decoration — the clock is injected, so a test (and a fast
+	// enough caller) can mint two in the same instant, and `CreatedAt` alone would leave those two
+	// in map order again. The id is a ULID, so this is also time order at finer resolution.
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out
 }
 
