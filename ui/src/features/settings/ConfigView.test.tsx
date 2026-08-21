@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { ConfigView } from "./ConfigView";
 import type { ConfigResponse } from "@/lib/types";
+import { testConfig } from "@/test/config";
 
 // WHAT THIS PINS, AND WHAT IT CANNOT: quince#631.
 //
@@ -19,18 +20,18 @@ import type { ConfigResponse } from "@/lib/types";
 // it, leaving `overflow-auto` looking like it does something.
 function response(over: Partial<ConfigResponse> = {}): ConfigResponse {
   return {
-    config: {
-      backup: { preferred_transport: "usb", require_encryption: true },
-      storage: null,
-      sessions: { allow_insecure_transport: false },
-      reconcile: { interval_minutes: 360 },
-      ui: { theme: "system" },
-    },
+    // testConfig() rather than a local literal: this fixture was a hand-rolled partial ending
+    // `as ConfigResponse`, which suppressed the check and let it drift five sections behind the
+    // type — and set `source.mtime` to null, a value the server cannot send (Go's field is a
+    // string, "empty when the file does not exist yet"). One fixture, compiler-checked, is what
+    // stops a third copy going stale in a different direction.
+    config: testConfig(),
     warnings: [],
     file_text: "storage:\n    - path: /backups\n",
-    source: { path: "/data/config.yml", mtime: null },
+    source: { path: "/data/config.yml", mtime: "" },
+    discarded: false,
     ...over,
-  } as ConfigResponse;
+  };
 }
 
 describe("ConfigView does not widen the page", () => {
