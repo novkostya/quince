@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -92,12 +93,30 @@ func (d Deps) handleSessionFile() http.HandlerFunc {
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusOK)
 
-		if _, err := io.Copy(w, rc); err != nil {
+		written, err := io.Copy(w, rc)
+		switch {
+		case err == nil:
+		case errors.Is(err, http.ErrContentLength):
+			// THE FILE IS LONGER THAN ITS RECORD SAYS — the OPPOSITE of a short read, and it
+			// was logged as one until quince#1379. net/http refuses the write past the
+			// declared length, so io.Copy fails here on a stream that delivered too MUCH.
+			//
+			// This is the silent case, and that is why it gets its own words: the client
+			// receives exactly Content-Length bytes, the header agrees with the body, and
+			// nothing on the wire says the file was cut. Only this line does.
+			d.Log.Warn("vault: file is longer than its manifest record — the download was "+
+				"truncated at the recorded length. The backup on disk holds more data than its "+
+				"own index claims for this file; a fresh backup of this device re-records it",
+				"session", r.PathValue("id"), "file_id", r.PathValue("file_id"),
+				"recorded_size", entry.Size, "err", err)
+		default:
 			// The header is already sent, so there is no status left to change. The
 			// truncated body IS the report — the client sees fewer bytes than declared —
 			// and the log is where the reason lives.
-			d.Log.Warn("vault: file stream ended early",
-				"session", r.PathValue("id"), "file_id", r.PathValue("file_id"), "err", err)
+			d.Log.Warn("vault: file stream ended early — the backup holds fewer bytes than its "+
+				"index records for this file",
+				"session", r.PathValue("id"), "file_id", r.PathValue("file_id"),
+				"recorded_size", entry.Size, "delivered", written, "err", err)
 		}
 	}
 }

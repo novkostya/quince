@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -375,5 +377,90 @@ func TestUnsupportedVersionIs422AndBusyIs409(t *testing.T) {
 func TestAnUnknownCodeIs500NotAPanic(t *testing.T) {
 	if got := statusForVaultCode("a_code_no_version_of_this_table_has_seen"); got != http.StatusInternalServerError {
 		t.Errorf("unknown code = %d, want %d", got, http.StatusInternalServerError)
+	}
+}
+
+// A file with MORE bytes than its record says must not be logged as one with fewer.
+//
+// quince#1379: `io.Copy` fails in both directions — short reads end the body early, and a
+// long file trips net/http's refusal to write past the declared Content-Length — and one
+// message said "ended early" for both. For the long case that message is not merely
+// collapsed, it is FALSE, which is the shape the troubleshooting rule names as a defect even
+// when every word is true.
+//
+// MEASURED, and it corrects what quince#1379 and its ruling both assumed: this is NOT a
+// silent truncation. Both described the client receiving exactly Content-Length bytes with
+// the header agreeing, so that nothing on the wire showed a problem. What actually happens
+// is that net/http tears the response: the client gets a 200 and a correct Content-Length
+// header, then reads ZERO bytes and an `unexpected EOF`. Checked at both 4 bytes declared
+// and 65536, i.e. either side of the response buffer, in case a flushed prefix could arrive
+// looking complete. It cannot.
+//
+// So the download FAILS VISIBLY and the user is not handed corrupt data. What they are not
+// given is any way to find out why — which is what this log line is for, and why it has to
+// say the true thing.
+func TestVaultFileLongerThanItsRecordIsNotReportedAsEndingEarly(t *testing.T) {
+	var logged bytes.Buffer
+	deps := testDeps(t)
+	deps.Log = slog.New(slog.NewTextHandler(&logged, nil))
+	deps.VaultBrowse = &stubVault{
+		entry:   wire.FileEntry{FileID: "f1", Size: 4},
+		content: "far more bytes on disk than the record claims",
+	}
+	srv := httptest.NewServer(NewRouter(deps))
+	defer srv.Close()
+
+	resp, err := authedClient(t, srv).Get(srv.URL + "/api/sessions/s1/file/f1")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, readErr := io.ReadAll(resp.Body)
+
+	// Content-Length stays the RECORDED size — this PR changes the diagnosis, not the bytes.
+	// Pinned so a later change cannot quietly start serving the on-disk length, which would
+	// destroy short-read detectability (contracts §1).
+	if got := resp.Header.Get("Content-Length"); got != "4" {
+		t.Errorf("Content-Length = %q, want %q (the recorded size)", got, "4")
+	}
+	// The transfer must not look like a clean success. If this ever passes with a nil error
+	// and a full body, the long case HAS become the silent truncation everyone assumed it
+	// already was, and the remedy has to change with it.
+	if readErr == nil && int64(len(body)) == 4 {
+		t.Error("a file longer than its record was delivered as a clean, complete-looking " +
+			"download; the truncation is now silent and this is no longer only a logging bug")
+	}
+
+	out := logged.String()
+	if strings.Contains(out, "ended early") {
+		t.Errorf("a file LONGER than its record was logged as ending early:\n%s", out)
+	}
+	if !strings.Contains(out, "longer than its manifest record") {
+		t.Errorf("the long-file case was not reported; the client learns only `unexpected EOF`, "+
+			"so this log line is the only place the reason exists:\n%s", out)
+	}
+}
+
+// The short case must keep its own words, so the fix above did not simply move the problem.
+func TestVaultFileShorterThanItsRecordStillReportsEndingEarly(t *testing.T) {
+	var logged bytes.Buffer
+	deps := testDeps(t)
+	deps.Log = slog.New(slog.NewTextHandler(&logged, nil))
+	deps.VaultBrowse = &stubVault{
+		entry:   wire.FileEntry{FileID: "f1", Size: 4096},
+		content: "only a few bytes",
+	}
+	srv := httptest.NewServer(NewRouter(deps))
+	defer srv.Close()
+
+	resp, err := authedClient(t, srv).Get(srv.URL + "/api/sessions/s1/file/f1")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.ReadAll(resp.Body)
+
+	if out := logged.String(); strings.Contains(out, "longer than its manifest record") {
+		t.Errorf("a SHORT file was reported as longer than its record:\n%s", out)
 	}
 }
