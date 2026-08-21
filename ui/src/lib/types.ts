@@ -144,6 +144,10 @@ export interface Op {
 export interface Session {
   id: string;
   version_id: string;
+  // RFC3339 UTC. The session ends at this instant whether or not anybody is looking; it is a
+  // fact to display, NOT A TIMER THE CLIENT OWNS. A countdown implemented client-side diverges
+  // from the server's truth the moment a tab sleeps or a clock skews, and the version it shows
+  // is the one the user believes.
   expires_at: string;
 }
 
