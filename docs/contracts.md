@@ -2333,9 +2333,7 @@ Version: {
               |  "",                                                     // zfs row with no snapshot: UNBROWSABLE
   // qn.6h D7: on zfs browse_root is the SNAPSHOT ROOT — .zfs/snapshot/<snap>, with NO trailing
   // component. The dataset root is the backup tree and quince writes into it in place, so a
-  // snapshot of it IS the version. Pre-qn.6h snapshots hold their content at <snap>/latest/ and
-  // pre-qn.5b at <snap>/working/; there is NO dual-read fallback — those versions are surfaced as
-  // unbrowsable and the skip is logged.
+  // snapshot of it IS the version.
   // AND ON zfs browse_root NEVER RESOLVES TO THE LIVE HEAD, whatever the row holds: in place the
   // head is the tree being written, so a zfs row without a snapshot yields no browse root rather
   // than a half-transferred tree presented as a version.

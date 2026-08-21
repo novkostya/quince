@@ -5,8 +5,7 @@ Self-hosted iPhone/iPad backup server. Go core daemon + a swappable vault behind
 session-scoped reads, no persistent index; **unbuilt — qn.8**, and its process model is
 open, stack D4) + React/TS UI (Tailwind v4 tokens, vendored shadcn-style components, Zustand;
 device-centric IA — Devices + Settings only), REST + one WebSocket, SQLite app DB,
-never-mutate-committed versioned storage — **TWO lifecycles, split by backend** (design §5),
-since qn.6h.
+never-mutate-committed versioned storage — **TWO lifecycles, split by backend** (design §5).
 
 **On the namespace backends — reflink (FICLONE) / hardlink / copy** — `idevicebackup2` writes only
 into a per-job `working/<udid>` seeded from `latest/` at job start (reflink where the filesystem
@@ -18,12 +17,8 @@ offsite-sync source; a version is a `versions/<ts>/` dir.
 **On `zfs` the child dataset root IS the tree and quince writes into it IN PLACE**: no `latest/`, no
 `working/`, no `versions/`, no seed and no exchange — commit is verify → `zfs snapshot`. A version
 is a `@quince-*` snapshot (one child dataset per device), browsed at `.zfs/snapshot/<snap>/` —
-**the snapshot root, with NO trailing component**. So this backend has no stable whole-tree offsite
-source: the head is torn mid-backup, and offsite must read a snapshot mount. **Snapshots written
-before qn.6h hold their content at `<snap>/latest/`, and pre-qn.5b ones at `<snap>/working/`;
-neither is browsable** — quince logs and skips them rather than dual-reading, so an old storage
-degrades loudly. Ruled 2026-08-04 (quince#591), layout refined by qn.6h D1/D7 on 2026-08-08, and
-**BUILT** — `docs/specs/qn.6h/`, plus design §5's block at the end of the section.
+**the snapshot root, with NO trailing component**. This backend has no stable whole-tree offsite
+source: the head is torn mid-backup, so offsite reads a snapshot mount. Spec: `docs/specs/qn.6h/`.
 
 Commit is journaled and startup reconciliation is first-class. Wi-Fi backup is the PRIMARY use case
 under the ASSISTED model — iOS requires on-device passcode entry per backup, so there is

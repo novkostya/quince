@@ -383,11 +383,10 @@ differently (Operator ruling: no hardlink games under ZFS):
      and rejected (with `snapdir=hidden` rclone never sees them; with
      `snapdir=visible` it would walk EVERY snapshot at full size).
    A version IS a `zfs snapshot <parent>/<udid>@quince-<YYYY-MM-DDTHH-MM>-<ULID>`, taken **only after
-   structural verification passes** on the child dataset root, which since qn.6h IS the backup tree —
-   quince writes into it in place, so the snapshot captures the head = the version. Browsed read-only
-   at `.zfs/snapshot/<snap>/`, **the snapshot root with no trailing component** (qn.6h D7);
-   pre-qn.6h snapshots hold their content at `<snap>/latest/`, are not browsable, and are skipped
-   with a log line. There is no seed and no `working/`; `rollback` discards a dirty head and is for
+   structural verification passes** on the child dataset root, which IS the backup tree — quince
+   writes into it in place, so the snapshot captures the head = the version. Browsed read-only
+   at `.zfs/snapshot/<snap>/`, **the snapshot root with no trailing component** (qn.6h D7).
+   There is no seed and no `working/`; `rollback` discards a dirty head and is for
    **abandon only** — a failed job KEEPS the head so a retry resumes without re-transferring;
    retention = destroying our own snapshots. **Only quince-created snapshots count** — host auto-snapshot tooling is
    never relied on, created, or classified. Host-side ops go through a
@@ -493,12 +492,9 @@ live mounted filesystems and uploads whatever is there. The rule:
   > `IsFullBackup`. D5's two version models collapse toward one. Full scope: qn.5b spec +
   > decisions log (cg)/(co).
 
-  **SUPERSEDED FOR `zfs` BY qn.6h (built).** Everything in the block above still describes the
-  namespace backends exactly. On zfs there is no `working/`, no seed, no exchange and no `latest/`:
-  the dataset root is the tree, `browse_root` is `…/.zfs/snapshot/<snap>` with no trailing
-  component, and between backups the dataset holds the tree itself. The qn.5b record is kept because
-  it is what the namespace lifecycle still is, and because a reader meeting `<snap>/latest` in an
-  old snapshot needs to know where it came from.
+  **The block above describes the NAMESPACE backends.** On zfs there is no `working/`, no seed, no
+  exchange and no `latest/`: the dataset root is the tree, and `browse_root` is
+  `…/.zfs/snapshot/<snap>` with no trailing component.
 
   Push-style alternative: the post-commit hook (parked) runs rclone
   right after each verified commit.
