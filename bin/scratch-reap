@@ -242,6 +242,49 @@ done
 
 say ''
 
+# `unjudged` IS IN THIS COUNT AND WAS NOT, WHICH MADE THE REFUSAL FIRE ON THE WRONG BOX (quince#1422).
+#
+# The predicate was `reaped + kept`, and `--help` one screen up says the refusal is for having
+# *"judged no clones AT ALL"*. Those are different questions, and an unjudged clone answers the second
+# one NO: it is a clone, it is directly in this root, and the tool looked at it. So the code and its
+# own documented contract disagreed, and the contract is the one that is right.
+#
+# THE MEASURED FAILURE, on the architect box with a correctly-pointed root:
+#
+#   $ bin/scratch-reap                    # runner arch2 declared, no --root
+#     ?  pr-1409 — detached or unreadable HEAD; not something to judge automatically
+#     …  (eight of them)
+#   scratch-reap: DID NOT RUN — judged 0 clones in /root/scratch/arch2, …
+#   scratch-reap: this root is one level too shallow. …
+#   scratch-reap: Point it at one — --root /root/scratch/arch2/<runner> …
+#
+# **Every clause of that was false there.** `arch2` IS the runner, the runner WAS declared, no
+# `--root` was passed, and the path it suggests cannot exist. The tool reported a PATH problem for
+# what is a JUDGEMENT problem — quince#823's detached HEADs, which are the shape this seat's own
+# documented workflow produces.
+#
+# IT GOT WORSE AS quince#823 GOT MORE TRUE, which is why it is worth its own fix. Earlier the same
+# day, on the same root, `--prune` reaped 3 clones — because branch-checkout clones were still there
+# to be judged. Once only detached-HEAD clones remained the count reached zero and the refusal became
+# unconditional. The tool degraded from under-reaping to NOT RUNNING, and it did so at `/retire` §7,
+# the one moment canon schedules it (quince-devlog#286).
+#
+# AND IT WAS UNCONDITIONAL, NOT OCCASIONAL, WHICH THE ISSUE DID NOT KNOW. The nested-clone probe
+# below is `[ -d "$c/.git" ]`, and that FOLLOWS SYMLINKS. `/kickoff` §3 puts `local ->
+# $QUINCE_PRIVATE_LAYER` in every clone, and the private layer is itself a git repository — so every
+# real clone on every box contains what that probe reads as a nested clone.
+#
+# So `_nested` is non-empty for ANY root holding real clones, and the old predicate's other half was
+# the only thing standing between a correct root and a refusal. The moment the judged count reached
+# zero there was nothing left to discriminate on. That is why the architect box went from
+# under-reaping to refusing in a single day with no middle state, and it is why counting `unjudged`
+# is a fix rather than a mitigation: it restores the only discriminator the guard ever had.
+
+# THE OTHER HALF IS BELOW: judging nothing while clones ARE here is now reported as what it is, with
+# the cause named, rather than passed off as a clean sweep. Neither fix makes the other unnecessary —
+# quince#823 wants detached HEADs judged, and this wants the zero-judged inference to consider WHY
+# the count is zero.
+#
 # JUDGING NOTHING IS NOT A CLEAN RESULT WHEN THE CLONES ARE ONE LEVEL DOWN (quince#823).
 #
 # THE MEASURED FAILURE: `bin/scratch-reap --root /root/scratch` printed
@@ -259,7 +302,7 @@ say ''
 # fresh runner root, or one holding only scratch files. What is NOT ordinary is no clones HERE while
 # a child directory contains one, which is the root-of-roots shape and nothing else. A root that is
 # simply empty of clones still exits 0.
-if [ "$((reaped + kept))" -eq 0 ]; then
+if [ "$((reaped + kept + unjudged))" -eq 0 ]; then
 	_nested=''
 	for d in "$ROOT"/*; do
 		[ -d "$d" ] || continue
@@ -278,6 +321,26 @@ if [ "$((reaped + kept))" -eq 0 ]; then
 		printf 'scratch-reap: refusing rather than reporting a clean sweep of a disk it never read.\n' >&2
 		exit 2
 	fi
+fi
+
+# EVERY CLONE HERE, AND NOT ONE COULD BE JUDGED. Distinct from the refusal above, and it must not be
+# folded into it: there the root is wrong, here the root is right and the JUDGEMENT is what failed.
+# One message covering both is what quince#1422 was — the tool naming a path problem for a
+# judgement one, sending a seat looking for a directory layout it does not have.
+#
+# NOT A REFUSAL. It read the disk and every decision is on stdout above, so `0 reaped` is a true
+# report rather than a vacuous one — and `/retire` §7 asks for `N reaped, M kept, K unjudged`, which
+# it can now answer. Exiting 2 here would be the failure this fix exists to remove.
+#
+# LOUD ANYWAY, because a run that can never reap anything is a degraded mode, and this project
+# surfaces those rather than letting them read as "nothing to do" (CLAUDE.md, no silent caps).
+if [ "$((reaped + kept))" -eq 0 ] && [ "$unjudged" -gt 0 ]; then
+	printf 'scratch-reap: judged NONE of the %s clone(s) in %s — every one was unjudged.\n' \
+		"$unjudged" "$ROOT" >&2
+	printf 'scratch-reap: the root is right and nothing is wrong with your arguments. The reasons are\n' >&2
+	printf 'scratch-reap: on the lines marked ? above; a detached HEAD is the common one, and it is\n' >&2
+	printf 'scratch-reap: the shape this workflow itself produces (quince#823).\n' >&2
+	printf 'scratch-reap: nothing was deleted, and nothing here says the disk is clean.\n' >&2
 fi
 
 if [ "$PRUNE" = yes ]; then
