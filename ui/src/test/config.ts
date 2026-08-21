@@ -5,15 +5,36 @@ import type { Config, ConfigResponse } from "@/lib/types";
 // `PUT /api/config` is a full-document replace decoded into a zero-valued Go struct, so a key the
 // client omits is a key ZEROED on the server (quince#493). A fixture that omits keys lets a test
 // pass over a form that would drop them — which is the one class of defect this document's shape
-// exists to prevent. Every key the TS `Config` declares is here, at its Go default.
+// exists to prevent.
+//
+// THE COMPLETENESS IS ENFORCED BY THE COMPILER, NOT BY THIS COMMENT — and it was the other way
+// round until qn.8's slice 7 tripped over it. The literal ended `} as Config`, and an assertion
+// suppresses BOTH halves of the check that matters here: a missing required key and an unknown
+// one. So "every key the TS Config declares is here" was a promise nothing verified, and it had
+// already gone false — `vault.session_ttl_minutes` was added to Config when the vault session
+// registry landed and never added here, so every test built on this fixture was PUTting a config
+// that would zero it on the server.
+//
+// Without the assertion, adding a key to Config fails HERE until it is added here too, which is
+// the whole point of a fixture that claims to be complete.
 export function testConfig(over: Partial<Config> = {}): Config {
   return {
     backup: { preferred_transport: "usb", require_encryption: true },
     storage: null,
-    devices: { usbmuxd_socket: "/var/run/usbmuxd", netmuxd_addr: "127.0.0.1:27015" },
+    muxers: null,
+    // `manage_muxer` is required by the TS `Config` and is INERT on the wire: Go's
+    // `Config.Devices` is a `*LegacyDevices` tagged `json:"-"` on the struct and on every field,
+    // because `devices:` is a RETIRED section that "must never reach the wire". So the server
+    // neither sends this nor reads it, and the value here cannot matter.
+    //
+    // It is present because the type demands it, not because the document carries it — that
+    // mismatch is real and is filed rather than resolved here, since changing the wire type is a
+    // different claim from making this fixture compiler-checked (quince#1382).
+    devices: { manage_muxer: false, usbmuxd_socket: "/var/run/usbmuxd", netmuxd_addr: "127.0.0.1:27015" },
     tls: { cert_file: "", key_file: "" },
     sessions: { allow_insecure_transport: false },
     reconcile: { interval_minutes: 360 },
+    vault: { session_ttl_minutes: 15 },
     notifications: {
       staleness_days: 3,
       reminder_cooldown_hours: 24,
@@ -26,7 +47,7 @@ export function testConfig(over: Partial<Config> = {}): Config {
     },
     ui: { theme: "system" },
     ...over,
-  } as Config;
+  };
 }
 
 // The `GET /api/config` envelope. `file_text` is only what the user SET (qn.6j), so it is
@@ -38,7 +59,7 @@ export function testConfigResponse(over: Partial<Config> = {}): ConfigResponse {
     source: { path: "/data/config.yml", mtime: "2026-08-18T00:00:00Z" },
     file_text: "notifications:\n  staleness_days: 3\n",
     discarded: false,
-  } as ConfigResponse;
+  };
 }
 
 // routeGet dispatches a mocked `api.get` BY PATH.
