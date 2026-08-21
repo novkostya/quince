@@ -186,6 +186,24 @@ var (
 	// retry cannot change it. Callers surface it; they do not treat it as an error to hide.
 	ErrIncompleteFile = errors.New("vault: file is incomplete in this backup")
 
+	// ErrOverlongFile is ErrIncompleteFile's MIRROR: the version holds MORE bytes for a file
+	// than its index records. Measured on real backups at ~34–38 files per version, and the
+	// same file by the same amount across a month of them, so it is a property of iOS backups
+	// rather than a transfer accident (quince#1379).
+	//
+	// IT IS ALSO NOT A FAILED READ, for the same reason and with the opposite sign. Everything
+	// the INDEX promises has been delivered when this is returned; what the caller does not get
+	// is the extra data on disk, because `Content-Length` is the recorded size and making it
+	// the on-disk size would destroy short-read detectability (contracts §1).
+	//
+	// IT EXISTS BECAUSE THE ALTERNATIVE WAS SILENCE. The unencrypted implementation bounds its
+	// read to the record, so nothing overruns, so the HTTP layer sees a clean success and the
+	// user receives a truncated file with every signal agreeing — a silent cap, measured on
+	// hardware after qn.8 slice 4 shipped. The encrypted path is loud instead, by accident: it
+	// overruns and net/http tears the response. Neither told anyone WHY, which is what this and
+	// the `overlong` wire field are for.
+	ErrOverlongFile = errors.New("vault: file is longer in this backup than its index records")
+
 	// ErrNoCanary is a version with no entry small enough and readable enough to prove the
 	// keys against. VerifyCanary reports it rather than passing on an empty search.
 	ErrNoCanary = errors.New("vault: no file in this version is eligible as a canary")
@@ -216,7 +234,7 @@ func Code(err error) string {
 	switch {
 	case err == nil:
 		return ""
-	case errors.Is(err, ErrIncompleteFile):
+	case errors.Is(err, ErrIncompleteFile), errors.Is(err, ErrOverlongFile):
 		return ""
 	case errors.Is(err, ErrBadPassword):
 		return "bad_password"

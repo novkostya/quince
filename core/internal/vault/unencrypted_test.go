@@ -2,6 +2,7 @@ package vault
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -131,3 +132,69 @@ func TestUnencryptedShortBlobDeliversWhatThereIsThenReportsIncomplete(t *testing
 }
 
 func truncate(path string, size int64) error { return os.Truncate(path, size) }
+
+// A BLOB LONGER THAN ITS RECORD MUST NOT READ AS AN ORDINARY SUCCESS — the defect qn.8 slice 4
+// shipped and hardware found (quince#1379).
+//
+// The reader bounds itself to the recorded size, which is correct: Content-Length is the
+// recorded size, and serving the on-disk length would destroy short-read detectability. But
+// bounding alone means NOTHING overruns, so the HTTP layer sees a clean 200 with the header
+// agreeing with the body, and the user gets a truncated file with no signal anywhere. Measured
+// on the stand: 4,096 bytes delivered for a 118,784-byte blob, curl exit 0, nothing logged.
+//
+// So the last read reports ErrOverlongFile AFTER the recorded bytes — the mirror of
+// ErrIncompleteFile, and not a failure either: everything the INDEX promises was delivered.
+func TestUnencryptedOverlongBlobIsReportedRatherThanSilentlyTruncated(t *testing.T) {
+	dir := t.TempDir()
+	res, err := fixture.Build(dir, fixture.Spec{
+		Unencrypted: true,
+		Files: []fixture.File{
+			{Domain: "HomeDomain", RelativePath: "Library/short-record.bin", Flags: 1, Data: []byte("0123")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+
+	// Append behind the record's back: the manifest still says four bytes.
+	id := res.Files[0].FileID
+	f, err := os.OpenFile(filepath.Join(dir, id[:2], id), os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("opening the blob: %v", err)
+	}
+	if _, err := f.Write([]byte("these bytes are on disk and not in the index")); err != nil {
+		t.Fatalf("appending: %v", err)
+	}
+	_ = f.Close()
+
+	v, err := OpenUnencrypted(dir)
+	if err != nil {
+		t.Fatalf("OpenUnencrypted: %v", err)
+	}
+	defer func() { _ = v.Close() }()
+	if _, err := v.Unlock(context.Background(), ""); err != nil {
+		t.Fatalf("Unlock: %v", err)
+	}
+
+	rc, err := v.Open(context.Background(), id)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = rc.Close() }()
+
+	got, err := io.ReadAll(rc)
+	// THE RECORDED LENGTH IS STILL WHAT IS SERVED. Pinned so a later change cannot "fix" this
+	// by serving the on-disk length, which would break the short case it is paired with.
+	if string(got) != "0123" {
+		t.Errorf("delivered %q, want %q — the recorded size is what Content-Length declares", got, "0123")
+	}
+	if !errors.Is(err, ErrOverlongFile) {
+		t.Errorf("read ended with %v, want ErrOverlongFile — without it the truncation is "+
+			"invisible: status, header and body all agree and the user is never told", err)
+	}
+	// NOT a failure: it must not become an error code, for the same reason incompleteness does
+	// not — the read succeeded against everything the index promised.
+	if Code(err) != "" {
+		t.Errorf("Code(err) = %q, want \"\": an overlong file is a successful read", Code(err))
+	}
+}

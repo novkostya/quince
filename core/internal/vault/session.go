@@ -49,7 +49,10 @@ type registryEntry struct {
 	// mutex, not by busy: a browse may read it while a stream is still running, which is the
 	// whole point of remembering.
 	incomplete map[string]bool
-	scratch    string
+	// overlong is its mirror — files whose blob held MORE bytes than the index records
+	// (quince#1379). Same lifetime, same guard, opposite sign.
+	overlong map[string]bool
+	scratch  string
 
 	// busy guards the Vault, which is not required to be concurrency-safe. TryLock rather
 	// than Lock — see ErrSessionBusy.
@@ -417,7 +420,11 @@ func (s *streamHold) Close() error {
 // to read it; refusing would break a live download to record a note. The note is simply lost,
 // which is the right trade for a session that is ending anyway.
 func (r *Registry) WatchIncomplete(sessionID, fileID string, rc io.ReadCloser) io.ReadCloser {
-	return &incompleteWatcher{ReadCloser: rc, mark: func() { r.markIncomplete(sessionID, fileID) }}
+	return &incompleteWatcher{
+		ReadCloser: rc,
+		mark:       func() { r.markIncomplete(sessionID, fileID) },
+		markLong:   func() { r.markOverlong(sessionID, fileID) },
+	}
 }
 
 // IncompleteIn reports which files this session has read short. The map is a COPY: a caller
@@ -452,17 +459,55 @@ func (r *Registry) markIncomplete(sessionID, fileID string) {
 // incompleteWatcher records the one error that is not a failure.
 type incompleteWatcher struct {
 	io.ReadCloser
-	mark func()
-	once sync.Once
+	mark     func()
+	markLong func()
+	once     sync.Once
+	onceLong sync.Once
 }
 
 func (w *incompleteWatcher) Read(p []byte) (int, error) {
 	n, err := w.ReadCloser.Read(p)
-	// ErrIncompleteFile arrives as the terminal error of the stream, AFTER the bytes. It is
-	// checked before io.EOF rather than after, because an incomplete read ends in this rather
-	// than in EOF — testing for EOF first would skip it.
-	if err != nil && errors.Is(err, ErrIncompleteFile) {
+	// Both arrive as the TERMINAL error of the stream, AFTER the bytes, and both are checked
+	// before io.EOF rather than after — such a read ends in one of these rather than in EOF,
+	// so testing for EOF first would skip them.
+	switch {
+	case err == nil:
+	case errors.Is(err, ErrIncompleteFile):
 		w.once.Do(w.mark)
+	case errors.Is(err, ErrOverlongFile):
+		// WITHOUT THIS THE CASE IS SILENT. The reader stops at the recorded size, so nothing
+		// overruns Content-Length and the HTTP layer sees an ordinary success — the user gets
+		// a truncated file and every signal agrees (quince#1379).
+		w.onceLong.Do(w.markLong)
 	}
 	return n, err
+}
+
+// OverlongIn reports which files this session read that hold MORE bytes than their record.
+// A COPY, for the same reason IncompleteIn returns one.
+func (r *Registry) OverlongIn(sessionID string) map[string]bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e, ok := r.sessions[sessionID]
+	if !ok || len(e.overlong) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(e.overlong))
+	for k, v := range e.overlong {
+		out[k] = v
+	}
+	return out
+}
+
+func (r *Registry) markOverlong(sessionID, fileID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e, ok := r.sessions[sessionID]
+	if !ok {
+		return
+	}
+	if e.overlong == nil {
+		e.overlong = make(map[string]bool)
+	}
+	e.overlong[fileID] = true
 }
