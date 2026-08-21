@@ -80,9 +80,13 @@ export function VaultBrowsePage() {
     retry: false,
   });
 
-  // A 409 `locked` MID-BROWSE IS THE TTL COLLECTING THE SESSION, which is the route a real user
-  // takes: nobody clicks Lock, they leave the tab open past the timeout. Rendering it as a generic
-  // failure would tell them something broke when what happened is the thing the setting is for.
+  // A 409 `locked` MID-BROWSE MEANS THE SESSION IS GONE, AND QUINCE CANNOT SAY WHICH WAY. The TTL
+  // collecting it is the common route — nobody clicks Lock, they leave the tab open past the
+  // timeout — but a daemon restart produces the identical answer, because the registry is in
+  // memory. Measured on the stand: the body is `vault: no such session` either way, so there is
+  // nothing below this to tell them apart. The copy names both causes rather than asserting the
+  // likelier one, which would be a collapsed diagnostic (quince#940) in the one place the reader
+  // cannot check it.
   const expired = browse.error instanceof APIError && browse.error.code === "locked";
 
   async function lock() {
@@ -214,11 +218,11 @@ export function VaultBrowsePage() {
       ) : (
         <div className="mt-6 rounded-card border border-line bg-card p-6">
           <div className="text-sm font-medium">
-            {expired ? "This backup locked itself" : "This backup is locked"}
+            {expired ? "This backup is no longer open" : "This backup is locked"}
           </div>
           <p className="mt-1 text-sm text-muted">
             {expired
-              ? "The session reached the timeout set in Settings, and everything it decrypted was wiped. Open it again to carry on."
+              ? "The session ended — either the timeout in Settings passed, or quince restarted. Everything it decrypted was wiped either way. Open it again to carry on."
               : version.encrypted
                 ? "quince decrypts it only while you are looking, and needs the backup password you set for this device."
                 : "This backup is not encrypted, so opening it needs no password."}
