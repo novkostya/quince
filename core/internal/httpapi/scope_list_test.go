@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"errors"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -52,8 +54,8 @@ func TestAScopedPrincipalCannotAskForAnotherDevicesList(t *testing.T) {
 	r := httptest.NewRequest("GET", "/api/jobs?udid=SOMEONE-ELSE", nil)
 	r = r.WithContext(withPrincipal(r.Context(), p))
 
-	udid, refuse := listUDID(d, r)
-	if refuse {
+	udid, err := listUDID(d, r)
+	if err != nil {
 		t.Fatalf("a resolvable scoped principal was refused")
 	}
 	if udid != "DEVICE-A" {
@@ -71,10 +73,10 @@ func TestAScopedPrincipalWithNoQueryGetsItsOwnDevice(t *testing.T) {
 	r := httptest.NewRequest("GET", "/api/versions", nil)
 	r = r.WithContext(withPrincipal(r.Context(), p))
 
-	udid, refuse := listUDID(d, r)
-	if refuse || udid != "DEVICE-A" {
-		t.Fatalf("got %q refuse=%v — an absent query must not mean every device for a scoped holder",
-			udid, refuse)
+	udid, err := listUDID(d, r)
+	if err != nil || udid != "DEVICE-A" {
+		t.Fatalf("got %q err=%v — an absent query must not mean every device for a scoped holder",
+			udid, err)
 	}
 }
 
@@ -91,14 +93,14 @@ func TestTheAdminKeepsTheQueryIncludingAllDevices(t *testing.T) {
 
 	r := httptest.NewRequest("GET", "/api/versions?udid=ANY-DEVICE", nil)
 	r = r.WithContext(withPrincipal(r.Context(), admin))
-	if udid, refuse := listUDID(d, r); refuse || udid != "ANY-DEVICE" {
-		t.Fatalf("the admin's query was overridden: %q refuse=%v", udid, refuse)
+	if udid, err := listUDID(d, r); err != nil || udid != "ANY-DEVICE" {
+		t.Fatalf("the adminx27s query was overridden: %q err=%v", udid, err)
 	}
 
 	r2 := httptest.NewRequest("GET", "/api/versions", nil)
 	r2 = r2.WithContext(withPrincipal(r2.Context(), admin))
-	if udid, refuse := listUDID(d, r2); refuse || udid != "" {
-		t.Fatalf("the admin lost the all-devices list: %q refuse=%v", udid, refuse)
+	if udid, err := listUDID(d, r2); err != nil || udid != "" {
+		t.Fatalf("the admin lost the all-devices list: %q err=%v", udid, err)
 	}
 }
 
@@ -110,10 +112,55 @@ func TestAnUnresolvablePrincipalIsRefusedRatherThanUnfiltered(t *testing.T) {
 	r := httptest.NewRequest("GET", "/api/jobs", nil)
 	r = r.WithContext(withPrincipal(r.Context(), auth.Principal{CredentialID: "revoked"}))
 
-	udid, refuse := listUDID(d, r)
-	if !refuse {
+	udid, err := listUDID(d, r)
+	if err == nil {
 		t.Fatalf("a revoked credential resolved to %q instead of being refused", udid)
 	}
 }
 
 // No principal at all is the exempt path, and the guard — not this filter — is what handles it.
+
+// THE TWO CAUSES REACH THE WIRE AS DIFFERENT ANSWERS (quince#1412).
+//
+// `listUDID` returned a bool, so both mapped to `401 authentication required` — and one of them is
+// a database fault, for which that sentence tells an authenticated user to do something a login
+// screen cannot fix. Refusing is right in both cases; the REASON was wrong in one.
+//
+// ASSERTED AT THE MAPPING RATHER THAN THROUGH A ROUTER, because a store that fails on demand is a
+// seam this package does not have — and what the fix changed is which status each cause produces,
+// which is exactly what this reads.
+func TestARevokedCredentialAndAReadFailureAreDifferentAnswers(t *testing.T) {
+	d, _ := listDeps(t)
+
+	revoked := httptest.NewRecorder()
+	d.writeScopeResolutionError(revoked, auth.ErrCredentialRevoked)
+	if revoked.Code != http.StatusUnauthorized {
+		t.Fatalf("a revoked credential answered %d, want 401 — authenticating again IS the remedy",
+			revoked.Code)
+	}
+
+	fault := httptest.NewRecorder()
+	d.writeScopeResolutionError(fault, errors.New("database is locked"))
+	if fault.Code != http.StatusInternalServerError {
+		t.Fatalf("a database fault answered %d, want 500 — the caller is authenticated and cannot "+
+			"fix a read failure at a login screen", fault.Code)
+	}
+
+	// AND THE BODIES DIFFER, not only the codes. A user reads the sentence, not the status.
+	if revoked.Body.String() == fault.Body.String() {
+		t.Fatalf("both causes produced the same body: %s", revoked.Body.String())
+	}
+}
+
+// AND THE WHOLE POINT OF THE ERROR RETURN: the cause SURVIVES `listUDID`. A bool could not carry it,
+// so no caller could have made the distinction above however carefully it was written.
+func TestListUDIDCarriesTheCauseOutward(t *testing.T) {
+	d, _ := listDeps(t)
+	r := httptest.NewRequest("GET", "/api/jobs", nil)
+	r = r.WithContext(withPrincipal(r.Context(), auth.Principal{CredentialID: "revoked"}))
+
+	_, err := listUDID(d, r)
+	if !errors.Is(err, auth.ErrCredentialRevoked) {
+		t.Fatalf("got %v, want ErrCredentialRevoked — the cause did not survive the call", err)
+	}
+}

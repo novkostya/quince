@@ -50,9 +50,9 @@ func (d Deps) handleJobs() http.HandlerFunc {
 		}
 		// SCOPED PRINCIPALS SEE ONLY THEIR OWN DEVICE (spec D8). The query is overridden, not
 		// defaulted — see listUDID.
-		udid, refuse := listUDID(d, r)
-		if refuse {
-			writeError(w, d.Log, http.StatusUnauthorized, "unauthorized", "authentication required")
+		udid, err := listUDID(d, r)
+		if err != nil {
+			d.writeScopeResolutionError(w, err)
 			return
 		}
 		jobs, next := d.Jobs.Jobs(udid, q.Get("cursor"), limit)
@@ -96,9 +96,9 @@ func (d Deps) handleJobLog() http.HandlerFunc {
 func (d Deps) handleVersions() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// SCOPED PRINCIPALS SEE ONLY THEIR OWN DEVICE (spec D8).
-		udid, refuse := listUDID(d, r)
-		if refuse {
-			writeError(w, d.Log, http.StatusUnauthorized, "unauthorized", "authentication required")
+		udid, err := listUDID(d, r)
+		if err != nil {
+			d.writeScopeResolutionError(w, err)
 			return
 		}
 		versions := d.Versions.Versions(udid)
