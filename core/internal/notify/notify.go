@@ -204,22 +204,6 @@ func Enabled(kind Kind, cfg config.NotificationsConfig) bool {
 	return false
 }
 
-// DeviceEnabled reports whether quince notifies about this device at all (quince#1270).
-//
-// PRECEDENCE IS AND, and there is no override in either direction: a notification goes out only
-// if the category is on AND the subject device is on. A per-device switch that could override a
-// category the user turned off would resurrect the double-notification problem D5 was built to
-// prevent, and would make the global switches mean something different depending on which screen
-// you read them from.
-//
-// THIS IS A SWITCH, NOT A SILENT CAP — the same reading `Enabled` carries, one axis over. It is
-// the user's own instruction, which is what makes suppression here honest, and the status surface
-// reports it as `device_off`. THAT CAUSE IS DISTINCT FROM `category_off` AND MUST STAY DISTINCT:
-// both mean "nothing will arrive", and their remedies are on different screens — the global
-// settings page for one, this one device's page for the other. A message that cannot tell them
-// apart sends the user to the wrong one, which is the quince#940 defect exactly.
-func DeviceEnabled(dev wire.Device) bool { return dev.NotificationsEnabled }
-
 // Reminder is a device's place on the reminder track — the only state this package keeps.
 type Reminder struct {
 	// LastSentAt is when this device was last reminded, at EITHER rank. Zero means never.

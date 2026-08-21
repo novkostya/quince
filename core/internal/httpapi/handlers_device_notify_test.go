@@ -22,10 +22,13 @@ type stubDeviceNotifs struct {
 	called    bool
 	recUDID   string
 	recEnable bool
+	// recOwner is the hole finding 1 came through: the stub dropped it, so no test could see
+	// that the handler was resolving the owner with a LIST helper that honours `?udid=`.
+	recOwner string
 }
 
 func (s *stubDeviceNotifs) SetNotificationsEnabled(udid, owner string, enabled bool) (bool, int, string) {
-	s.called, s.recUDID, s.recEnable = true, udid, enabled
+	s.called, s.recUDID, s.recEnable, s.recOwner = true, udid, enabled, owner
 	if s.stored != nil {
 		return *s.stored, s.status, s.reason
 	}
@@ -172,5 +175,41 @@ func TestDeviceNotificationsEchoesTheStoredValueNotTheRequest(t *testing.T) {
 	if !got.Enabled {
 		t.Fatalf("echoed enabled=false — the handler echoed the REQUEST. It must echo what the "+
 			"write reported storing, which this stub set to %v", stored)
+	}
+}
+
+// FINDING 1'S REGRESSION TEST. The admin's write must land under the ADMIN's owner key whatever the
+// query string says — `?udid=` is a LIST filter and has no business deciding whose preference row a
+// write mutates. Before the fix this returned 200 with `owner="SOMEONE-ELSE"`, which both silently
+// failed to mute the device for the admin and let the admin mute a scoped holder.
+func TestTheOwnerOfAWriteIsTheCallerAndNotTheQueryString(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		query string
+	}{
+		{"no query — the control", ""},
+		{"a query naming another device", "?udid=SOMEONE-ELSE"},
+		{"a query naming this device", "?udid=DEV-1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n := &stubDeviceNotifs{status: http.StatusOK}
+			srv, c := notifsServer(t, n)
+
+			resp := putCSRF(t, c, srv, "/api/devices/DEV-1/notifications"+tc.query, `{"enabled":false}`)
+			defer func() { _ = resp.Body.Close() }()
+
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, want 200", resp.StatusCode)
+			}
+			if !n.called {
+				t.Fatal("the store was never reached")
+			}
+			if n.recOwner != "" {
+				t.Fatalf("owner = %q, want \"\" — the admin's own row, not one named by the query", n.recOwner)
+			}
+			if n.recUDID != "DEV-1" {
+				t.Fatalf("udid = %q, want DEV-1 — the PATH decides the subject", n.recUDID)
+			}
+		})
 	}
 }

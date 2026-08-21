@@ -108,6 +108,14 @@ func (s *Service) Deliver(ctx context.Context, sender Sender, d notify.Decision,
 		// because the answer differs per principal: the admin muting a device says nothing
 		// about its scoped holder.
 		//
+		// PRECEDENCE IS AND, WITH NO OVERRIDE IN EITHER DIRECTION — the guard `notify.DeviceEnabled`
+		// used to carry, kept here because that function had no callers left and an exported
+		// principal-blind gate is an invitation to put one back. A notification goes out only if the
+		// category is on AND this subject is on for this owner. A per-device switch that could
+		// override a category the user turned off would resurrect the double-notification problem D5
+		// exists to prevent, and would make the global switches mean different things on different
+		// screens.
+		//
 		// A READ FAILURE SENDS. The switch is a user instruction, and defaulting to silence on
 		// a database fault would be the silent cap the hard rules forbid — a missed backup
 		// notification is the failure this whole subsystem exists to prevent.
@@ -115,7 +123,20 @@ func (s *Service) Deliver(ctx context.Context, sender Sender, d notify.Decision,
 		if row.ScopeUDID != nil {
 			owner = *row.ScopeUDID
 		}
-		if on, err := sender.DeviceNotificationsEnabled(d.UDID, owner); err == nil && !on {
+		on, prefErr := sender.DeviceNotificationsEnabled(d.UDID, owner)
+		switch {
+		case prefErr != nil:
+			// SENT, AND SAID SO. Sending is the right call — see above — but a degraded mode
+			// that nothing records is the silent fallback the hard rules forbid, and this one
+			// makes quince ignore a user instruction. `pushsvc` has no logger, so it uses the
+			// carrier this function already has; `live.go` logs the sibling read for the same
+			// reason and says as much at the code.
+			//
+			// A Result WITH AN ERROR AND A DELIVERY BOTH, because the send still happens: the
+			// error names what could not be consulted, not a failure to deliver.
+			out = append(out, Result{Label: row.Label, Err: fmt.Errorf(
+				"device notification preference unreadable for %s; notifying anyway: %w", d.UDID, prefErr)})
+		case !on:
 			continue
 		}
 		// THE PAYLOAD IS BUILT PER SUBSCRIPTION, because `navigate` must be ABSOLUTE and each device

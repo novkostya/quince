@@ -1,6 +1,11 @@
 package httpapi
 
-import "net/http"
+import (
+	"errors"
+	"net/http"
+
+	"github.com/novkostya/quince/core/internal/auth"
+)
 
 // deviceNotificationsRequest is the PUT /api/devices/{udid}/notifications body (contracts §1).
 //
@@ -30,12 +35,25 @@ func (d Deps) handleDeviceNotifications() http.HandlerFunc {
 				"enabled is required and must be true or false")
 			return
 		}
-		// THE CALLERS OWN PREFERENCE, not the installs (qn.13 slice 10b). This route is
-		// `scopedOwnDevice`, so a scoped principal reaches it only for its own device — and the
-		// row it writes is its own, leaving the admins untouched.
-		owner, refuse := listUDID(d, r)
-		if refuse {
-			writeError(w, d.Log, http.StatusUnauthorized, "unauthorized", "authentication required")
+		// THE CALLER'S OWN PREFERENCE, and `callerScope` rather than `listUDID` is the whole of
+		// finding 1 from this PR's review. `listUDID` answers what a LIST may report on, which for
+		// an admin is `?udid=` — so using it here made the owner of the written row whatever the
+		// query string said. An admin could then write a scoped holder's preference row by naming
+		// them, which is D7's ruling inverted through the write path; and the admin's own mute
+		// landed under a key nothing reads, so the handler echoed 200 to a write that did nothing.
+		//
+		// Being `scopedOwnDevice` is not a defence: that guard constrains the PATH udid.
+		owner, err := callerScope(d, r)
+		if err != nil {
+			// A REVOKED CREDENTIAL AND A DATABASE FAULT ARE NOT THE SAME REFUSAL (quince#940).
+			// The first is an auth problem the user can act on; the second is not, and telling
+			// them to authenticate sends them to a screen that cannot fix it.
+			if errors.Is(err, auth.ErrCredentialRevoked) {
+				writeError(w, d.Log, http.StatusUnauthorized, "unauthorized", "authentication required")
+				return
+			}
+			writeError(w, d.Log, http.StatusInternalServerError, "internal_error",
+				"could not resolve who is making this request")
 			return
 		}
 		stored, status, reason := d.DeviceNotifs.SetNotificationsEnabled(

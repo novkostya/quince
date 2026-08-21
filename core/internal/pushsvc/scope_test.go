@@ -121,3 +121,83 @@ func TestAnAdminMuteDoesNotSilenceTheScopedHolder(t *testing.T) {
 			"the ruling inverted, and the whole reason the mute moved to send")
 	}
 }
+
+// THE NEIGHBOUR HALF, REBUILT AT THE LAYER IT MOVED TO (quince#1409 review, finding 8).
+//
+// `notify.TestAMutedNeverBackedUpDeviceIsNotInvitedAndItsNeighbourStillIs` was labelled *the case
+// that prompted the feature* and is quince#1270's named acceptance. Slice 10b deleted it, correctly
+// — it asserted the mute at a layer that no longer reads it — but the property it protected did not
+// move on its own. This is it: muting ONE device must not silence the same owner's other device.
+func TestMutingOneDeviceDoesNotSilenceTheOwnersOtherDevice(t *testing.T) {
+	staged := &stagedPush{status: http.StatusCreated}
+	srv := staged.server(t)
+	s, raw := senderWith(t, srv.URL+"/push/token")
+	s = s.WithHTTPClient(srv.Client())
+
+	muted := decision()
+	if err := raw.SetDeviceNotificationsEnabled(muted.UDID, "", false); err != nil {
+		t.Fatalf("mute: %v", err)
+	}
+	if err := s.DeliverDecision(context.Background(), muted); err != nil {
+		t.Fatalf("deliver the muted one: %v", err)
+	}
+	if staged.got != nil {
+		t.Fatal("fixture: the muted device was delivered; the neighbour assertion below would prove nothing")
+	}
+
+	// THE NEIGHBOUR. Same subscription, same owner, a different device — and nothing was said
+	// about this one, so it must still arrive.
+	neighbour := decision()
+	neighbour.UDID = "UDID-NEIGHBOUR"
+	neighbour.Navigate = "/devices/UDID-NEIGHBOUR"
+	if err := s.DeliverDecision(context.Background(), neighbour); err != nil {
+		t.Fatalf("deliver the neighbour: %v", err)
+	}
+	if staged.got == nil {
+		t.Fatal("muting one device silenced its owner's OTHER device — quince#1270's whole gap")
+	}
+}
+
+// THE EVERY-KIND HALF, ALSO REBUILT (finding 8).
+//
+// `notify.TestMutingCoversTheTerminalKindsToo` pinned the subject axis across the terminal kinds:
+// *"notifications about this device: on or off" is the whole of it*, and a per-kind reading would be
+// the per-(device × category) matrix quince#1270 defers.
+//
+// AT THIS LAYER IT IS FREE BY CONSTRUCTION — the send loop never looks at `Kind` — and that is a
+// reason to SAY SO rather than to drop it. The test is what keeps it free: a future filter that
+// grew a kind-dependent branch would fail here.
+func TestTheMuteCoversEveryKind(t *testing.T) {
+	for _, kind := range []notify.Kind{
+		notify.KindBackupAvailable, notify.KindBackupCompleted, notify.KindBackupFailed,
+	} {
+		t.Run(string(kind), func(t *testing.T) {
+			staged := &stagedPush{status: http.StatusCreated}
+			srv := staged.server(t)
+			s, raw := senderWith(t, srv.URL+"/push/token")
+			s = s.WithHTTPClient(srv.Client())
+
+			d := decision()
+			d.Kind = kind
+			// THE FIXTURE FIRST: unmuted, this kind must actually deliver, or the refusal below
+			// would be indistinguishable from a kind that never sends at all.
+			if err := s.DeliverDecision(context.Background(), d); err != nil {
+				t.Fatalf("deliver unmuted: %v", err)
+			}
+			if staged.got == nil {
+				t.Fatalf("fixture: kind %q delivered nothing unmuted; the assertion below proves nothing", kind)
+			}
+
+			staged.got = nil
+			if err := raw.SetDeviceNotificationsEnabled(d.UDID, "", false); err != nil {
+				t.Fatalf("mute: %v", err)
+			}
+			if err := s.DeliverDecision(context.Background(), d); err != nil {
+				t.Fatalf("deliver muted: %v", err)
+			}
+			if staged.got != nil {
+				t.Fatalf("kind %q survived the mute — the subject axis must cover every kind", kind)
+			}
+		})
+	}
+}

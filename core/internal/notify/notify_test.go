@@ -1,6 +1,9 @@
 package notify
 
 import (
+	"context"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -302,17 +305,84 @@ func TestAMutedDeviceStillProducesADecision(t *testing.T) {
 	}
 }
 
-// THE COOLDOWN IS SPENT ON A MUTED DEVICE, which is the cost of the move. Asserted rather than
-// discovered: `push_reminders` advances when a decision is produced, so a device muted by every
-// principal still consumes its track. Nothing is delivered, so this is a wasted evaluation rather
-// than a wrong notification — but a reader wondering why the ledger moved deserves to find this.
+// THE COOLDOWN IS SPENT ON A MUTED DEVICE, which is the cost of the move. Asserted through the
+// RUNNER rather than restated at `Evaluate`, because the track advance happens in `send` and a test
+// that only checks `send == true` proves the same thing as the test above it while carrying a name
+// that claims the half it does not reach (quince#1409 review, finding 6).
+//
+// `push_reminders` advances when a decision is produced, so a device muted by every principal still
+// consumes its track. Nothing is delivered — the send loop drops it per owner — so this is a wasted
+// evaluation rather than a wrong notification. A reader wondering why the ledger moved finds it here.
+type stubDevices struct{ list []wire.Device }
+
+func (s stubDevices) Devices() []wire.Device { return s.list }
+
+type stubJobs struct{ running bool }
+
+func (s stubJobs) RunningFor(string) bool { return s.running }
+
+type stubReminders struct {
+	at      time.Time
+	setUDID string
+	setAt   time.Time
+	sets    int
+}
+
+func (s *stubReminders) PushReminder(string) (time.Time, bool, error) {
+	return s.at, !s.at.IsZero(), nil
+}
+
+func (s *stubReminders) SetPushReminder(udid string, at time.Time) error {
+	s.sets, s.setUDID, s.setAt = s.sets+1, udid, at
+	return nil
+}
+
+func (s *stubReminders) ClearPushReminder(string) error { return nil }
+
+type stubDeliverer struct{ delivered int }
+
+func (s *stubDeliverer) DeliverDecision(context.Context, Decision) error {
+	s.delivered++
+	return nil
+}
+
 func TestAMutedDeviceStillAdvancesTheReminderTrack(t *testing.T) {
 	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
-	dev := device("drawer-iphone", nil, now)
-	dev.NotificationsEnabled = false
-	if _, send := Evaluate(dev, Reminder{}, defaults(), false, now); !send {
-		t.Fatal("fixture: a muted device should still decide")
+	muted := device("drawer-iphone", nil, now)
+	muted.NotificationsEnabled = false
+
+	rem := &stubReminders{}
+	del := &stubDeliverer{}
+	r := &Runner{
+		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Devices:   stubDevices{list: []wire.Device{muted}},
+		Jobs:      stubJobs{},
+		Reminders: rem,
+		Deliver:   del,
+		Config:    func() config.NotificationsConfig { return defaults() },
+		Now:       func() time.Time { return now },
 	}
-	// The caller advances the track on `send`, so this documents the consequence rather than the
-	// mechanism, which lives in the runner.
+	r.evaluateAll(context.Background())
+
+	if rem.sets != 1 {
+		t.Fatalf("SetPushReminder called %d times, want 1 — a muted device must still spend its track", rem.sets)
+	}
+	if rem.setUDID != muted.UDID {
+		t.Fatalf("the track advanced for %q, want %q", rem.setUDID, muted.UDID)
+	}
+	if !rem.setAt.Equal(now) {
+		t.Fatalf("the track recorded %v, want %v", rem.setAt, now)
+	}
+	// THE CONTROL. An unmuted device must behave identically here — the mute is no longer read at
+	// this layer at all, so if these two ever differ the gate has crept back to the decision point.
+	unmuted := device("kitchen-ipad", nil, now)
+	unmuted.NotificationsEnabled = true
+	rem2, del2 := &stubReminders{}, &stubDeliverer{}
+	r.Devices, r.Reminders, r.Deliver = stubDevices{list: []wire.Device{unmuted}}, rem2, del2
+	r.evaluateAll(context.Background())
+
+	if rem2.sets != rem.sets || del2.delivered != del.delivered {
+		t.Fatalf("muted and unmuted differ at this layer: muted sets=%d delivered=%d, unmuted sets=%d delivered=%d",
+			rem.sets, del.delivered, rem2.sets, del2.delivered)
+	}
 }

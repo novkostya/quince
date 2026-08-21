@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -255,4 +256,36 @@ func listUDID(d Deps, r *http.Request) (udid string, refuse bool) {
 		return r.URL.Query().Get("udid"), false
 	}
 	return scope, false
+}
+
+// errNoPrincipal — the request reached a handler that must know WHO is calling, with nothing bound
+// into its context.
+//
+// AN INVARIANT VIOLATION, NOT A CLIENT ERROR. Every JSON route runs behind `authGuard`, which binds
+// the principal, so this is reachable only by registering a route outside that chain — the same
+// class of mistake `/api/ws` was (quince#1380). It is therefore a 500 and not a 401: telling a
+// caller to authenticate when they already did sends them somewhere that cannot help.
+var errNoPrincipal = errors.New("httpapi: no principal bound to this request")
+
+// callerScope answers WHO IS CALLING — the principal's own scope, and nothing else.
+//
+// A DIFFERENT QUESTION FROM listUDID'S, AND THE DIFFERENCE IS THE QUERY STRING. `listUDID` decides
+// what a LIST endpoint may report on, so for an admin it returns `?udid=` — the admin is allowed to
+// ask about any device. That is exactly wrong for deciding whose preference row a WRITE lands in:
+// the owner would then be whatever the query said, so an admin could write a scoped holder's row by
+// naming them, which is D7's ruling inverted through the write path (quince#1409 review, finding 1).
+//
+// Being `scopedOwnDevice` is NOT a defence for the caller of this function: that guard constrains
+// the PATH udid, and says nothing about the query.
+//
+// THE ERROR IS RETURNED RATHER THAN A `refuse` BOOL, so the caller can tell a revoked credential
+// from a database fault. `listUDID` collapses those into one 401 and that is a live defect
+// (quince#1412); this is new code and does not need to reproduce it.
+func callerScope(d Deps, r *http.Request) (string, error) {
+	p, ok := PrincipalFrom(r.Context())
+	if !ok {
+		return "", errNoPrincipal
+	}
+	// "" for an unscoped principal — the admin's own row, which is what 0018 backfills to.
+	return d.Auth.ScopeOf(p)
 }

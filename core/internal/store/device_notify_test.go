@@ -68,3 +68,48 @@ func TestUnmutingWritesARowRatherThanDeletingOne(t *testing.T) {
 		t.Fatalf("rows for an explicitly-enabled device = %d, want 1 — the choice was not recorded", n)
 	}
 }
+
+// THE ENTIRE POINT OF 0018: (device, owner) is the key, so two principals hold independent
+// opinions about one device. Nothing asserted this — `device_notify_test.go` was updated
+// mechanically with "" throughout, which passes just as readily against the old single-row key
+// (quince#1409 review, finding 5).
+func TestTwoOwnersHoldIndependentRowsForOneDevice(t *testing.T) {
+	st := openTemp(t)
+
+	if err := st.SetDeviceNotificationsEnabled("DEV-1", "", false); err != nil {
+		t.Fatalf("admin mute: %v", err)
+	}
+	if err := st.SetDeviceNotificationsEnabled("DEV-1", "HOLDER", true); err != nil {
+		t.Fatalf("holder unmute: %v", err)
+	}
+
+	admin, err := st.DeviceNotificationsEnabled("DEV-1", "")
+	if err != nil {
+		t.Fatalf("read admin: %v", err)
+	}
+	holder, err := st.DeviceNotificationsEnabled("DEV-1", "HOLDER")
+	if err != nil {
+		t.Fatalf("read holder: %v", err)
+	}
+	if admin {
+		t.Fatal("the admin's own mute did not survive the holder's write — one row, not two")
+	}
+	if !holder {
+		t.Fatal("the holder's setting did not survive the admin's — one row, not two")
+	}
+
+	// AND THE UPSERT IS STILL AN UPSERT WITHIN ONE OWNER. If the key were wrong in the other
+	// direction, a second write for the same owner would APPEND rather than replace, and the
+	// read would return whichever row came first. This is the half that `''`-instead-of-NULL
+	// buys, since SQLite treats NULLs as distinct in a unique index.
+	if err := st.SetDeviceNotificationsEnabled("DEV-1", "", true); err != nil {
+		t.Fatalf("admin unmute: %v", err)
+	}
+	admin, err = st.DeviceNotificationsEnabled("DEV-1", "")
+	if err != nil {
+		t.Fatalf("re-read admin: %v", err)
+	}
+	if !admin {
+		t.Fatal("a second write for the same owner did not replace the first")
+	}
+}
