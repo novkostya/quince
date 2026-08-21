@@ -121,10 +121,19 @@ const ROLES = new Set(MAPPINGS.map((m) => m[1]));
 // because rule 1 already owns it as shadcn's name: two rules matching one class would report it
 // twice, and the canary below pins `border-border` at exactly one hit.
 //
-// LONGEST FIRST, AND THIS IS NOT COSMETIC. The pattern ends in `\b`, and `-` is a word boundary, so
-// against `text-fg-muted` an alternation that offered `fg` before `fg-muted` would match `text-fg`
-// and report the wrong class. `fg` is a role today and therefore excluded, so nothing exercises it —
-// which is exactly why it is pinned here rather than left to a future palette to discover.
+// LONGEST FIRST, AND IT IS DEFENSIVE RATHER THAN LOAD-BEARING — `TOKEN_END` is what guarantees a
+// whole-token match. A short alternative fails the lookahead on the following `-` and the engine
+// backtracks to the full token, so exactly one alternative can ever match and the order is
+// irrelevant. Measured, with the derived list and with a deliberate `[fg, fg-muted]`:
+//
+//   text-fg-muted, longest-first or shortest-first, with TOKEN_END -> ["text-fg-muted"]
+//   [fg, fg-muted] shortest-first, with a plain `\b`               -> ["text-fg"]
+//
+// The second line is why the sort stays. It is the state this file was in until the boundary was
+// fixed, and it is one "simplification" away from returning: `\b` holds mid-token because `-` is a
+// non-word character, and a reader who weakens `TOKEN_END` back to `\b` would then be relying on
+// this ordering without knowing it. Kept as the second line of defence, and named as one so nobody
+// mistakes it for the first.
 const DEAD = MAPPINGS.map((m) => m[2])
   .filter((raw) => !ROLES.has(raw) && !FOREIGN.includes(raw))
   .sort((a, b) => b.length - a.length);
