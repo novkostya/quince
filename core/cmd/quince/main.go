@@ -210,7 +210,7 @@ func serve(args []string) error {
 		// so an install that never opens the notifications page never creates one — and the
 		// generation rules, which are the Operator's (quince#1128), stay in one place rather than
 		// being split between startup and a handler.
-		pushSvc = pushsvc.New(st, func() string { return id.New() }, time.Now)
+		pushSvc = pushsvc.New(st, func() string { return id.New() }, time.Now).WithLogger(log)
 	}
 	if demoMode {
 		// configureDemoAuth owns the mode banner too, so this branch has NO `if *publicDemo` in it.
