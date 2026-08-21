@@ -425,3 +425,16 @@ func terminalJobState(state string) bool {
 	}
 	return false
 }
+
+// Version resolves one version by id (qn.13 slice 8b-2).
+//
+// THE ERROR IS ALWAYS NIL HERE, and that is honest rather than lazy: the demo holds its versions in
+// a map, so "the registry could not answer" is a state that cannot arise. The three-value shape is
+// the interface's, because the real implementation CAN fail and the scope guard must be able to
+// tell that from "no such version".
+func (p *Provider) Version(id string) (wire.Version, bool, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	v, ok := p.versions[id]
+	return v, ok, nil
+}

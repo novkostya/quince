@@ -106,21 +106,24 @@ func TestAnUnknownJobResolvesToNoDevice(t *testing.T) {
 	}
 }
 
-// The four vault routes fail closed until 8b-2, and each says why.
-func TestTheVaultRoutesFailClosedWithAReason(t *testing.T) {
+// THE FOUR VAULT ROUTES ARE NOW RESOLVED, not failing closed (slice 8b-2). Kept as a test
+// rather than deleted, because the inverse is what regressed: a route slipping back into
+// `unresolvableToday` would be refused for its rightful holder and nothing else would say so.
+func TestTheVaultRoutesResolveTheirDevice(t *testing.T) {
 	for _, p := range []string{
 		"POST /api/versions/{id}/unlock",
 		"POST /api/sessions/{id}/lock",
 		"GET /api/sessions/{id}/browse",
 		"GET /api/sessions/{id}/file/{file_id}",
 	} {
-		reason, ok := unresolvableToday[p]
-		if !ok {
-			t.Errorf("%s is not recorded as unresolvable — it would be permitted unchecked", p)
-			continue
+		if _, ok := resourceDevice[p]; !ok {
+			t.Errorf("%s has no resolver — a scoped holder cannot reach their own version", p)
 		}
-		if !strings.Contains(reason, "8b-2") {
-			t.Errorf("%s: the reason does not name what closes it: %q", p, reason)
+		if _, deferred := unresolvableToday[p]; deferred {
+			t.Errorf("%s is still recorded as unresolvable", p)
 		}
+	}
+	if len(unresolvableToday) != 0 {
+		t.Fatalf("unresolvableToday should be empty: %v", unresolvableToday)
 	}
 }

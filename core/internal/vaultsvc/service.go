@@ -189,3 +189,19 @@ func toWireEntry(e vault.FileEntry, incomplete, overlong bool) wire.FileEntry {
 		Overlong:     overlong,
 	}
 }
+
+// SessionVersion reports which version a session was opened on (qn.13 slice 8b-2).
+//
+// THE AUTHORIZATION SEAM'S HALF OF session → version → device. The scope guard has a session id and
+// needs the device; `VersionReader.Version` covers the second hop, and this is the first.
+//
+// IT ANSWERS FROM THE REGISTRY, NOT FROM A CACHE, so a session that has been locked or has expired
+// reports `false` — which the guard turns into a refusal rather than into access under a session
+// that no longer exists.
+func (s *Service) SessionVersion(sessionID string) (string, bool) {
+	sess, ok := s.registry.Get(sessionID)
+	if !ok {
+		return "", false
+	}
+	return sess.VersionID, true
+}

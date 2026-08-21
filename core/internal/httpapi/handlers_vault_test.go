@@ -464,3 +464,11 @@ func TestVaultFileShorterThanItsRecordStillReportsEndingEarly(t *testing.T) {
 		t.Errorf("a SHORT file was reported as longer than its record:\n%s", out)
 	}
 }
+
+// SessionVersion — the stub answers from the session it was seeded with (qn.13 slice 8b-2).
+func (s *stubVault) SessionVersion(string) (string, bool) {
+	if s.session.ID == "" {
+		return "", false
+	}
+	return s.session.VersionID, true
+}

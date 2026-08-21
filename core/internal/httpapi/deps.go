@@ -302,8 +302,18 @@ type JobReader interface {
 }
 
 // VersionReader serves the version REST reads. udid "" means all devices.
+//
+// `Version` WAS ADDED FOR qn.13 slice 8b-2, and the implementation already existed: a scoped
+// principal may reach `POST /api/versions/{id}/unlock` only for its OWN device, and a version
+// id is all the request carries. `storage.Manager.Version` has answered this since the vault
+// surface landed; only the interface did not name it.
+//
+// THE THREE-VALUE RETURN IS LOAD-BEARING and is `Manager.Version`'s own reasoning: a missing
+// row and a failed query are different, and collapsing them would make the scope guard refuse
+// a version that exists because the registry hiccuped.
 type VersionReader interface {
 	Versions(udid string) []wire.Version
+	Version(id string) (wire.Version, bool, error)
 }
 
 // Empty is the no-op reader used when not in --demo mode: real providers land in qn.2+.
@@ -442,6 +452,17 @@ type VaultBrowse interface {
 	Lock(sessionID string) (code, message string)
 	// Browse returns one page of the version's file tree.
 	Browse(sessionID string, q wire.BrowseQuery) (p wire.BrowsePage, code, message string)
+	// SessionVersion reports which VERSION a vault session was opened on, and whether it exists.
+	//
+	// ADDED FOR qn.13 slice 8b-2. The three /api/sessions/{id}/… routes carry only a session id,
+	// and a scoped principal may use them only for its own device — so the guard needs
+	// session → version, and `VersionReader.Version` supplies version → device.
+	//
+	// IT EXPOSES THE VERSION ID AND NOTHING ELSE. Returning the whole session would put its
+	// expiry and scratch path within reach of an authorization check that has no business with
+	// either, and a narrower method cannot grow a second caller by accident.
+	SessionVersion(sessionID string) (versionID string, ok bool)
+
 	// OpenFile returns the decrypted content of one file. The caller MUST close the reader.
 	//
 	// It returns the entry as well as the reader so the handler can set Content-Length from
@@ -471,3 +492,6 @@ func (UnavailableVaultBrowse) Browse(string, wire.BrowseQuery) (wire.BrowsePage,
 func (UnavailableVaultBrowse) OpenFile(string, string) (io.ReadCloser, wire.FileEntry, string, string) {
 	return nil, wire.FileEntry{}, wire.VaultCodeUnavailable, vaultUnavailable
 }
+
+// SessionVersion — no vault is wired, so no session exists to name a version for.
+func (UnavailableVaultBrowse) SessionVersion(string) (string, bool) { return "", false }
