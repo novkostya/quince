@@ -1,5 +1,7 @@
+import type * as React from "react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render as rtlRender, screen, fireEvent, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import type { Device, Version } from "@/lib/types";
 import { VersionList } from "./VersionList";
 import { useVersionsStore } from "@/stores/versions";
@@ -7,6 +9,14 @@ import { useDevicesStore } from "@/stores/devices";
 
 const del = vi.fn();
 vi.mock("@/lib/api", () => ({ api: { del: (p: string) => del(p) } }));
+
+// EVERY CASE RENDERS INSIDE A ROUTER, because the row's chevron became a `<Link>` at qn.8 slice 7
+// (quince#270) and react-router throws outside one. A local wrapper rather than a per-case
+// `<MemoryRouter>`: the cases below are about the ROW, and repeating the harness in each of them
+// would put the thing under test one indent further from the thing being asserted.
+function render(node: React.ReactNode) {
+  return rtlRender(<MemoryRouter>{node}</MemoryRouter>);
+}
 
 function ver(over: Partial<Version> = {}): Version {
   return {
@@ -96,5 +106,33 @@ describe("VersionList", () => {
     });
     render(<VersionList versions={[ver()]} showDevice />);
     expect(screen.getByText("family-iphone")).toBeTruthy();
+  });
+
+  // qn.8 slice 7 step 2. The chevron was an explicit non-interactive placeholder for four rungs;
+  // this is the assertion that it went somewhere, and that it went there WITHOUT reintroducing the
+  // word the row is not allowed to say.
+  it("opens the backup: the chevron is a link to the browse page, and still never says Unlock", () => {
+    render(<VersionList versions={[ver()]} />);
+    const link = screen.getByRole("link", { name: /browse this backup/i });
+    expect(link.getAttribute("href")).toBe("/versions/V1/browse");
+    expect(screen.queryByText(/unlock/i)).toBeNull();
+  });
+
+  // BOTH CLASSES, because D7 is the reason the control is a chevron rather than an "Unlock" button:
+  // an unencrypted version has nothing to unlock and is browsable all the same. A link offered only
+  // to encrypted versions would make the honest half of the vault unreachable from the product.
+  it("offers the same entry point on an unencrypted version", () => {
+    render(<VersionList versions={[ver({ encrypted: false })]} />);
+    expect(screen.getByRole("link", { name: /browse this backup/i }).getAttribute("href")).toBe(
+      "/versions/V1/browse",
+    );
+  });
+
+  // A MISSING VERSION HAS NOTHING TO OPEN, and the row's own contract already says so — no size
+  // claim, no browse. The dead branch returns before the link, so this pins that the two rows did
+  // not converge: a link here would land on a page that can only say the files are gone.
+  it("offers no entry point on a missing version", () => {
+    render(<VersionList versions={[ver({ missing: true })]} />);
+    expect(screen.queryByRole("link", { name: /browse this backup/i })).toBeNull();
   });
 });

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ChevronRight } from "lucide-react";
+import { Link } from "react-router-dom";
 import type { Version } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -117,10 +118,23 @@ function VersionRow({ version, showDevice }: { version: Version; showDevice?: bo
           {formatBytes(version.logical_bytes)}
         </div>
       </div>
-      {/* A quiet chevron instead of a disabled "Unlock" button — it reads for BOTH encrypted and
-          unencrypted versions (nothing to "unlock" on an unencrypted one) and hints the row will open
-          into the file browser, which arrives with the vault (qn.8). Non-interactive for now. */}
-      <ChevronRight size={18} className="shrink-0 text-subtle" aria-hidden />
+      {/* THE ROW OPENS THE BACKUP, and until qn.8 slice 7 this chevron was explicitly inert — the
+          comment here read "Non-interactive for now" because there was nowhere for it to go.
+
+          A LINK, NOT A BUTTON, and not the word "Unlock". `VersionList.test.tsx` asserts that word
+          appears nowhere on a row and has since quince#442: it made no sense on an unencrypted
+          version, which has nothing to unlock and is still browsable (spec D7). The accessible name
+          is the same sentence the dialog leads with, so the control and the screen it opens agree.
+
+          The password is asked for on the destination, not here. That keeps one credential surface
+          rather than two, and it means a row click is a navigation the browser can undo. */}
+      <Link
+        to={`/versions/${version.id}/browse`}
+        aria-label="Browse this backup"
+        className="shrink-0 rounded-lg p-1 text-subtle transition-colors hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      >
+        <ChevronRight size={18} aria-hidden />
+      </Link>
     </div>
   );
 }
