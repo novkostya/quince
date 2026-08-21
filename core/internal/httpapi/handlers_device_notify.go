@@ -1,10 +1,7 @@
 package httpapi
 
 import (
-	"errors"
 	"net/http"
-
-	"github.com/novkostya/quince/core/internal/auth"
 )
 
 // deviceNotificationsRequest is the PUT /api/devices/{udid}/notifications body (contracts §1).
@@ -45,15 +42,10 @@ func (d Deps) handleDeviceNotifications() http.HandlerFunc {
 		// Being `scopedOwnDevice` is not a defence: that guard constrains the PATH udid.
 		owner, err := callerScope(d, r)
 		if err != nil {
-			// A REVOKED CREDENTIAL AND A DATABASE FAULT ARE NOT THE SAME REFUSAL (quince#940).
-			// The first is an auth problem the user can act on; the second is not, and telling
-			// them to authenticate sends them to a screen that cannot fix it.
-			if errors.Is(err, auth.ErrCredentialRevoked) {
-				writeError(w, d.Log, http.StatusUnauthorized, "unauthorized", "authentication required")
-				return
-			}
-			writeError(w, d.Log, http.StatusInternalServerError, "internal_error",
-				"could not resolve who is making this request")
+			// THE SAME MAPPING THE TWO LIST HANDLERS USE. It was spelled out inline here first
+			// (quince#1409 review); quince#1412 gave it a name, and a second copy is exactly how
+			// the two would drift into disagreeing about what a database fault is.
+			d.writeScopeResolutionError(w, err)
 			return
 		}
 		stored, status, reason := d.DeviceNotifs.SetNotificationsEnabled(

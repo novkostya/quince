@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/novkostya/quince/core/internal/auth"
 	"io"
 	"net/http"
 	"strings"
@@ -229,8 +230,19 @@ func fromSession(d Deps, r *http.Request) (string, bool) {
 	return v.UDID, v.UDID != ""
 }
 
-// listUDID decides which device a LIST endpoint may report on.
+// listUDID returns an error rather than a `refuse` bool, so its two callers can tell a REVOKED
+// CREDENTIAL from a DATABASE FAULT (quince#1412).
 //
+// IT COLLAPSED THEM INTO ONE 401. `ScopeOf` returns two distinguishable errors — `ErrCredentialRevoked`
+// for a session whose credential is gone, for which 401 is exactly right, and a raw error out of
+// `GetPasskey`, which is a read failure. Refusing is correct in both cases; the REASON was wrong in
+// one, and quince told a user who was authenticated to authenticate again over a fault no login
+// screen can fix. That is the *troubleshooting is actionable* rule failing at the one moment it
+// matters, and it did not need new information — the typed error was already in hand and thrown away.
+//
+// `scope_resource.go` argues the same case correctly twenty lines up, for the resource guard: *"a
+// registry that could not answer must not read as a scope violation, or a transient database fault
+// becomes a permanent-looking 403."* This is that reasoning carried down.
 // THE THIRD SHAPE (spec D8, slice 8c). `GET /api/jobs` and `GET /api/versions` are permitted for a
 // scoped principal, so refusing them would take away their own device's history — but the response
 // must be narrowed, and both readers already take a udid filter where "" means every device.
@@ -242,20 +254,38 @@ func fromSession(d Deps, r *http.Request) (string, bool) {
 // for its own device.
 //
 // THE ADMIN KEEPS THE QUERY, including "" for all devices, so nothing changes for them.
-func listUDID(d Deps, r *http.Request) (udid string, refuse bool) {
+func listUDID(d Deps, r *http.Request) (string, error) {
 	p, ok := PrincipalFrom(r.Context())
 	if !ok {
-		return r.URL.Query().Get("udid"), false
+		return r.URL.Query().Get("udid"), nil
 	}
 	scope, err := d.Auth.ScopeOf(p)
 	if err != nil {
 		// A principal we cannot resolve gets nothing, rather than the unfiltered list that "" means.
-		return "", true
+		// WHAT it gets told is now the caller's to decide, and the cause travels with it.
+		return "", err
 	}
 	if scope == "" {
-		return r.URL.Query().Get("udid"), false
+		return r.URL.Query().Get("udid"), nil
 	}
-	return scope, false
+	return scope, nil
+}
+
+// writeScopeResolutionError maps a failure to resolve WHO is calling, keeping the two causes apart.
+//
+// ONE PLACE, so the three call sites cannot drift. `handlers_device_notify.go` already spelled this
+// out inline for `callerScope`; this is the same mapping named once and shared, which is the fix
+// quince#1412 asks for rather than a third copy of it.
+func (d Deps) writeScopeResolutionError(w http.ResponseWriter, err error) {
+	if errors.Is(err, auth.ErrCredentialRevoked) {
+		// THE SESSION'S CREDENTIAL IS GONE, so authenticating again is exactly the remedy.
+		writeError(w, d.Log, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return
+	}
+	// A READ FAILED. The caller is authenticated and there is nothing they can do at a login
+	// screen; saying otherwise sends them somewhere that cannot help.
+	writeError(w, d.Log, http.StatusInternalServerError, "internal_error",
+		"could not resolve who is making this request")
 }
 
 // errNoPrincipal — the request reached a handler that must know WHO is calling, with nothing bound
