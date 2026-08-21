@@ -5,6 +5,8 @@ import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-quer
 import { BackLink } from "@/components/BackLink";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { RelativeTime } from "@/components/RelativeTime";
 import { APIError, api, messageFor } from "@/lib/api";
 import { useDialogRoute } from "@/lib/useDialogRoute";
@@ -73,16 +75,36 @@ export function VaultBrowsePage() {
   const { open, onOpenChange } = useDialogRoute("unlock");
   const sessionID = session?.id ?? "";
 
+  // TWO PIECES OF STATE FOR ONE FILTER, and the split is what stops a keystroke being a decrypt.
+  // `draft` is what the boxes hold; `filter` is what has been asked for. Only the second is in the
+  // query key, so typing `HomeDomain` one letter at a time issues one request rather than ten
+  // against a manifest the daemon has to walk each time.
+  const [draft, setDraft] = React.useState({ domain: "", prefix: "" });
+  const [filter, setFilter] = React.useState({ domain: "", prefix: "" });
+  const filtering = filter.domain !== "" || filter.prefix !== "";
+
   const browse = useInfiniteQuery({
-    queryKey: ["vault-browse", sessionID],
+    // THE FILTER IS IN THE KEY, so narrowing the list starts a fresh walk from the beginning rather
+    // than appending to the one already on screen. A cursor is only meaningful against the query
+    // that produced it (spec D3), so carrying one across a filter change would page through the
+    // wrong sequence.
+    queryKey: ["vault-browse", sessionID, filter.domain, filter.prefix],
     enabled: sessionID !== "",
     // The empty cursor IS the first page — contracts §1's `cursor` is optional and absent means the
     // beginning, so there is no separate first-page request shape to keep in step with this one.
     initialPageParam: "",
-    queryFn: ({ pageParam }) =>
-      api.get<BrowsePage>(
-        `/api/sessions/${sessionID}/browse${pageParam ? `?cursor=${encodeURIComponent(pageParam)}` : ""}`,
-      ),
+    queryFn: ({ pageParam }) => {
+      // NO `limit`, DELIBERATELY. The server's default is design §7's batch size and quince has no
+      // reason to ask for a different one — which means quince's own client CANNOT provoke a clamp,
+      // and the disclosure below is for a caller that can. Sending a number here to make that
+      // surface reachable would be inventing a knob to justify a guard.
+      const p = new URLSearchParams();
+      if (filter.domain) p.set("domain", filter.domain);
+      if (filter.prefix) p.set("prefix", filter.prefix);
+      if (pageParam) p.set("cursor", pageParam);
+      const qs = p.toString();
+      return api.get<BrowsePage>(`/api/sessions/${sessionID}/browse${qs ? `?${qs}` : ""}`);
+    },
     // ABSENT next_cursor IS THE LAST PAGE, and `undefined` is what react-query reads as "no more".
     // An empty string would be a falsy cursor that still looks like a page param, so it is
     // normalised here rather than at the two places that consume `hasNextPage`.
@@ -163,6 +185,25 @@ export function VaultBrowsePage() {
 
   const entries = browse.data?.pages.flatMap((p) => p.entries) ?? [];
 
+  // THE DOMAINS SEEN SO FAR, offered as SUGGESTIONS and never as the list. A domain filter is an
+  // exact match and nothing on the wire enumerates the domains a backup holds — a page carries
+  // entries, never a catalogue. So a `<select>` here would be a closed list built from whichever
+  // pages happened to be loaded, which is a silent cap wearing a helpful face: the domain you want
+  // is missing precisely because you have not paged to it yet. A `<datalist>` suggests and still
+  // takes anything typed.
+  const suggestions = Array.from(new Set(entries.map((e) => e.domain))).sort();
+
+  // THE SERVER CLAMPED, SO THE SCREEN SAYS SO — contracts §1's `effective_limit` is *"no silent caps
+  // or fallbacks as a wire field"*, and a client that reads it and shows nothing is where that
+  // guarantee would die quietly. Present only when a clamp happened, so this is absent on every
+  // ordinary page.
+  //
+  // UNREACHABLE FROM THIS CLIENT TODAY, stated rather than left to be discovered: the query above
+  // sends no `limit`, so the server has nothing to clamp. This exists so that a clamp can never
+  // arrive unannounced — if a page-size control is ever added, the disclosure is already wired
+  // rather than being remembered.
+  const clamped = browse.data?.pages.find((p) => p.effective_limit)?.effective_limit;
+
   return (
     <section>
       <BackLink to={back} className="inline-flex items-center gap-1 text-sm text-muted hover:text-fg">
@@ -224,10 +265,78 @@ export function VaultBrowsePage() {
             </p>
           ) : null}
 
+          {/* A FORM, so Enter applies. Both fields go to the server rather than filtering what is
+              already on screen: a client-side filter over the loaded pages would narrow a sample
+              and present it as the answer — the same silent cap as a `<select>` of seen domains. */}
+          <form
+            className="mt-4 flex flex-wrap items-end gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setFilter(draft);
+            }}
+          >
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="browse-domain">Domain</Label>
+              <Input
+                id="browse-domain"
+                list="browse-domains"
+                placeholder="exact, e.g. HomeDomain"
+                className="w-56"
+                value={draft.domain}
+                onChange={(e) => setDraft((d) => ({ ...d, domain: e.target.value }))}
+              />
+              <datalist id="browse-domains">
+                {suggestions.map((d) => (
+                  <option key={d} value={d} />
+                ))}
+              </datalist>
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="browse-prefix">Path starts with</Label>
+              <Input
+                id="browse-prefix"
+                placeholder="e.g. Library/SMS"
+                className="w-56"
+                value={draft.prefix}
+                onChange={(e) => setDraft((d) => ({ ...d, prefix: e.target.value }))}
+              />
+            </div>
+            <Button type="submit" size="sm" variant="outline">
+              Filter
+            </Button>
+            {filtering ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setDraft({ domain: "", prefix: "" });
+                  setFilter({ domain: "", prefix: "" });
+                }}
+              >
+                Clear
+              </Button>
+            ) : null}
+          </form>
+
+          {/* THE CLAMP, IF ONE HAPPENED. Rendered above the list rather than beside the count,
+              because it changes what the count MEANS. */}
+          {clamped ? (
+            <p className="mt-3 text-sm text-warn">
+              The server returned at most {clamped} files per page — it reduced the page size this
+              request asked for. Use <b>Show more</b> to read the rest.
+            </p>
+          ) : null}
+
           {browse.data ? (
             entries.length === 0 ? (
+              // AN EMPTY FILTERED LIST IS NOT AN EMPTY BACKUP, and telling a user their backup
+              // holds no files when what happened is that `HomeDomian` matched nothing is the
+              // collapsed-diagnostic defect quince#940 named. The remedy is in the sentence.
               <div className="mt-4 rounded-card border border-dashed border-line bg-card p-10 text-center text-sm text-muted">
-                This backup holds no files.
+                {filtering
+                  ? "No files in this backup match that domain and path. The domain has to match exactly — the box suggests the ones seen so far."
+                  : "This backup holds no files."}
               </div>
             ) : (
               <div className="mt-4">
@@ -253,7 +362,9 @@ export function VaultBrowsePage() {
                       {browse.isFetchingNextPage ? "Reading…" : "Show more"}
                     </Button>
                   ) : (
-                    <span className="text-xs text-muted">End of the backup.</span>
+                    <span className="text-xs text-muted">
+                      {filtering ? "End of the matches." : "End of the backup."}
+                    </span>
                   )}
                 </div>
               </div>
