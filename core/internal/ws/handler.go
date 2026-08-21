@@ -17,10 +17,17 @@ import (
 	"github.com/novkostya/quince/core/internal/wire"
 )
 
+// pingInterval is the liveness beat, and since qn.13 it is also how often the principal is
+// re-resolved — so it bounds how long a revoked session or a changed scope keeps its socket.
+//
+// A VAR SO TESTS CAN SHRINK IT. The alternative is a test that waits a real 30 seconds, and
+// this codebase already injects clocks rather than sleeping through them (qn.12 G3). The
+// production value lives here and nothing else writes it.
+var pingInterval = 30 * time.Second
+
 const (
 	subscriberBuffer = 64
 	writeTimeout     = 10 * time.Second
-	pingInterval     = 30 * time.Second
 )
 
 // Handler returns the /api/ws HTTP handler. authFn validates the session cookie value.
@@ -98,10 +105,11 @@ func Handler(b *bus.Bus, authFn func(sessionID string) (Principal, error), serve
 				_ = conn.Close(websocket.StatusPolicyViolation, "client too slow")
 				return
 			case env := <-sub.C():
-				// THE FILTER, AND IT IS AT SEND RATHER THAN AT SUBSCRIBE. A scope can change and a
-				// credential can be revoked while a socket is open, so a subscription narrowed once
-				// at connect would keep delivering under authority that has since gone. Same
-				// reasoning as spec D7 gives for push.
+				// THE FILTER IS AT SEND, AND THE PRINCIPAL IS RE-RESOLVED ON THE PING TICK BELOW.
+				//
+				// Send-versus-subscribe decides WHERE a scope is applied, not whether it is fresh —
+				// a principal resolved once at connect is stale in both designs (quince#1380
+				// review). Freshness is the ticker's job; this line is where the answer is used.
 				if !principal.MayReceive(env) {
 					continue
 				}
@@ -109,10 +117,27 @@ func Handler(b *bus.Bus, authFn func(sessionID string) (Principal, error), serve
 					return
 				}
 			case <-ticker.C:
-				pctx, pcancel := context.WithTimeout(ctx, writeTimeout)
-				err := conn.Ping(pctx)
-				pcancel()
+				// RE-RESOLVE BEFORE PINGING, so a scope change or a revocation takes effect within
+				// one interval instead of lasting as long as the connection.
+				//
+				// THIS ALSO ENDS A SOCKET WHOSE SESSION IS GONE, which was true before qn.13 and
+				// nobody had cause to notice: `authFn` ran once, pre-upgrade, so a client that
+				// logged out — or whose session quince#1001 deleted when its credential was
+				// removed — kept receiving every frame until it disconnected on its own.
+				//
+				// THE PING IS THE RIGHT PLACE rather than a second timer: it is the existing
+				// liveness beat, so the cost is one session lookup per interval per socket and no
+				// new goroutine. Bounded staleness, stated: up to one `pingInterval`.
+				fresh, err := authFn(sessionID)
 				if err != nil {
+					_ = conn.Close(websocket.StatusPolicyViolation, "session ended")
+					return
+				}
+				principal = fresh
+				pctx, pcancel := context.WithTimeout(ctx, writeTimeout)
+				perr := conn.Ping(pctx)
+				pcancel()
+				if perr != nil {
 					return
 				}
 			}
