@@ -280,7 +280,10 @@ func BeginPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, rpID stri
 	if err != nil {
 		return nil, "", err
 	}
-	handle, err := userHandle(st)
+	// THE PRINCIPAL'S OWN HANDLE, not the install's (quince#1393). Both halves of the ceremony must
+	// agree: the library compares the assertion's user handle against `WebAuthnID()` and refuses a
+	// mismatch, so a Begin under one identity and a Finish under another would fail after Face ID.
+	handle, err := handleForScope(st, scope)
 	if err != nil {
 		return nil, "", err
 	}
@@ -328,7 +331,10 @@ func FinishPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, key, nam
 	if err != nil {
 		return store.Passkey{}, err
 	}
-	handle, err := userHandle(st)
+	// THE PRINCIPAL'S OWN HANDLE, not the install's (quince#1393). Both halves of the ceremony must
+	// agree: the library compares the assertion's user handle against `WebAuthnID()` and refuses a
+	// mismatch, so a Begin under one identity and a Finish under another would fail after Face ID.
+	handle, err := handleForScope(st, scope)
 	if err != nil {
 		return store.Passkey{}, err
 	}
@@ -352,6 +358,9 @@ func FinishPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, key, nam
 	}
 
 	pk := store.Passkey{
+		// RECORDED SO LOGIN CAN ANSWER WITH IT. The assertion presents this value back, and the
+		// library refuses a credential whose user does not carry the same one.
+		UserHandle:   storedHandle(scope, handle),
 		CredentialID: base64.RawURLEncoding.EncodeToString(cred.ID),
 		PublicKey:    cred.PublicKey,
 		RPID:         pending.rpID,
@@ -473,13 +482,6 @@ func scopeUsername(st *store.Store, scope store.Scope) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// AMBIGUITY IS REFUSED FOR THE SAME REASON AS AN UNKNOWN DEVICE, and quince can see it
-	// coming (quince#1368 review). `device_identity.name` has no UNIQUE constraint — it is
-	// whatever the device calls itself, refreshed on Enrich — so two devices CAN share a name.
-	// Two scoped credentials would then carry the same `user.name`, and iOS collapses on
-	// `(rpId, username)`: one unselectable row granting two different devices. That is the
-	// defect D2.1 removes, reached by a shorter path than the fallback this function already
-	// refuses — and the device list is right here, so not looking would be a choice.
 	var match string
 	for _, d := range rows {
 		if d.Name == "" {
@@ -489,25 +491,17 @@ func scopeUsername(st *store.Store, scope store.Scope) (string, error) {
 			match = d.Name
 		}
 	}
+	// AMBIGUITY IS NO LONGER REFUSED — quince#1393 removed the reason. This used to refuse two
+	// devices sharing a name, because with ONE shared user.id a display collision was the only
+	// thing distinguishing two principals, so an ambiguous label was an authorization problem.
+	//
+	// Each principal now has its own user.id, which is the platforms notion of identity, so a
+	// name collision is COSMETIC: two credentials still present separately and each grants only
+	// its own device. What remains is that both rows read the same, which is a wart and not a
+	// dead end — and refusing to issue a credential over a wart was the worse answer.
 	if match == "" {
 		return "", ErrUnknownScopeDevice
 	}
-	for _, d := range rows {
-		if d.UDID != udid && d.Name == match {
-			return "", ErrAmbiguousScopeDevice{Name: match}
-		}
-	}
-	// A DEVICE NAMED `quince-admin` IS DELIBERATELY NOT REFUSED — Operator, 2026-08-21, given in
-	// session and relayed here; it is not on the forge, and this comment is the whole of its
-	// provenance.
-	//
-	// It would collide with the admin credential's username and collapse the same way two same-named
-	// devices do. It is refused nowhere, and that is a DECISION rather than the gap it looks like:
-	// "I'd do nothing, I don't think it's worth our attention."
-	//
-	// Recorded because the absence is the kind a later reader corrects. The ambiguity check directly
-	// above refuses two devices sharing a name, so the obvious next thought is that the admin anchor
-	// should be in that set — and adding it would be undoing a ruling, not closing a hole.
 	return match, nil
 }
 
@@ -518,23 +512,67 @@ func scopeUsername(st *store.Store, scope store.Scope) (string, error) {
 // something that is not on the Devices list.
 var ErrUnknownScopeDevice = errors.New("auth: cannot name the device this credential is scoped to")
 
-// ErrAmbiguousScopeDevice — two devices share the name this credential would be labelled with.
+// handleForScope returns the WebAuthn `user.id` this principal registers under (quince#1393).
 //
-// A STRUCT RATHER THAN A SENTINEL, because the remedy is only actionable if the message names the
-// name. "Two devices share a name" sends the operator to look; "two devices are called `iPad`" tells
-// them what to look for.
+// ONE HANDLE PER PRINCIPAL. The admin's is the stored constant, unchanged, so nothing already
+// issued is orphaned. A device-scoped principal gets its own stable random value — minted on its
+// first credential and REUSED by any later one for the same device, because two passkeys for one
+// device are one user and that is what the platform should see.
 //
-// THE REMEDY IS ON THE DEVICE, NOT IN quince, and that is why this error carries it. quince has no
-// rename endpoint — `device_identity.name` is whatever the device calls itself, refreshed on Enrich
-// (0004) — so "rename it and retry" means renaming the iPhone or iPad in its own Settings. A message
-// that said "rename it here" would name a control that does not exist, which is the *troubleshooting
-// is actionable* rule failing in the most frustrating way available.
-type ErrAmbiguousScopeDevice struct {
-	Name string
+// WHY IT MATTERS MORE THAN THE NAME. `user.name` is a display string; `user.id` is the identity.
+// Sharing one handle told the platform that a household member and the admin were the same user —
+// which is why credentials collapsed in the sheet, why two devices sharing a NAME became an
+// authorization dead end, and why a scoped enrolment on the admin's phone operates on the admin's
+// own credential rather than beside it.
+//
+// THE REUSE LOOKUP IS BY SCOPE, NOT BY CREDENTIAL, and it reads the FIRST match. Ordering is by
+// creation, so a device's handle is its earliest credential's — stable as later ones come and go,
+// which is what "stable" has to mean for a value the authenticator stores and presents back.
+func handleForScope(st *store.Store, scope store.Scope) ([]byte, error) {
+	if scope.IsAdmin() {
+		return userHandle(st)
+	}
+	rows, err := st.ListPasskeys()
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range rows {
+		if p.ScopeUDID != nil && *p.ScopeUDID == scope.UDID() && p.UserHandle != nil {
+			return base64.RawURLEncoding.DecodeString(*p.UserHandle)
+		}
+	}
+	// FIRST CREDENTIAL FOR THIS DEVICE — mint one. 32 bytes, the same width and source as the
+	// admin's, because there is no reason for a scoped principal's identity to be weaker.
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
 }
 
-func (e ErrAmbiguousScopeDevice) Error() string {
-	return fmt.Sprintf("auth: two devices are called %q, so a credential scoped to one could not be "+
-		"told from the other on your phone — rename one on the device itself "+
-		"(Settings → General → About → Name), then issue the code again", e.Name)
+// storedHandle renders a handle for the `user_handle` column: nil for the admin's shared value, so
+// the column keeps meaning what 0016 says it means.
+func storedHandle(scope store.Scope, handle []byte) *string {
+	if scope.IsAdmin() {
+		return nil
+	}
+	s := base64.RawURLEncoding.EncodeToString(handle)
+	return &s
+}
+
+// handleOf returns the WebAuthn user.id a STORED credential was registered under.
+//
+// THE LOGIN SIDE OF handleForScope. A discoverable assertion presents the handle back, and the
+// library refuses when it does not equal WebAuthnID() — measured in the vendored source:
+// `bytes.Equal(userHandle, user.WebAuthnID())`, "User handle and User ID do not match". So
+// answering with the install's shared handle for a scoped credential would fail every scoped
+// sign-in, and it would read as a broken passkey rather than as a bug here.
+//
+// NIL MEANS THE ADMIN'S SHARED HANDLE, which is what every credential registered before
+// quince#1393 carries — so this is the upgrade path as well as the admin path.
+func handleOf(st *store.Store, pk store.Passkey) ([]byte, error) {
+	if pk.UserHandle == nil {
+		return userHandle(st)
+	}
+	return base64.RawURLEncoding.DecodeString(*pk.UserHandle)
 }

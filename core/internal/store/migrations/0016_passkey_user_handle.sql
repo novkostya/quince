@@ -1,0 +1,32 @@
+-- qn.13 (quince#1393): a credential records the WebAuthn user handle it was registered under.
+--
+-- THE DISEASE THE NAMING FIXES WERE SYMPTOMS OF. Every quince credential presented the SAME
+-- `user.id` — one stored random value, minted for an install that had one principal (`userHandle`'s
+-- own doc comment says "the ADMIN's stable WebAuthn id"). qn.13 added a second kind of principal and
+-- kept the identity model from when there was only one.
+--
+-- To the platform, same `(rpId, user.id)` genuinely IS the same user. So:
+--   * credentials collapsing in the sign-in sheet was CORRECT platform behaviour, and D2.1 fixed it
+--     by making `user.name` — a DISPLAY string — carry identity work it cannot do;
+--   * two devices sharing a name became an authorization dead end (`ErrAmbiguousScopeDevice`),
+--     because a display collision was the only thing distinguishing two principals;
+--   * and a scoped enrolment on the phone holding the admin's passkey is, per the WebAuthn model,
+--     operating on the admin's own credential rather than beside it.
+--
+-- NULL MEANS THE ADMIN'S SHARED HANDLE — the value in the `passkey_user_handle` setting. Every row
+-- that exists today is an admin credential registered under it, so this is additive with no
+-- backfill, and nothing already issued is orphaned. That is what `userHandle`'s "a stored random
+-- value, NEVER derived from the password" reasoning was protecting, and it stays protected.
+--
+-- ONE HANDLE PER PRINCIPAL, NOT PER CREDENTIAL. A device's second credential reuses the first's
+-- handle: two passkeys for one device are one user, which is what the platform should see. The
+-- admin's several devices likewise share the one in settings.
+--
+-- IT IS ANOTHER NULL-MEANS-ADMIN DEFAULT, the fourth in this rung (0014, 0015, `passkeyUser.name`,
+-- and this). Accepted for the same reason each time: it is TRUE of every row that exists, and the
+-- Go layer refuses to guess for new ones — registration resolves the handle from the scope and
+-- passes it, rather than falling through to a default.
+ALTER TABLE passkeys ADD COLUMN user_handle TEXT;
+
+-- Resolving a scope's existing handle is a lookup by scope, done once per registration.
+CREATE INDEX idx_passkeys_scope_handle ON passkeys (scope_udid) WHERE scope_udid IS NOT NULL;

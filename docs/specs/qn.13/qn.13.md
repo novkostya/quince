@@ -142,7 +142,7 @@ different authority. The constant stays correct for admin credentials and only f
 **It also disarms the measurement's defect.** Two credentials with different usernames do not
 collapse, so the unselectable single row cannot arise even on a phone holding both.
 
-**A DEVICE NAMED `quince-admin` IS DELIBERATELY NOT REFUSED** — Operator, 2026-08-21, given in
+**A DEVICE NAMED `quince-admin` IS DELIBERATELY NOT REFUSED** — and since D2.3 gave each principal its own `user.id`, the collision it was about no longer exists; the ruling stands and is now moot. — Operator, 2026-08-21, given in
 session and relayed here; **it is not on the forge, and this paragraph is the whole of its
 provenance.** Such a device would collide with the admin credential's username and collapse exactly
 as two same-named devices do, and it is refused nowhere. Asked whether to guard it: *"I'd do nothing,
@@ -152,6 +152,7 @@ I don't think it's worth our attention."*
 devices sharing a name a few lines earlier, so the obvious next thought is that the admin anchor
 belongs in that set — and adding it would be undoing a ruling rather than closing a hole. The same
 note sits at the code.
+
 
 ### D2.2 — quince chooses which credential is offered; the platform stops choosing
 
@@ -211,6 +212,46 @@ already handles.
 **This is what lets D4's exclusion-list question relax.** quince disambiguates rather than forbidding,
 so one phone holding both an admin and a scoped credential becomes supportable instead of refused —
 which is a real want, since the admin plausibly uses their own device page as its owner.
+
+### D2.3 — One WebAuthn `user.id` per principal, which is what D2.1 was reaching for
+
+**quince#1393, Operator-directed 2026-08-21.** Every credential presented the same `user.id` — one
+stored random value minted for an install that had one principal. `userHandle`'s own comment says
+*"the ADMIN's stable WebAuthn id"*. **qn.13 added a second kind of principal and kept the identity
+model from when there was only one.**
+
+**`user.name` is a display string; `user.id` is the identity.** Same `(rpId, user.id)` genuinely *is*
+the same user, so:
+
+- the sheet collapsing three credentials into one row was **correct platform behaviour**, and D2.1
+  fixed it by making a label carry identity work it cannot do;
+- two devices sharing a name became an **authorization dead end** (`ErrAmbiguousScopeDevice`),
+  because a display collision was the only thing separating two principals;
+- and a scoped enrolment on the phone holding the admin's passkey operates on the admin's own
+  credential rather than beside it.
+
+**The fix: the admin keeps the stored handle** — nothing already issued is orphaned, which is what
+`userHandle`'s *"never derived from the password"* reasoning was protecting — **and each scoped
+principal gets its own stable random one**, minted on its first credential and reused by any later
+one for the same device. Two passkeys for one device are one user.
+
+**D2.1 STANDS AND ITS REASON NARROWS.** A scoped credential still carries its device's name rather
+than `quince-admin`, because telling a household member they hold admin is dishonest at the one place
+they look. What it no longer has to do is *distinguish principals* — so `ErrAmbiguousScopeDevice` is
+**deleted rather than patched**, and two devices sharing a name is cosmetic: both credentials present
+separately and each grants only its own device. The residual wart is that both rows read the same;
+refusing to issue a credential over a wart was the worse answer.
+
+**UNVERIFIED, AND IT IS THE CLAIM THAT MADE THIS URGENT.** Whether an authenticator *replaces* an
+existing discoverable credential for the same `(rpId, user.id)` is not established here. The W3C
+spec's `authenticatorMakeCredential` text could not be retrieved in full from this session, and MDN
+describes duplicates being **prevented** — by `excludeCredentials`, which **D4.1 rules the enrolment
+ceremony must not send**. So the guard MDN names is deliberately absent on exactly this path. D2.1's
+hardware measurement showed iOS keeping all three credentials, so quince was relying on that
+tolerance rather than on the specification. **The fix removes the reliance either way**; what stays
+owed is a measurement — enrol a scoped credential on a phone already holding the admin's passkey and
+see what survives.
+
 
 ### D3 — What a scoped holder may do: a rule, and the one exception the Operator ruled
 
