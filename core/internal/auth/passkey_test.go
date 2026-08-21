@@ -99,7 +99,7 @@ func TestUserHandleSurvivesAPasswordChange(t *testing.T) {
 // could be replayed against a second attempt.
 func TestCeremonyIsSingleUse(t *testing.T) {
 	cer := NewPasskeyCeremonies()
-	key, err := cer.put(&webauthn.SessionData{Challenge: "c"}, rpHome, ceremonyRegister)
+	key, err := cer.put(&webauthn.SessionData{Challenge: "c"}, rpHome, ceremonyRegister, store.AdminScope())
 	if err != nil {
 		t.Fatalf("put: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestCeremonyExpires(t *testing.T) {
 	now := time.Now().UTC()
 	cer.now = func() time.Time { return now }
 
-	key, err := cer.put(&webauthn.SessionData{Challenge: "c"}, rpHome, ceremonyRegister)
+	key, err := cer.put(&webauthn.SessionData{Challenge: "c"}, rpHome, ceremonyRegister, store.AdminScope())
 	if err != nil {
 		t.Fatalf("put: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestCeremonyExpires(t *testing.T) {
 // rather than storing a credential the authenticator signed for another domain.
 func TestCeremonyCarriesItsRPID(t *testing.T) {
 	cer := NewPasskeyCeremonies()
-	key, err := cer.put(&webauthn.SessionData{Challenge: "c"}, rpHome, ceremonyRegister)
+	key, err := cer.put(&webauthn.SessionData{Challenge: "c"}, rpHome, ceremonyRegister, store.AdminScope())
 	if err != nil {
 		t.Fatalf("put: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestCeremonyCarriesItsRPID(t *testing.T) {
 // becomes an oracle for probing which kind a key is.
 func TestACeremonyCannotBeFinishedAsTheOtherKind(t *testing.T) {
 	cer := NewPasskeyCeremonies()
-	key, err := cer.put(&webauthn.SessionData{Challenge: "c"}, rpHome, ceremonyAssert)
+	key, err := cer.put(&webauthn.SessionData{Challenge: "c"}, rpHome, ceremonyAssert, store.Scope{})
 	if err != nil {
 		t.Fatalf("put: %v", err)
 	}

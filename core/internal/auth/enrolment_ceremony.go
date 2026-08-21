@@ -74,9 +74,22 @@ func (s *Service) BeginEnrolment(cer *PasskeyCeremonies, enr *Enrolments, rpID, 
 // because minutes can pass between the two calls: the admin may have revoked it, or it may have
 // expired, and a ceremony that consulted only its own start would honour a QR the admin cancelled
 // while the phone sat on the unlock sheet.
+// RATE-LIMITED, LIKE BEGIN AND FOR A SHARPER REASON (quince#1426 review). Begin's comment claimed
+// the bucket bounds guessing at the secret; it did not, because this door takes the same secret and
+// was unmetered — so an attacker would simply use this one. Both of Begin's reasons apply here
+// verbatim, and this call allocates MORE: a full WebAuthn attestation verification runs before
+// anything can refuse.
+//
+// THE REPOSITORY HAS BOTH PATTERNS AND THIS IS THE SECOND. `FinishSetupPasskey` is unmetered
+// correctly — its gate is `Configured()`, a boolean with nothing to guess.
+// `FinishPasskeyAssertion` IS metered, because it accepts a caller-supplied value that decides the
+// outcome. So does this.
 func (s *Service) FinishEnrolment(cer *PasskeyCeremonies, enr *Enrolments, key, name, rpID, token string,
-	r *http.Request, now time.Time, priorSessionID string,
+	r *http.Request, now time.Time, priorSessionID, clientIP string,
 ) (store.Passkey, store.AuthSession, string, error) {
+	if !s.limiter.allow(clientIP, s.now()) {
+		return store.Passkey{}, store.AuthSession{}, "", ErrRateLimited
+	}
 	en, err := enr.Check(token)
 	if err != nil {
 		return store.Passkey{}, store.AuthSession{}, "", err

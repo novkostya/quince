@@ -95,6 +95,16 @@ type pendingCeremony struct {
 	rpID    string
 	kind    ceremonyKind
 	expires time.Time
+	// scope is the confinement this ceremony was BEGUN for, and finishing under a different
+	// one is refused (quince#1426 review).
+	//
+	// WHY THE SEAM AND NOT THE CALL SITES. `FinishPasskeyRegistration` takes the scope as a
+	// parameter, so the credential is confined to whatever the FINISHING call passes. Begin
+	// and Finish agreed because both callers resolved it the same way — by convention, with
+	// nothing checking. `the scope comes off the record, and no parameter here could name a
+	// device` is the property this rung is built on, and it belongs where it cannot be
+	// restated wrongly. Same argument `store.Scope` and `Disclosure` already won.
+	scope store.Scope
 }
 
 // NewPasskeyCeremonies builds the in-flight challenge store.
@@ -107,7 +117,8 @@ func NewPasskeyCeremonies() *PasskeyCeremonies {
 // The sweep is here rather than on a timer because this map is bounded by how often a human taps
 // "add a passkey": a goroutine to collect at most a handful of two-minute entries would be more
 // machinery than the thing it manages.
-func (p *PasskeyCeremonies) put(session *webauthn.SessionData, rpID string, kind ceremonyKind) (string, error) {
+func (p *PasskeyCeremonies) put(session *webauthn.SessionData, rpID string, kind ceremonyKind,
+	scope store.Scope) (string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
@@ -122,7 +133,8 @@ func (p *PasskeyCeremonies) put(session *webauthn.SessionData, rpID string, kind
 			delete(p.in, k)
 		}
 	}
-	p.in[key] = pendingCeremony{session: *session, rpID: rpID, kind: kind, expires: now.Add(challengeTTL)}
+	p.in[key] = pendingCeremony{session: *session, rpID: rpID, kind: kind, scope: scope,
+		expires: now.Add(challengeTTL)}
 	return key, nil
 }
 
@@ -317,7 +329,7 @@ func BeginPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, rpID stri
 	if err != nil {
 		return nil, "", err
 	}
-	key, err := cer.put(session, rpID, ceremonyRegister)
+	key, err := cer.put(session, rpID, ceremonyRegister, scope)
 	if err != nil {
 		return nil, "", err
 	}
@@ -336,6 +348,16 @@ func FinishPasskeyRegistration(st *store.Store, cer *PasskeyCeremonies, key, nam
 	// the new one would store a credential the authenticator signed for the old.
 	if pending.rpID != rpID {
 		return store.Passkey{}, ErrRPIDMismatch{Registered: pending.rpID, Presented: rpID}
+	}
+	// AND THE CEREMONY'S OWN SCOPE WINS, for the same reason one line up (quince#1426 review).
+	//
+	// The credential is confined to whatever this call passes, and until now the only thing making
+	// that the RIGHT confinement was that both callers happened to resolve it identically. That is
+	// convention, and this rung has spent five slices replacing conventions with things a compiler
+	// or a check enforces. A ceremony begun for one device and finished for another is now refused
+	// rather than quietly writing the second.
+	if pending.scope != scope {
+		return store.Passkey{}, ErrScopeMismatch
 	}
 
 	wa, err := relyingParty(pending.rpID)
