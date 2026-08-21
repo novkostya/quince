@@ -103,6 +103,15 @@ var resourceDevice = map[string]deviceResolver{
 	// THE FOURTH SHAPE. Its device is in the payload, not the path, and it looks like a plain
 	// create — which is exactly why it is the one a path-reading guard would miss.
 	"POST /api/jobs": fromBody,
+
+	// THE VAULT ROUTES, resolvable since slice 8b-2. A version knows its device; a session
+	// knows its version. Both hops existed — `storage.Manager.Version` since the vault surface
+	// landed, and `vault.Registry.Get` since sessions did — and only the interfaces did not
+	// name them.
+	"POST /api/versions/{id}/unlock":        fromVersion,
+	"POST /api/sessions/{id}/lock":          fromSession,
+	"GET /api/sessions/{id}/browse":         fromSession,
+	"GET /api/sessions/{id}/file/{file_id}": fromSession,
 }
 
 // unresolvableToday are `scopedOwnDevice` routes with NO way to find their device yet, and they
@@ -117,12 +126,11 @@ var resourceDevice = map[string]deviceResolver{
 // contradicts D3's *browse and download from a version — yes*; it affects nobody, because nothing
 // mints a scoped credential until slice 9, and an unchecked route is the one thing that must not
 // ship. A permitted-but-uncompared route would look identical in a passing test suite.
-var unresolvableToday = map[string]string{
-	"POST /api/versions/{id}/unlock":        "a version does not expose its device yet (slice 8b-2)",
-	"POST /api/sessions/{id}/lock":          "a vault session does not expose its device yet (slice 8b-2)",
-	"GET /api/sessions/{id}/browse":         "a vault session does not expose its device yet (slice 8b-2)",
-	"GET /api/sessions/{id}/file/{file_id}": "a vault session does not expose its device yet (slice 8b-2)",
-}
+// unresolvableToday is EMPTY since slice 8b-2, and it stays as a named, asserted-empty map
+// rather than being deleted: `assertResolversPresent` is what makes a future
+// `scopedOwnDevice` route with no resolver a panic instead of an unchecked route, and it
+// needs somewhere to record a deliberate exception if one is ever right again.
+var unresolvableToday = map[string]string{}
 
 // assertResolversPresent panics if a `scopedOwnDevice` route has neither a resolver nor a stated
 // reason to fail closed.
@@ -184,4 +192,38 @@ func scopedResourceGuard(d Deps, pattern string, next http.HandlerFunc) http.Han
 		}
 		next(w, r)
 	}
+}
+
+// fromVersion resolves the device through the version named in the path.
+//
+// AN ERROR IS NOT "NO DEVICE". `VersionReader.Version` distinguishes a missing row from a failed
+// query, and so does this: a registry that could not answer must not read as a scope violation, or
+// a transient database fault becomes a permanent-looking 403.
+func fromVersion(d Deps, r *http.Request) (string, bool) {
+	if d.Versions == nil {
+		return "", false
+	}
+	v, ok, err := d.Versions.Version(r.PathValue("id"))
+	if err != nil || !ok {
+		return "", false
+	}
+	return v.UDID, v.UDID != ""
+}
+
+// fromSession resolves the device through the session's version. Two hops, both cheap.
+func fromSession(d Deps, r *http.Request) (string, bool) {
+	if d.VaultBrowse == nil || d.Versions == nil {
+		return "", false
+	}
+	versionID, ok := d.VaultBrowse.SessionVersion(r.PathValue("id"))
+	if !ok {
+		// A LOCKED OR EXPIRED SESSION REPORTS NO DEVICE, so the guard refuses rather than admitting
+		// a request under a session that no longer exists.
+		return "", false
+	}
+	v, ok, err := d.Versions.Version(versionID)
+	if err != nil || !ok {
+		return "", false
+	}
+	return v.UDID, v.UDID != ""
 }
