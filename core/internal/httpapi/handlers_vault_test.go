@@ -399,6 +399,22 @@ func TestAnUnknownCodeIs500NotAPanic(t *testing.T) {
 // So the download FAILS VISIBLY and the user is not handed corrupt data. What they are not
 // given is any way to find out why — which is what this log line is for, and why it has to
 // say the true thing.
+//
+// THE STUB IS THE ENCRYPTED SHAPE, AND THAT IS THE SCOPE OF THIS TEST (quince#1433). The
+// unbounded `strings.NewReader` overruns the declared length, which is what `encrypted.Open`
+// does — it pipes DecryptFile through with no bound. The UNENCRYPTED backend cannot reach
+// this case at all: `boundedFile` stops at the record and the registry wrapper turns
+// ErrOverlongFile into io.EOF (quince#1400), so the handler sees a clean success.
+//
+// SO THIS TEST IS ALSO WHAT PROVES THE `http.ErrContentLength` ARM IS STILL LIVE. Reading
+// the unencrypted behaviour on hardware makes that arm look vestigial — quince#1433 was
+// filed believing it might be — and the assertion below that the log names the long case is
+// the thing that says otherwise. A green run here means the branch was taken.
+//
+// WHAT IS NOT COVERED, deliberately: the unencrypted path's own success. It is asserted
+// where it is produced, in `TestOverlongIsRecordedThenSwallowedSoTheTransferReadsAsThe
+// SuccessItIs` and `TestUnencryptedOverlongBlobIsReportedRatherThanSilentlyTruncated`, and
+// duplicating it here would test the stub rather than the handler.
 func TestVaultFileLongerThanItsRecordIsNotReportedAsEndingEarly(t *testing.T) {
 	var logged bytes.Buffer
 	deps := testDeps(t)

@@ -111,13 +111,38 @@ func (d Deps) handleSessionFile() http.HandlerFunc {
 			// was logged as one until quince#1379. net/http refuses the write past the
 			// declared length, so io.Copy fails here on a stream that delivered too MUCH.
 			//
-			// The download FAILS rather than arriving quietly truncated: net/http tears the
-			// response, so the client reads ZERO bytes and an `unexpected EOF`. Measured
-			// either side of the response buffer, because a large file could plausibly flush
-			// a complete-looking prefix first; it does not (quince#1381).
+			// WHICH BACKEND SERVED THE VERSION DECIDES WHETHER THIS ARM IS REACHED AT ALL,
+			// and reading it as one behaviour is how it gets misread in both directions
+			// (quince#1433). httpapi is consumer-defined and cannot tell them apart, so it
+			// must be correct for both:
+			//
+			//   ENCRYPTED — this arm. `Open` pipes DecryptFile straight through with no
+			//   bound, so an overlong file overruns the declared length and net/http tears
+			//   the response: the client reads ZERO bytes and an `unexpected EOF`. Measured
+			//   either side of the response buffer, because a large file could plausibly
+			//   flush a complete-looking prefix first; it does not (quince#1381).
+			//
+			//   UNENCRYPTED — NOT this arm, and nothing here runs. `boundedFile` stops at
+			//   the recorded size and the registry wrapper turns ErrOverlongFile into
+			//   io.EOF (quince#1400), so io.Copy returns nil and the transfer is the
+			//   success it is. Measured on hardware 2026-08-21: HTTP 200, Content-Length
+			//   1003520, 1003520 bytes delivered, no error.
+			//
+			// SO THE ARM IS LIVE, WHICH IS THE QUESTION quince#1433 ASKED FIRST. It is not
+			// vestigial and must not be deleted as such: `TestVaultFileLongerThanItsRecord
+			// IsNotReportedAsEndingEarly` drives an unbounded stub — the encrypted shape —
+			// and is green, and its assertion that the log names the long case is what
+			// proves this branch is the one taken.
+			//
+			// THE PARAGRAPH THIS REPLACES STATED THE ENCRYPTED BEHAVIOUR UNQUALIFIED, which
+			// is what made it read as simply stale to a session measuring the unencrypted
+			// path on the stand. Both halves were true; neither was the whole, and the arm
+			// that looks dead from one backend is the only one the other can take.
 			//
 			// That is why this line gets its own words: `unexpected EOF` is the whole of what
-			// reaches the client, so the log is the only place the reason exists.
+			// reaches the client, so the log is the only place the reason exists. The user's
+			// remedy is the same either way and it is in the message — a fresh backup of this
+			// device re-records the file.
 			d.Log.Warn("vault: file is longer than its manifest record, so the download FAILED — "+
 				"net/http refuses the write past the declared Content-Length and the client sees "+
 				"`unexpected EOF`. This backup holds more bytes on disk for this file than its own "+
