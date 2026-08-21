@@ -15,9 +15,9 @@
                     ┌──────────┐   spawns    ┌──────────────────┐                      │
                     │ quince  │────────────►│ idevicebackup2   │──writes──► /backups  │
                     │ (Go core)│             │ idevicepair etc. │            (mounted) │
-                    │          │   spawns    ├──────────────────┤                      │
-                    │  event   │────────────►│ quince-vault    │──reads───► /backups  │
-                    │  bus     │  stdio RPC  │ (vault sidecar)  │──writes──► /cache    │
+                    │  event   │  in-process ├──────────────────┤                      │
+                    │  bus     │  vault.Vault│ vault (a package)│──reads───► /backups  │
+                    │          │             │  not a process   │──writes──► /cache    │
                     └────┬─────┘             └──────────────────┘                      │
                          │ REST + WebSocket                                            │
                          ▼                                                             │
@@ -43,7 +43,7 @@ and the only network listener.
 | `job engine` | One goroutine per job driving the state machine (§4); global per-UDID mutex; persists every transition to SQLite *before* emitting the event (crash-safe: on startup, orphaned `backing_up` jobs become `connection_lost` and their work dirs are discarded). |
 | `backup supervisor` | Spawns `idevicebackup2` in its own process group; parses stdout incrementally (tolerant line parser — unknown lines are logged, never fatal); tracks progress and liveness via the activity sampler (§4). |
 | `storage backends` | `VersionBackend` implementations (§5) behind capability probe. |
-| `vault manager` | Spawns/kills `quince-vault` processes; owns session lifecycle (unlock → TTL/lock → wipe scratch); brokers RPC. |
+| `vault` | Reads one committed version behind the `vault.Vault` interface; owns session lifecycle (unlock → TTL/lock → wipe scratch). **A package, not a process** — qn.8 built it in-process on stack D4's measurement; the stdio-RPC child `contracts.md` §4 specifies stays a permitted implementation of the same interface. |
 | `event bus` | In-process pub/sub; every state change is an event; WS handler fans out to subscribers with per-client send buffers (slow client → dropped connection, never a blocked publisher). **A dropped subscriber is never blocked-on, so every consumer owes a recovery**, and the two in-process ones answer differently on purpose: the WS handler **tears the connection down** and lets the client reconnect and GET-refresh, while the qn.12 notifier **resubscribes and re-evaluates the whole fleet** — it has no client to tell, and its state is derivable from the device table. A third consumer picks whichever of those it can honestly implement; there is no default. |
 | `http api` | REST + WS per `contracts.md`; auth middleware (session cookie); serves embedded UI. |
 | `config` | Owns `/data/config.yml` (source of truth for all non-bootstrap settings, stack D12): schema+defaults, validation, atomic canonical writes of **only the keys the user set, with no generated annotation** (ruled 2026-08-08, quince#728; this row said *"with generated doc-comments"* until then), file watch → apply-or-keep-last-good with a UI banner; serves `GET/PUT /api/config`. |
@@ -719,14 +719,27 @@ screen that offers passwordless.
   same-uid exposure it would carry is **not a residual risk this project accepts; it is
   one quince does not have.** Never logged, never stored; audit-trailed as an event
   *without* the secret.
-- **Backup password**: never written to disk. Unlock flow: user submits it → core sends
-  it inside the framed `initialize` request on the vault's stdin (never argv/env, never
-  logged — raw RPC frames are unloggable by rule) → keys exist only in the vault
-  process. Locking a session or TTL expiry kills the process and wipes
-  `/cache/scratch/<session>`. Session scratch should be tmpfs (compose examples set it
-  up, with a configurable memory limit); docs state honestly that on SSD/ZFS a "secure
-  wipe" of on-disk scratch is not achievable — deleted plaintext may persist in lower
-  storage layers.
+- **Backup password**: never written to disk. Unlock flow: user submits it →
+  `POST /api/versions/{id}/unlock` → it reaches `vault.Vault.Unlock` **in memory and reaches
+  nothing else** — no argv, no env, no log line, no column in the app DB, no line in
+  `config.yml`. Keys exist between unlock and lock and nowhere else. Locking a session, TTL
+  expiry, and process shutdown all run **one teardown**: the vault is closed, the keys are
+  dropped, and `/cache/scratch/<session>` is wiped.
+  **THE SEAM ADMITS A stdio-RPC IMPLEMENTATION AND qn.8 BUILT THE IN-PROCESS ONE**, on stack D4's
+  measurement. `contracts.md` §4 specifies that protocol and is not stale: it describes an
+  implementation nobody has built. Read the two together that way rather than as a contradiction —
+  and if an RPC vault is ever built, the password crosses a pipe on its stdin and the isolation
+  below returns with it.
+  **THE COST OF IN-PROCESS IS ADDRESS-SPACE ISOLATION.** A decrypt panic or OOM takes the daemon,
+  and the password lives in the daemon's memory for the session's lifetime rather than in a
+  process that exits at lock. The measurement chose in-process on **memory**; this is what it
+  spent, and a security model that recorded only the win would be true and misleading.
+  Session scratch should be tmpfs (compose examples set it up, with a configurable memory
+  limit); docs state honestly that on SSD/ZFS a "secure wipe" of on-disk scratch is not
+  achievable — deleted plaintext may persist in lower storage layers.
+  **THE SCRATCH TREE IS WIPED ON START AS WELL AS ON LOCK**, which is what makes "nothing survives
+  a lock" true across a CRASH: a teardown that only runs on the way out cannot cover a `SIGKILL`,
+  and the decrypted `Manifest.db` is the whole file index of a phone.
 - **No secrets at rest.** v1 stores no backup password in any form — lazy session-scoped
   reading (§7) removed the only feature that wanted one (unattended post-backup
   indexing). If a future feature reintroduces the need, it returns as an explicit
@@ -734,7 +747,13 @@ screen that offers passwordless.
 - **Pairing records** (`/var/lib/lockdown`) are **private-key-grade secrets** — they let
   any holder talk to the iPhone as a trusted host. Backed up into `/data` (0600), never
   served, never logged, called out in the backup-your-appdata docs.
-- **Committed versions are read-only** to the vault (ro bind of the version's `browse_root`).
+- **Committed versions are never written by the vault**, and that is a property of the code rather
+  than of a mount: the vault opens the version's files for reading and writes **only** into the
+  session scratch dir it is handed — the decrypted index and nothing else. There is no bind mount,
+  because in-process there is nothing to spawn one for.
+  **The hard rule it serves is *never mutate a committed version***, and a reader that opens for
+  reading cannot. A read-only bind would be belt over braces; its absence is stated so nobody
+  designs against one that is not there.
 - **Subprocess hygiene**: argv arrays only; UDIDs and paths validated against strict
   patterns before use.
 
@@ -959,15 +978,28 @@ never logged and never served to another session.
   derived from backup content except fingerprint-validated caches (below). The backup
   dataset is external storage the user may prune, replicate, or hand-edit — a stored
   index would diverge; a session can't.
-- `vault serve`: JSON-RPC over stdio (shapes in `contracts.md`), opened by a framed
-  `initialize` request carrying password + backup path (stdin-only, unambiguous parsing,
-  never logged). The vault is **jailed to its session scratch root**, passed at spawn:
-  no filesystem destination ever crosses the RPC boundary — `materialize {file_id}`
-  writes under the scratch root and returns an opaque handle + scratch-relative path
-  (external-review hardening, accepted). On unlock: load keybag, decrypt `Manifest.db`
-  into scratch (lab-measured: ~sub-second reads, a few seconds for big manifests —
-  narrated in the UI, once per session). Then serve `list/stat/materialize` lazily;
-  domain DBs (`sms.db`, `Photos.sqlite`) are decrypted to scratch on first use of their
+- **BUILT IN-PROCESS at qn.8, and the seam is the Go interface rather than a protocol.** The core
+  holds `vault.Vault`; `core/internal/vault`'s encrypted implementation opens a version through
+  `ios-backup-crypt` and streams from it. On unlock: hash the on-disk `Manifest.db` (that
+  identifies the VERSION, so it needs no password), load the keybag, decrypt the index into the
+  session's scratch dir. Then serve `List`/`Stat`/`Open` lazily.
+  **`Open` RETURNS A READER, NOT A SCRATCH PATH**, and that is the shape decision the rest
+  follows from. `contracts.md` §4's `materialize {file_id} → {handle, rel_path, size}` exists
+  because a *process boundary* cannot carry an open file; putting it on the interface would make
+  an in-process implementation pay decrypt → scratch → read → unlink for a boundary it does not
+  have. Measured: **7.9 MiB peak RSS streaming a 128 MiB file** (stack D4). The RPC remains a
+  permitted implementation of the same interface and would pay that cost behind the same method.
+- **THE SCRATCH ROOT IS A CONVENTION, NOT AN ENFORCEMENT, and it must not be credited as a security
+  property.** `contracts.md` §4 describes the vault as spawned with its scratch root *"as its only
+  writable directory"* — that is what an RPC vault would be **told**, and it is not what anything is
+  **confined to**: there is no `chroot`, `unshare`, `bwrap` or credential-dropping anywhere in
+  quince, and in-process there is not even a separate address space.
+  **What IS true and IS checked**: the decrypted index goes to a caller-chosen directory
+  (`ios-backup-crypt`'s `WithScratchDir`), that directory is the session's own, and the registry
+  wipes it on lock, on TTL, at shutdown **and on start** — the last of which is what covers a crash.
+- On unlock the manifest read is narrated in the UI, once per session (lab-measured:
+  ~sub-second, a few seconds for big manifests). Domain DBs (`sms.db`, `Photos.sqlite`) are
+  decrypted to scratch on first use of their
   domain. Core streams materialized files and unlinks. Hard memory ceiling documented
   per op; everything paginates; search FTS is built in scratch on first search,
   session-scoped.
@@ -991,13 +1023,23 @@ never logged and never served to another session.
   uses this (its only planned consumer was photo thumbnail generation, parked — and
   possibly mooted by Apple's prebuilt thumbnails).
 - Memory discipline (small-NAS requirement): stream rows in batches (500–2000), never
-  `fetchall()` the Manifest, cap thumbnail workers (default 2, config); the vault process
-  dies at session lock — RSS returns to zero between sessions.
-- **Swap-ready seam** (Operator decision): the core depends on a Go `vault.Vault`
-  interface, and a stdio-RPC child process is one implementation of it. The RPC contract +
-  golden conformance suite against fixture backups define correctness; any other
-  implementation — including an in-process one — is a drop-in that must pass the same
-  suite. Which of the two qn.8 builds is open (stack D4).
+  `fetchall()` the Manifest, cap thumbnail workers (default 2, config).
+  **RSS DOES NOT RETURN ON ITS OWN AT LOCK.** In-process the allocations are in the daemon's heap,
+  and Go returns freed pages to the OS on the scavenger's schedule rather than when a session ends.
+  Session teardown therefore calls `debug.FreeOSMemory()` — a stop-the-world cost at a rare event,
+  never in a hot path and never during a backup.
+  **Whether that reaches the bar is UNMEASURED**: stack D4's threshold asks for RSS back within
+  32 MB of the pre-unlock baseline within 60 s of lock, and the spike's harness cannot measure it
+  (a process that exits has no post-lock RSS). Owed to a gate on real hardware.
+- **Swap-ready seam** (Operator decision): the core depends on a Go `vault.Vault` interface, and
+  an in-process implementation is what qn.8 built. The interface + golden conformance suite
+  against fixture backups define correctness; any other implementation — including the stdio-RPC
+  child `contracts.md` §4 specifies — is a drop-in that must pass the same suite.
+  **The suite drives the INTERFACE, so it gates both and frames neither**: an RPC implementation
+  owes its own marshalling and crash-semantics tests on top of passing it. **Which of the two to
+  build is no longer open** — stack D4's measurement chose in-process, and the reasons a sidecar
+  might still earn its place (crash isolation, an rlimitable ceiling) are untouched rather than
+  refuted.
 
 ## 8. Frontend shape
 
