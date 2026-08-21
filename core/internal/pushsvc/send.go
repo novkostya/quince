@@ -85,6 +85,19 @@ func (s *Service) Deliver(ctx context.Context, sender Sender, d notify.Decision,
 		if !row.Live() {
 			continue
 		}
+		// A SCOPED SUBSCRIPTION RECEIVES ONLY ITS OWN DEVICE (spec D7, slice 10a).
+		//
+		// 0011 stated the read this narrows: *reads are every live subscription, which is what
+		// a send does*. True while quince had one principal; a device-scoped holder would
+		// otherwise receive the household backups, their failures, and the device NAMES in the
+		// titles.
+		//
+		// AT SEND RATHER THAN AT SUBSCRIBE, which is the placement D7 asks for: a scope can
+		// change and a credential can be revoked after a subscription exists, so a filter
+		// applied once at subscribe would keep delivering under authority that has since gone.
+		if !receives(row, d) {
+			continue
+		}
 		// THE PAYLOAD IS BUILT PER SUBSCRIPTION, because `navigate` must be ABSOLUTE and each device
 		// knows this quince by its own address. It used to be built once, above the loop, with the
 		// relative path the Decision carries — and Declarative Web Push DROPS a payload that fails
@@ -267,4 +280,15 @@ func reasonOf(body io.Reader) string {
 		return ""
 	}
 	return ": " + clean
+}
+
+// receives reports whether this subscription may be sent this decision.
+//
+// A NAMED PREDICATE RATHER THAN AN INLINE CONDITION, so a test can assert the REAL rule instead of
+// restating it. A test that mirrors a condition passes just as happily when the condition is wrong,
+// which is the defect this rung has been removing from its own gates all the way down.
+//
+// AN ADMIN SUBSCRIPTION (nil scope) RECEIVES EVERYTHING, which is every subscription today.
+func receives(row store.PushSubscription, d notify.Decision) bool {
+	return row.ScopeUDID == nil || *row.ScopeUDID == d.UDID
 }

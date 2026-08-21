@@ -1,0 +1,22 @@
+-- qn.13 slice 10a (spec D7): a push subscription records WHOSE it is.
+--
+-- 0011's index comment states the read this changes: *"Reads are 'every live subscription', which is
+-- what a send does."* That was correct while quince had one principal — everyone and the admin were
+-- the same set. A device-scoped credential makes them different, and a subscription created by a
+-- scoped holder would otherwise receive every device's notifications: the household's backups, their
+-- failures, and the device names in the titles.
+--
+-- NULL MEANS THE ADMIN, the fifth such default in this rung and true of every row that exists — no
+-- subscription can have been created by a scoped principal, because none can exist yet.
+--
+-- FILTERED AT SEND, NOT AT SUBSCRIBE, which is why this column is read rather than acted on at
+-- write time. Spec D7: a scope can change and a credential can be revoked after a subscription
+-- exists, and narrowing once at subscribe would keep delivering under authority that has since gone.
+-- The socket learned the same lesson the harder way (quince#1380 review): placement decides WHERE a
+-- stale answer is applied, not whether it is stale, so the value has to be re-read per send.
+--
+-- SCOPE_UDID RATHER THAN A CREDENTIAL ID, deliberately. A subscription outlives the credential that
+-- created it — the phone keeps its endpoint across a re-enrolment — so keying on the credential
+-- would silence a device the moment its passkey was reissued. What must be stable here is WHICH
+-- DEVICE the holder is confined to, not which key proved it.
+ALTER TABLE push_subscriptions ADD COLUMN scope_udid TEXT;
