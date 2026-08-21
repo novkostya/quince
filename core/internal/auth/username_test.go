@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/novkostya/quince/core/internal/store"
@@ -98,5 +99,63 @@ func TestScopeUsernameRefusesADeviceWithNoName(t *testing.T) {
 	_, err := scopeUsername(svc.store, store.DeviceScope("DEVICE-B"))
 	if !errors.Is(err, ErrUnknownScopeDevice) {
 		t.Fatalf("got %v — a nameless device must not produce a blank or default username", err)
+	}
+}
+
+// TWO DEVICES SHARING A NAME IS REFUSED, not disambiguated and not accepted (quince#1368 review).
+//
+// It is the same collapse D2.1 removes, reached by a shorter path than the generic fallback this
+// function already refuses: two scoped credentials with one `user.name` merge into one unselectable
+// row on `(rpId, username)`, and that row grants two different devices.
+//
+// Refusing is chosen over a disambiguating suffix because a suffix invents a naming rule whose only
+// non-private input is an ordinal, and an ordinal changes when devices come and go — so the label on
+// a phone would silently start meaning a different device.
+func TestScopeUsernameRefusesTwoDevicesSharingAName(t *testing.T) {
+	svc, _ := newTestAuth(t)
+	for _, d := range []store.DeviceIdentityRow{
+		{UDID: "DEVICE-A", Name: "iPad"},
+		{UDID: "DEVICE-B", Name: "iPad"},
+	} {
+		if err := svc.store.UpsertDeviceIdentity(d); err != nil {
+			t.Fatalf("seed %s: %v", d.UDID, err)
+		}
+	}
+
+	_, err := scopeUsername(svc.store, store.DeviceScope("DEVICE-A"))
+	var ambiguous ErrAmbiguousScopeDevice
+	if !errors.As(err, &ambiguous) {
+		t.Fatalf("got %v — want ErrAmbiguousScopeDevice rather than a colliding username", err)
+	}
+	if ambiguous.Name != "iPad" {
+		t.Fatalf("the refusal does not name the name: %q", ambiguous.Name)
+	}
+	// THE REMEDY MUST BE THE ONE THAT EXISTS. quince has no rename endpoint, so a message saying
+	// "rename it here" would name a control that is not there.
+	if msg := err.Error(); !strings.Contains(msg, "on the device itself") {
+		t.Fatalf("the refusal does not say where to fix it: %s", msg)
+	}
+}
+
+// THE CONTROL. A device whose name is unique must still resolve — otherwise the check above would
+// pass against a function that refused everything, which is the failure an absence-assertion invites.
+func TestScopeUsernameAcceptsAUniqueNameBesideOthers(t *testing.T) {
+	svc, _ := newTestAuth(t)
+	for _, d := range []store.DeviceIdentityRow{
+		{UDID: "DEVICE-A", Name: "Kitchen iPad"},
+		{UDID: "DEVICE-B", Name: "Studio iPad"},
+		{UDID: "DEVICE-C", Name: ""}, // nameless rows must not count as a collision
+	} {
+		if err := svc.store.UpsertDeviceIdentity(d); err != nil {
+			t.Fatalf("seed %s: %v", d.UDID, err)
+		}
+	}
+
+	name, err := scopeUsername(svc.store, store.DeviceScope("DEVICE-A"))
+	if err != nil {
+		t.Fatalf("a uniquely named device was refused: %v", err)
+	}
+	if name != "Kitchen iPad" {
+		t.Fatalf("got %q want %q", name, "Kitchen iPad")
 	}
 }

@@ -473,12 +473,31 @@ func scopeUsername(st *store.Store, scope store.Scope) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// AMBIGUITY IS REFUSED FOR THE SAME REASON AS AN UNKNOWN DEVICE, and quince can see it
+	// coming (quince#1368 review). `device_identity.name` has no UNIQUE constraint — it is
+	// whatever the device calls itself, refreshed on Enrich — so two devices CAN share a name.
+	// Two scoped credentials would then carry the same `user.name`, and iOS collapses on
+	// `(rpId, username)`: one unselectable row granting two different devices. That is the
+	// defect D2.1 removes, reached by a shorter path than the fallback this function already
+	// refuses — and the device list is right here, so not looking would be a choice.
+	var match string
 	for _, d := range rows {
-		if d.UDID == udid && d.Name != "" {
-			return d.Name, nil
+		if d.Name == "" {
+			continue
+		}
+		if d.UDID == udid {
+			match = d.Name
 		}
 	}
-	return "", ErrUnknownScopeDevice
+	if match == "" {
+		return "", ErrUnknownScopeDevice
+	}
+	for _, d := range rows {
+		if d.UDID != udid && d.Name == match {
+			return "", ErrAmbiguousScopeDevice{Name: match}
+		}
+	}
+	return match, nil
 }
 
 // ErrUnknownScopeDevice — a credential was scoped to a device quince cannot name.
@@ -487,3 +506,24 @@ func scopeUsername(st *store.Store, scope store.Scope) (string, error) {
 // before a credential can be confined to it, and a caller meeting this has issued the QR for
 // something that is not on the Devices list.
 var ErrUnknownScopeDevice = errors.New("auth: cannot name the device this credential is scoped to")
+
+// ErrAmbiguousScopeDevice — two devices share the name this credential would be labelled with.
+//
+// A STRUCT RATHER THAN A SENTINEL, because the remedy is only actionable if the message names the
+// name. "Two devices share a name" sends the operator to look; "two devices are called `iPad`" tells
+// them what to look for.
+//
+// THE REMEDY IS ON THE DEVICE, NOT IN quince, and that is why this error carries it. quince has no
+// rename endpoint — `device_identity.name` is whatever the device calls itself, refreshed on Enrich
+// (0004) — so "rename it and retry" means renaming the iPhone or iPad in its own Settings. A message
+// that said "rename it here" would name a control that does not exist, which is the *troubleshooting
+// is actionable* rule failing in the most frustrating way available.
+type ErrAmbiguousScopeDevice struct {
+	Name string
+}
+
+func (e ErrAmbiguousScopeDevice) Error() string {
+	return fmt.Sprintf("auth: two devices are called %q, so a credential scoped to one could not be "+
+		"told from the other on your phone — rename one on the device itself "+
+		"(Settings → General → About → Name), then issue the code again", e.Name)
+}
