@@ -59,6 +59,13 @@ func TestUpgradeFromPre0014Database(t *testing.T) {
 	                       VALUES ('old-cred-aaaa', X'00', 'quince.example', 0, 'phone', ?)`, now); err != nil {
 		t.Fatal(err)
 	}
+	// A PRE-0018 PREFERENCE ROW, so the backfill has something to carry. Without one the
+	// `INSERT … SELECT` in 0018 runs against an empty table and its data path is covered
+	// nowhere, in any form (quince#1409 review, finding 3) — and this is the behaviour whose
+	// failure mode is a household member muted with nothing on screen saying why.
+	if _, err := raw.Exec(`INSERT INTO device_notification_prefs (udid, enabled) VALUES ('DEV-OLD', 0)`); err != nil {
+		t.Fatal(err)
+	}
 	_ = raw.Close()
 	t.Logf("seeded a pre-qn.13 database with %d migrations applied", applied)
 	if applied != 13 {
@@ -91,5 +98,24 @@ func TestUpgradeFromPre0014Database(t *testing.T) {
 	admin, err := st.ListAdminPasskeys()
 	if err != nil || len(admin) != 1 {
 		t.Fatalf("the upgraded credential does not count as admin: n=%d err=%v", len(admin), err)
+	}
+	// THE BACKFILL LANDED ADMIN-OWNED, NOT GLOBAL (0018, spec D7). The distinction is the whole
+	// migration: an existing mute is the ADMIN's opinion about a device, and carrying it forward
+	// as everyone's would silence a scoped holder who never asked for it.
+	adminPref, err := st.DeviceNotificationsEnabled("DEV-OLD", "")
+	if err != nil {
+		t.Fatalf("reading the backfilled admin row: %v", err)
+	}
+	if adminPref {
+		t.Fatal("the pre-0018 mute did not survive as the admin's own: got enabled=true, want false")
+	}
+	// And a principal who has no opinion about that device is unmuted by it — the control that
+	// makes the assertion above mean "admin-owned" rather than merely "still present".
+	otherPref, err := st.DeviceNotificationsEnabled("DEV-OLD", "SOMEONE")
+	if err != nil {
+		t.Fatalf("reading another principal's row: %v", err)
+	}
+	if !otherPref {
+		t.Fatal("the admin's backfilled mute silenced another principal: got enabled=false, want true")
 	}
 }
