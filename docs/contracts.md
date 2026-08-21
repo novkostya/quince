@@ -364,7 +364,7 @@ POST /api/enrol/passkey/begin?secret=<secret>   → 200 {ceremony, options}
      // disclose every admin credential id to whoever scanned the QR.
      // 429 rate_limited, THE SAME BUCKET as login and setup · 426 insecure_origin
      // 409 passkeys_unsupported_here · and the four secret refusals below.
-POST /api/enrol/passkey/finish?secret=<secret>&ceremony=<key>&name=<label>
+POST /api/enrol/passkey/finish?secret=<secret>&ceremony=<key>
                                     → 200 {state, csrf_token} + session cookie
      // ISSUES A SCOPED SESSION. AuthStatus, not 201 {passkey}: the outcome is "you are
      // signed in", and a scoped holder reaches no passkey list to manage a row in.
@@ -376,7 +376,11 @@ POST /api/enrol/passkey/finish?secret=<secret>&ceremony=<key>&name=<label>
      // from the admin's list, and neither can be an admin credential.
      // 429 rate_limited — THIS DOOR IS METERED TOO (qn.13 slice 9b-2). Both halves take the
      // secret, so a limiter on begin alone would bound nothing; an attacker uses the other one.
-     // 400 no_ceremony · 400 passkey_rejected · 422 name_required · 409 passkey_rp_mismatch
+     // NO `&name=`, AND NO 422 name_required. The stored label is DERIVED from the enrolment's
+     // scope, not supplied — a household member naming a credential the ADMIN has to identify is
+     // the wrong source of truth, and two enrolments under one client-side constant would reach
+     // the passkey list as two rows nothing distinguishes.
+     // 400 no_ceremony · 400 passkey_rejected · 409 passkey_rp_mismatch
 ```
 
 **THE FOUR SECRET REFUSALS STAY FOUR, AND THAT IS THE CONTRACT** — they reach an *unauthenticated*

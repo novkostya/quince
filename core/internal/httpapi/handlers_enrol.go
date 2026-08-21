@@ -126,17 +126,15 @@ func (d Deps) handleEnrolPasskeyFinish() http.HandlerFunc {
 			return
 		}
 		ceremony := strings.TrimSpace(r.URL.Query().Get("ceremony"))
-		name := strings.TrimSpace(r.URL.Query().Get("name"))
 		if ceremony == "" {
 			writeError(w, d.Log, http.StatusBadRequest, "bad_request", "ceremony is required")
 			return
 		}
-		if name == "" {
-			writeError(w, d.Log, http.StatusUnprocessableEntity, "name_required",
-				"give this passkey a name you will recognise later")
-			return
-		}
-		_, sess, csrf, err := d.Auth.FinishEnrolment(d.Passkeys, d.Enrolments, ceremony, name,
+		// NO name_required HERE, unlike the first-run pair. The stored label is DERIVED from the
+		// enrolment's scope (quince#1431 review) — a household member naming a credential the ADMIN
+		// has to identify is the wrong source of truth, so any `?name=` is ignored rather than
+		// validated.
+		_, sess, csrf, err := d.Auth.FinishEnrolment(d.Passkeys, d.Enrolments, ceremony,
 			auth.RPIDFromRequest(r), token, r, time.Now().UTC(), sessionCookieValue(r), d.Proxies.ClientIP(r))
 		if err != nil {
 			switch {

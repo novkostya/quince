@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { registerPasskey, webauthnAvailable } from "@/lib/webauthn";
 import { APIError } from "@/lib/api";
@@ -14,10 +14,11 @@ import { APIError } from "@/lib/api";
 // whole shape is that the durable credential is a passkey and the secret authorises exactly one
 // registration. A form here would be asking for something quince has no use for.
 //
-// THE NAME IS THE DEVICE'S, NOT THE PERSON'S. `name` labels the credential in the ADMIN's passkey
-// list, and the admin already knows which device they issued this for. Asking a household member to
-// invent a label would be asking them to name something they will never see again — and a personal
-// name is exactly what the privacy rule keeps out of stored fields.
+// THE STORED LABEL IS THE DEVICE'S, DERIVED ON THE SERVER. `FinishEnrolment` resolves it from the
+// enrolment's scope, so this page sends no name and one would be ignored if it did. Asking a
+// household member to invent a label would ask them to name something they never see again — the
+// label exists for the ADMIN's passkey list — and a personal name is exactly what the privacy rule
+// keeps out of stored fields.
 
 // THE FIVE REFUSALS THE SERVER CAN SEND, and each gets its own sentence rather than one apology.
 //
@@ -61,6 +62,7 @@ function refusalFor(err: unknown): { title: string; body: string } {
 
 export function EnrolPage() {
   const [params] = useSearchParams();
+  const navigate = useNavigate();
   const secret = params.get("secret") ?? "";
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
@@ -81,7 +83,33 @@ export function EnrolPage() {
   }
 
   // A BROWSER THAT CANNOT DO THIS SAYS SO BEFORE THE BUTTON, not after a tap that goes nowhere.
+  //
+  // AND IT SAYS WHICH OF THE TWO CAUSES IT IS. `webauthnAvailable()` is false over plain http as
+  // well, because WebAuthn is secure-context-only — so the obvious single message would tell a
+  // household member on an http address that THEIR BROWSER is the problem and to try Safari.
+  // Their browser is fine, Safari will not help, and `https://` will. That is reachable on a
+  // documented path rather than an exotic one: quince supports plain http deliberately, so a QR
+  // issued from an http address carries an http URL to every device that scans it.
+  //
+  // THE GATE IS UNCHANGED AND ONLY THE SENTENCE SPLITS. `webauthnAvailable`'s own comment argues
+  // against testing `isSecureContext` as the PREDICATE — the absence of `PublicKeyCredential` is
+  // the effect this code depends on — and that reasoning stands. This is an argument about what to
+  // SAY afterwards, not about what to branch on.
   if (!webauthnAvailable()) {
+    if (!window.isSecureContext) {
+      return (
+        <Shell title="This link needs a secure address">
+          <p>
+            Passkeys only work over <strong>https</strong>. This link opened over plain http, so no
+            browser will offer to add one.
+          </p>
+          <p className="text-fg-muted">
+            Ask whoever looks after this quince to set up https and send a new QR code — the code
+            carries the address it was made at.
+          </p>
+        </Shell>
+      );
+    }
     return (
       <Shell title="This browser cannot add a passkey">
         <p>
@@ -98,17 +126,29 @@ export function EnrolPage() {
           This device is now yours to back up. You will only see this one device — nothing else on
           this quince.
         </p>
+        {/* NOT A DEAD END. The finish call set the session cookies, so this person is signed in
+            with a scoped session — and a success screen with no way onward reads as finished when
+            it is not (quince#1431 review).
+
+            `/` RATHER THAN A DEVICE PATH, because this page does not know the udid and should not:
+            the secret carries the scope on the server, and the app routes an authenticated
+            principal to its own Home. D8 makes that Home the device page for a scoped holder; the
+            shell work that renders it is slices 7 and 11, so today this lands on whatever the
+            dashboard shows and improves when they do — rather than hard-coding a path here that
+            those slices would have to come back and change. */}
+        <Button onClick={() => navigate("/")}>Open your device</Button>
       </Shell>
     );
   }
-
   async function add() {
     setBusy(true);
     setRefusal(null);
     try {
-      // THE NAME IS NOT ASKED FOR — see the header. The server labels the credential with the
-      // device it is scoped to, and this is the fallback the admin sees if it cannot.
-      const ok = await registerPasskey("household passkey", { enrolmentSecret: secret });
+      // NO NAME IS SENT, AND THE SERVER IGNORES ONE IF IT ARRIVES. `FinishEnrolment` derives the
+      // stored label from the enrolment's scope (quince#1431 review) — this argument used to pass a
+      // constant and claim the server relabelled it, which it did not, so every enrolled credential
+      // reached the admin's passkey list under one indistinguishable string.
+      const ok = await registerPasskey("", { enrolmentSecret: secret });
       // `false` IS A DISMISSED SHEET, NOT A FAILURE. `registerPasskey` returns it for a cancelled
       // or timed-out prompt, and the person is exactly where they started — so the page stays put
       // with no red message, and the button is still there.

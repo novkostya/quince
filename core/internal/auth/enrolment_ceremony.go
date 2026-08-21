@@ -84,7 +84,26 @@ func (s *Service) BeginEnrolment(cer *PasskeyCeremonies, enr *Enrolments, rpID, 
 // correctly — its gate is `Configured()`, a boolean with nothing to guess.
 // `FinishPasskeyAssertion` IS metered, because it accepts a caller-supplied value that decides the
 // outcome. So does this.
-func (s *Service) FinishEnrolment(cer *PasskeyCeremonies, enr *Enrolments, key, name, rpID, token string,
+// THE STORED LABEL IS DERIVED, NOT SUPPLIED — there is no `name` parameter (quince#1431 review).
+//
+// It used to take one and the caller passed a constant, so every enrolled credential landed in the
+// admin's passkey list as the same string. `wire.Passkey` carries no scope, so two enrolled devices
+// produced two rows the admin could tell apart only by guessing — which is D4's *visible and
+// revocable* failing at the surface it was ruled for.
+//
+// THE HOUSEHOLD MEMBER IS THE WRONG SOURCE FOR IT, which is why this is derived rather than asked
+// for. The label exists for the ADMIN, who already knows which device they issued the code for; the
+// person holding the phone would be naming something they never see again, and a personal name is
+// what the privacy rule keeps out of stored fields.
+//
+// SO IT COMES OFF THE SCOPE, like everything else on this path. `scopeUsername` resolves the device
+// quince already knows, and taking the parameter away means no caller can put a client-controlled
+// string on a credential the admin has to identify.
+//
+// TWO DEVICES SHARING A NAME PRODUCE TWO IDENTICAL LABELS, and that is a wart rather than a defect
+// — D2.3 ruled the same collision cosmetic for `user.name` and deleted the refusal that existed for
+// it. Do not reintroduce one here.
+func (s *Service) FinishEnrolment(cer *PasskeyCeremonies, enr *Enrolments, key, rpID, token string,
 	r *http.Request, now time.Time, priorSessionID, clientIP string,
 ) (store.Passkey, store.AuthSession, string, error) {
 	if !s.limiter.allow(clientIP, s.now()) {
@@ -94,7 +113,12 @@ func (s *Service) FinishEnrolment(cer *PasskeyCeremonies, enr *Enrolments, key, 
 	if err != nil {
 		return store.Passkey{}, store.AuthSession{}, "", err
 	}
-	pk, err := FinishPasskeyRegistration(s.store, cer, key, name, rpID, r, now, store.DeviceScope(en.ScopeUDID))
+	scope := store.DeviceScope(en.ScopeUDID)
+	label, err := scopeUsername(s.store, scope)
+	if err != nil {
+		return store.Passkey{}, store.AuthSession{}, "", err
+	}
+	pk, err := FinishPasskeyRegistration(s.store, cer, key, label, rpID, r, now, scope)
 	if err != nil {
 		return store.Passkey{}, store.AuthSession{}, "", err
 	}
