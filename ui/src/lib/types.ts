@@ -133,6 +133,14 @@ export interface Op {
   error: JobError | null;
 }
 
+// Session is what POST /api/versions/{id}/unlock returns — the handle every other vault route
+// takes, and the expiry the UI counts down.
+//
+// DECLARED ONCE, and that is worth a line because it was declared twice: qn.8 slice 6 added it
+// here and quince#1394 added an identical copy with the rest of the vault types. TypeScript
+// MERGES same-named interfaces rather than rejecting them, so nothing failed — and nothing
+// would have failed until the two drifted, at which point they would have silently merged into
+// a type with the union of both field sets.
 export interface Session {
   id: string;
   version_id: string;
@@ -782,15 +790,6 @@ export interface NotificationsTestResponse {
 // a field missing here costs a rendering rather than a key zeroed on the server. They are
 // still spelled out in full, because the browser reads every one of them.
 
-// Session is what POST /api/versions/{id}/unlock returns — the handle every other vault route
-// takes, and the expiry the UI counts down.
-export interface Session {
-  id: string;
-  version_id: string;
-  // RFC3339 UTC. The session ends at this instant whether or not anybody is looking; it is a
-  // fact to display, not a timer the client owns.
-  expires_at: string;
-}
 
 export interface VaultFileEntry {
   file_id: string;
