@@ -19,7 +19,17 @@ import "github.com/novkostya/quince/core/internal/store"
 type ResetResult struct {
 	HadPassword bool // a password existed and was removed
 	Passkeys    int  // credentials removed
-	Sessions    int  // live sessions invalidated
+	// ScopedPasskeys is how many of `Passkeys` were DEVICE-SCOPED rather than the admin's own
+	// (qn.13 D9). A subset of `Passkeys`, never a second total.
+	//
+	// COUNTED BECAUSE THE RESET IS A RECOVERY ACT WITH A CONSEQUENCE FOR OTHER PEOPLE. An admin who
+	// has lost their phone runs this to get back in; what they are not otherwise told is that every
+	// household member's access to their own device went with it. D9 asks that `quince auth reset`
+	// clearing scoped credentials be confirmed at build AND said on screen, and a flat
+	// "3 passkey(s) removed" says it to nobody: the admin learns it later from a confused household
+	// member, which is *state honesty* failing at the one moment it is load-bearing.
+	ScopedPasskeys int
+	Sessions       int // live sessions invalidated
 }
 
 // Reset clears the admin password, every passkey, and every live session, returning what went.
@@ -51,11 +61,12 @@ func Reset(st *store.Store) (ResetResult, error) {
 
 	// Order matters for the failure story, not for correctness: password first, so that a failure
 	// in either step below still leaves the box unable to accept the old password.
-	n, err := st.DeleteAllPasskeys()
+	n, scoped, err := st.DeleteAllPasskeys()
 	if err != nil {
 		return out, err
 	}
 	out.Passkeys = n
+	out.ScopedPasskeys = scoped
 
 	n, err = st.DeleteAllAuthSessions()
 	if err != nil {
