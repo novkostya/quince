@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ConfigEditor } from "./ConfigEditor";
 import type { Config, StorageEntry } from "@/lib/types";
+import { testConfig } from "@/test/config";
 
 // `updateConfig` is mocked so the post-save branch is reachable. The notice this rung removes lived
 // ONLY in that branch, so a suite that never submits cannot see it — which is how the first version
@@ -68,25 +69,12 @@ function entry(over: Partial<StorageEntry> = {}): StorageEntry {
   };
 }
 
+// testConfig() rather than a local literal. This was a full hand-rolled document ending
+// `as Config`, which suppressed the completeness check and let it drift behind the type —
+// `manage_muxer`, `muxers` and `vault` were all missing, and this form is a config EDITOR, the one
+// component whose whole job is to send the document back (quince#493).
 function config(storage: StorageEntry[] | null): Config {
-  return {
-    backup: { preferred_transport: "usb", require_encryption: true },
-    storage,
-    devices: { usbmuxd_socket: "/var/run/usbmuxd", netmuxd_addr: "127.0.0.1:27015" },
-    sessions: { allow_insecure_transport: false },
-    reconcile: { interval_minutes: 360 },
-    notifications: {
-      staleness_days: 3,
-      reminder_cooldown_hours: 24,
-      overdue_days: 14,
-      backup_available: true,
-      backup_overdue: true,
-      action_required: true,
-      backup_failed: true,
-      backup_completed: false,
-    },
-    ui: { theme: "system" },
-  } as Config;
+  return testConfig({ storage });
 }
 
 function renderEditor(c: Config) {
