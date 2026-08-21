@@ -283,11 +283,6 @@ ZFS — /backups/ is the parent dataset and IS idevicebackup2's target (qn.6h D1
 └── .quince-commit-<udid>.json       ← commit journal, in the PARENT for the same reason (D3)
 ```
 
-**Pre-qn.6h snapshots are NOT browsable and are skipped with a log line.** Their content sits at
-`<snap>/latest/`, and pre-qn.5b at `<snap>/working/`; there is no dual-read fallback, ruled
-2026-08-08. An unbrowsable version that said nothing would be indistinguishable from one that was
-never taken, which is why the skip is logged rather than silent.
-
 `latest/` is a real directory on the namespace backends, never a symlink — the offsite
 contract (stack D5a): include `latest/`, exclude `working/` and `versions/` — via ANCHORED
 filter rules only (unanchored name matches would silently drop same-named dirs inside
@@ -555,20 +550,15 @@ whether `missing_medium` diverges from `unreachable`, and whether reachability c
 restart — because the ruling reads better with the argument it was taken against than as a bare
 verdict. Spec: `docs/specs/qn.6c/qn.6c.md`, story 5.
 
-**BUILT (`qn.6h`): on the `zfs` backend `idevicebackup2` writes into the CHILD DATASET ROOT in
-place — no seed, no working copy, no exchange, and no `latest/` at all. Commit is verify → `zfs
-snapshot`; the host helper lost `seed` and gained `rollback`.** Operator ruling, 2026-08-04, relayed
-on [quince#591](https://github.com/novkostya/quince/issues/591) by the architect seat — the Operator
+**`qn.6h`: on the `zfs` backend `idevicebackup2` writes into the CHILD DATASET ROOT in place — no
+seed, no working copy, no exchange, and no `latest/`. Commit is verify → `zfs snapshot`; the host
+helper has `rollback` and no `seed`.** Operator ruling, 2026-08-04, relayed on
+[quince#591](https://github.com/novkostya/quince/issues/591) by the architect seat — the Operator
 ruled it to a session directly rather than on the forge, so that comment is the citable record
-rather than a pointer to one. **The LAYOUT was refined four days later**, 2026-08-08: the ruling as
-first stated kept `latest/` as the mutable head, and `qn.6h` D1 removed it, making the dataset root
-the tree. Spec: `docs/specs/qn.6h/qn.6h.md`.
+rather than a pointer to one. Spec: `docs/specs/qn.6h/qn.6h.md`.
 
 **A VERSION'S CONTENT IS AT THE SNAPSHOT ROOT — `.zfs/snapshot/<snap>/`, with NO trailing
-component** (D7). This is the clause most likely to be got wrong, because the pre-refinement path
-`<snap>/latest/` is what canon carried until 2026-08-21 and what every snapshot taken before the
-rung actually holds. **Those old snapshots are not browsable and are skipped with a log line**;
-there is no dual-read fallback, ruled 2026-08-08.
+component** (D7).
 
 **And `browseRoot` never resolves to the live head on this backend, whatever the row holds.** In
 place, the head is the tree being written: between the marker write and the snapshot it is a
@@ -578,11 +568,10 @@ complete, so a zfs row with no snapshot yields **no browse root** and the versio
 unbrowsable with a reason — the vocabulary a `missing` artifact already uses. That refusal is a
 guard against a representable case, not a claim the case occurs.
 
-**The never-mutate-a-committed-version rule SURVIVES, literally.** A committed version is a
-`@quince-*` snapshot and copy-on-write leaves it untouched, so writing into the head cannot reach
-one. The version MODEL does not move either — markers, verify, retention, adopt and
-reconcile-from-snapshots keep their semantics. What moved is **where the content sits inside the
-snapshot**: `<snap>/latest/` became `<snap>/`.
+**The never-mutate-a-committed-version rule holds literally.** A committed version is a `@quince-*`
+snapshot and copy-on-write leaves it untouched, so writing into the head cannot reach one. The
+version MODEL is unchanged — markers, verify, retention, adopt and reconcile-from-snapshots keep
+their semantics.
 
 **The price, accepted knowingly rather than discovered later: a SECOND LIFECYCLE.** `qn.5b`'s
 one-lifecycle-across-all-backends property ended for this backend. The reflink / hardlink / copy
