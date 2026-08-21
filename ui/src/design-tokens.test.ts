@@ -45,8 +45,32 @@ const FOREIGN = [
 
 const PREFIXES = ["bg", "text", "border", "ring", "fill", "stroke", "divide", "outline", "shadow"];
 
+// THE TRAILING BOUNDARY IS `(?![\w-])`, NOT `\b`, AND ALL THREE RULES DEPEND ON IT (quince#1436).
+//
+// `-` is a non-word character, so `\b` holds in the MIDDLE of a hyphenated token: against
+// `text-primary-foreground` the alternation matches `primary`, `\b` succeeds because the next
+// character is `-`, and the gate reports `text-primary` — a class that is not in the file. Measured
+// before the fix, and it affects three of the shadcn names on its own list:
+//
+//   text-primary-foreground      -> ["text-primary"]
+//   text-destructive-foreground  -> ["text-destructive"]
+//   text-popover-foreground      -> ["text-popover"]
+//
+// The gate still FAILED, so nothing shipped because of it — but it named the wrong class, which is
+// the troubleshooting rule's own case: a diagnostic sends the reader somewhere, and this one sent
+// them looking for a class that does not exist.
+//
+// IT ALSO MATTERS ACROSS RULES, which is how it surfaced. `bg-fg-muted` is rule 3's, and rule 2
+// matched `bg-fg` inside it first — two reports for one class, one of them fictional. A lookahead
+// that refuses a following `-` or word character makes every rule stop at the whole token, so the
+// longest correct name wins wherever two rules overlap.
+const TOKEN_END = "(?![\\w-])";
+
 // RULE 1 — a name from another palette. Resolves to nothing; fails invisibly.
-const FOREIGN_PATTERN = new RegExp(`\\b(?:${PREFIXES.join("|")})-(?:${FOREIGN.join("|")})\\b`, "g");
+const FOREIGN_PATTERN = new RegExp(
+  `\\b(?:${PREFIXES.join("|")})-(?:${FOREIGN.join("|")})${TOKEN_END}`,
+  "g",
+);
 
 // RULE 2 — A LOCAL TOKEN ON THE WRONG KIND OF SURFACE, which is the case that actually shipped and
 // which rule 1 structurally CANNOT catch (quince#778 review).
@@ -62,15 +86,62 @@ const FOREIGN_PATTERN = new RegExp(`\\b(?:${PREFIXES.join("|")})-(?:${FOREIGN.jo
 const FG_ONLY = ["fg", "muted", "subtle", "accent-fg"];
 const SURFACE = ["bg", "border", "divide", "ring", "outline"];
 const MISPLACED_PATTERN = new RegExp(
-  `\\b(?:${SURFACE.join("|")})-(?:${FG_ONLY.join("|")})\\b`,
+  `\\b(?:${SURFACE.join("|")})-(?:${FG_ONLY.join("|")})${TOKEN_END}`,
   "g",
 );
 
-// `g` ON BOTH, because a first-match-per-line regex makes fixing iterative: the line that shipped
-// carried TWO violations and the first version reported one, so a reader fixes it, re-runs, and is
-// told about the next one (quince#778 review).
+// RULE 3 — A COLOUR UTILITY THAT NAMES THE CSS VARIABLE INSTEAD OF THE TAILWIND ROLE. It emits
+// NOTHING, exactly like rule 1, and rule 1 structurally CANNOT see it: `fg-muted` is not another
+// palette's name, it is OUR OWN variable one layer too deep (quince#1436).
+//
+// `index.css` maps `--color-muted: var(--fg-muted)`, so `muted` is the role and `fg-muted` is the
+// raw variable behind it. `text-muted` emits a rule; `text-fg-muted` emits nothing, so the text
+// silently inherits — no error, no warning, and nothing on screen that looks wrong enough to chase.
+//
+// THE BLIND SPOT WAS IN THE TOKEN, NOT THE PREFIX, which is worth stating because the report
+// reasonably guessed otherwise. quince#1436 measured `border-border` caught and `text-fg-muted`
+// missed and asked whether `bg-*` / `ring-*` / `fill-*` shared it. They did not: rule 1 already
+// spans every prefix. What no rule covered was a NAME that is neither foreign nor a role.
+//
+// DERIVED FROM index.css, NOT TYPED OUT, and that is the point rather than economy. This file's own
+// canary exists because a guard whose pattern has drifted from the palette is worse than none — and
+// a hand-written list of variable names is a second copy of the palette with nothing holding the two
+// together. Reading the mapping means a renamed variable updates the rule in the same edit.
+//
+// THE PRICE HAS ALREADY BEEN PAID ONCE, LOCALLY. `NotificationsInstallPage` carried `text-fg-muted`
+// in EIGHT places — every body-text block it had — and the remedy taken then was an assertion scoped
+// to that one page's rendered output. Four days later the identical class landed in `EnrolPage` and
+// nothing fired. A page-scoped guard against a project-wide shape catches the page that already had
+// the bug.
+const THEME = readFileSync(join(__dirname, "index.css"), "utf8");
+const MAPPINGS = [...THEME.matchAll(/--color-([\w-]+):\s*var\(--([\w-]+)\)/g)];
+const ROLES = new Set(MAPPINGS.map((m) => m[1]));
+
+// A raw variable is dead as a utility token whenever it is not ALSO a role. `border` is excluded
+// because rule 1 already owns it as shadcn's name: two rules matching one class would report it
+// twice, and the canary below pins `border-border` at exactly one hit.
+//
+// LONGEST FIRST, AND THIS IS NOT COSMETIC. The pattern ends in `\b`, and `-` is a word boundary, so
+// against `text-fg-muted` an alternation that offered `fg` before `fg-muted` would match `text-fg`
+// and report the wrong class. `fg` is a role today and therefore excluded, so nothing exercises it —
+// which is exactly why it is pinned here rather than left to a future palette to discover.
+const DEAD = MAPPINGS.map((m) => m[2])
+  .filter((raw) => !ROLES.has(raw) && !FOREIGN.includes(raw))
+  .sort((a, b) => b.length - a.length);
+const DEAD_PATTERN = new RegExp(
+  `\\b(?:${PREFIXES.join("|")})-(?:${DEAD.join("|")})${TOKEN_END}`,
+  "g",
+);
+
+// `g` ON ALL THREE, because a first-match-per-line regex makes fixing iterative: the line that
+// shipped carried TWO violations and the first version reported one, so a reader fixes it, re-runs,
+// and is told about the next one (quince#778 review).
 function violations(line: string): string[] {
-  return [...line.matchAll(FOREIGN_PATTERN), ...line.matchAll(MISPLACED_PATTERN)].map((m) => m[0]);
+  return [
+    ...line.matchAll(FOREIGN_PATTERN),
+    ...line.matchAll(MISPLACED_PATTERN),
+    ...line.matchAll(DEAD_PATTERN),
+  ].map((m) => m[0]);
 }
 
 function sources(dir: string): string[] {
@@ -101,11 +172,13 @@ describe("design tokens", () => {
     }
     expect(
       offenders,
-      "either the name is from another palette and Tailwind emitted NOTHING for it, or it is one of " +
-        "ours used on the wrong surface — `fg`, `muted`, `subtle` and `accent-fg` are FOREGROUND " +
-        "colours, so `bg-muted` fills a box with the muted TEXT colour rather than failing. The " +
-        "palette is in ui/src/index.css: bg, card, elevated, line, fg, muted, subtle, accent, " +
-        "accent-fg, accent-soft, ok, warn, danger.",
+      "one of three things: the name is from another palette and Tailwind emitted NOTHING for it; " +
+        "or it is one of ours used on the wrong surface — `fg`, `muted`, `subtle` and `accent-fg` " +
+        "are FOREGROUND colours, so `bg-muted` fills a box with the muted TEXT colour rather than " +
+        "failing; or it names the CSS VARIABLE instead of the role, like `text-fg-muted` for " +
+        "`text-muted`, which also emits nothing. The palette is in ui/src/index.css: bg, card, " +
+        "elevated, line, fg, muted, subtle, placeholder, accent, accent-fg, accent-soft, ok, warn, " +
+        "danger — those are the ROLES, and the `--fg-*` / `--bg-*` variables behind them are not.",
     ).toEqual([]);
   });
 
@@ -125,5 +198,67 @@ describe("design tokens", () => {
     // The house surface, and the correct use of a foreground token, stay clean.
     expect(violations('className="rounded-card border border-line bg-card text-muted"')).toEqual([]);
     expect(violations('className="text-fg text-subtle text-accent-fg"')).toEqual([]);
+  });
+
+  // RULE 3's OWN CANARY (quince#1436). `text-fg-muted` reached `EnrolPage` with a green ladder, and
+  // the reason it is worth its own block is that the class it must catch is INVISIBLE: it emits no
+  // rule, so nothing on screen looks broken enough to chase.
+  it("catches a class that names the CSS variable instead of the role", () => {
+    // Measured against the built stylesheet before this rule existed: `text-muted` emits 1 rule,
+    // `text-fg-muted` emits 0, and the gate reported nothing.
+    expect(violations('className="text-fg-muted"')).toEqual(["text-fg-muted"]);
+    expect(violations('className="text-fg-subtle"')).toEqual(["text-fg-subtle"]);
+
+    // NOT PREFIX-SPECIFIC, which is the question quince#1436 left open. Rule 1 already spanned every
+    // prefix; what was missing was the NAME, so every prefix inherits the fix at once.
+    expect(violations('className="bg-fg-muted"')).toEqual(["bg-fg-muted"]);
+    expect(violations('className="ring-fg-muted"')).toEqual(["ring-fg-muted"]);
+    expect(violations('className="fill-fg-muted"')).toEqual(["fill-fg-muted"]);
+
+    // The ROLE spellings these are mistakes FOR must stay clean, or the rule is unusable.
+    expect(violations('className="text-muted text-subtle text-placeholder"')).toEqual([]);
+
+    // EXACTLY ONE HIT FOR `border-border`, pinned above and re-pinned here for a different reason:
+    // `border` is a raw variable AND a foreign name, so without the FOREIGN exclusion in `DEAD` two
+    // rules would match it and the report would double every occurrence.
+    expect(violations('className="border-border"')).toHaveLength(1);
+  });
+
+
+  // THE BOUNDARY, and it is a REGRESSION canary rather than a new rule (quince#1436). Each of these
+  // was reported as the truncated class before `TOKEN_END` replaced the trailing `\b`. The gate
+  // failed either way; what was wrong was the name it printed.
+  it("names the whole token, not a prefix of it", () => {
+    expect(violations('className="text-primary-foreground"')).toEqual(["text-primary-foreground"]);
+    expect(violations('className="text-destructive-foreground"')).toEqual([
+      "text-destructive-foreground",
+    ]);
+    expect(violations('className="text-popover-foreground"')).toEqual(["text-popover-foreground"]);
+
+    // ACROSS rules, which is how this surfaced: rule 2 saw `bg-fg` inside rule 3's `bg-fg-muted`,
+    // so one class produced two reports and one of them named nothing in the file.
+    expect(violations('className="bg-fg-muted"')).toEqual(["bg-fg-muted"]);
+
+    // The short spellings these truncate TO are real violations in their own right and must still
+    // be caught — the lookahead must not have turned the rules off.
+    expect(violations('className="bg-fg"')).toEqual(["bg-fg"]);
+    expect(violations('className="text-primary"')).toEqual(["text-primary"]);
+
+    // A hyphenated name that is CORRECT stays clean, which is the other direction.
+    expect(violations('className="bg-accent-soft text-accent-fg"')).toEqual([]);
+  });
+
+  // THE DERIVATION IS A CONTROL, NOT A CONVENIENCE — a parse that silently matched nothing would
+  // leave rule 3 vacuous and every one of the assertions above passing for the wrong reason. This is
+  // the one assertion that fails when index.css moves, is renamed, or changes its mapping syntax.
+  it("derives the dead-token list from the stylesheet, and it is not empty", () => {
+    expect(MAPPINGS.length).toBeGreaterThan(10);
+    expect([...ROLES]).toContain("muted");
+    expect(DEAD).toContain("fg-muted");
+    expect(DEAD).toContain("fg-subtle");
+    // A role is never dead: `muted` is what the correct class says.
+    expect(DEAD).not.toContain("muted");
+    // Rule 1 owns `border`; see the exclusion in DEAD.
+    expect(DEAD).not.toContain("border");
   });
 });
