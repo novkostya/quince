@@ -211,7 +211,11 @@ func NewRouter(deps Deps) http.Handler {
 	if deps.PasswordAdmin == nil {
 		deps.PasswordAdmin = UnavailablePasswordAdmin{}
 	}
-	apiMux := http.NewServeMux()
+	// EVERY ROUTE PASSES THROUGH THE SCOPE DECISION, and none can be registered without one:
+	// `scopedMux` records each pattern and `assertRoutesClassified` panics at construction on
+	// any that `routeScope` does not name (qn.13 D3/D8). The registrations below are unchanged.
+	rawAPIMux := http.NewServeMux()
+	apiMux := &scopedMux{mux: rawAPIMux, deps: deps}
 	apiMux.HandleFunc("GET /api/health", deps.handleHealth())
 	apiMux.HandleFunc("GET /api/auth/status", deps.handleAuthStatus())
 	apiMux.HandleFunc("GET /api/onboarding/https", deps.handleOnboardingHTTPS())
@@ -342,7 +346,8 @@ func NewRouter(deps Deps) http.Handler {
 	// Setup mode is a fact about a configured-but-unfinished install, and it is the operator's to
 	// see — leaking it to anyone who can reach the port would say "this quince is not set up yet",
 	// which is precisely what a stranger should not learn.
-	apiHandler := chain(apiMux, bodyLimit, deps.authGuard, deps.csrfGuard, deps.setupGuard)
+	assertRoutesClassified(apiMux.patterns)
+	apiHandler := chain(rawAPIMux, bodyLimit, deps.authGuard, deps.csrfGuard, deps.setupGuard)
 
 	wsHandler := ws.Handler(deps.Bus,
 		// THE SESSION IS NO LONGER DISCARDED HERE EITHER. This closure was
