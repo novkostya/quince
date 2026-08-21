@@ -2140,14 +2140,20 @@ GET    /api/sessions/{id}/browse?domain&prefix&cursor&limit
 GET    /api/sessions/{id}/file/{file_id}                → streamed decrypted content
 ```
 
-**Implemented at qn.8. The status mapping, because two of these are not the obvious code:**
+**Implemented at qn.8. The status mapping — and the table is TOTAL over the codes this surface can
+answer with, deliberately: a code with no row here answers 500, which reports a failure that did not
+happen. Two of them did exactly that for a rung (quince#1375), so `core/internal/wire` carries the
+vocabulary as one list and a test asserts the mapper covers it. The last two rows are produced above
+the seam and so are not in §4's RPC set — see §4.**
 
-| §4 code | HTTP | why |
+| code | HTTP | why |
 | --- | --- | --- |
 | `bad_password` | **403**, not 401 | the caller IS authenticated — every route here is behind `authGuard`. What failed is the **backup's** password, a different credential, and a 401 invites a client to re-run the login flow for the wrong reason |
 | `locked` | **409**, not 404 | the session id may be perfectly real and simply expired; that is a conflict with the current state rather than a missing thing |
 | `not_found`, `not_a_file` | 404 | the status cannot distinguish them, so **the body must** — see §4 |
 | `corrupt_manifest`, `unsupported_ios` | 422 | the request is well-formed and the artifact is not |
+| `busy` | **409**, not 500 | the session is real and a file stream is open against it; the registry holds it until the reader closes. The caller retries when the download finishes — a remedy a 500 would deny them |
+| `unsupported_version` | 422 | the version is a class this build cannot open, answered before any password is checked |
 | `unavailable` | 503 | no vault is wired (`--demo`, or no storage subsystem) |
 | `io` | 500 | something below failed and quince will not guess what |
 
@@ -3004,6 +3010,21 @@ frozen five turned out not to cover what it can answer:
   caller bug; over the RPC it is a real ordering condition on the wire, and a seam that cannot
   express it would make the RPC implementation lie. Over HTTP it is **`409`, not `404`**: the session
   id may be perfectly real and simply expired.
+
+**TWO CODES LIVE ABOVE THE SEAM AND ARE NOT IN THE SET ABOVE.** The vault process answers the RPC
+taxonomy; the join between it and the REST surface (`vaultsvc`) can fail in two ways the vault itself
+cannot name, and both reach a client:
+
+- **`busy`** — the session exists and a file stream is open against it, so the registry holds it. The
+  seam cannot report this because it is a property of quince's session registry rather than of the
+  backup. Distinct from `locked` in the remedy, which is what makes it its own code: `busy` means
+  wait, `locked` means unlock again.
+- **`unsupported_version`** — the version is a class this build cannot open, answered before any
+  password is checked so it is not a credential failure.
+
+Both are in `core/internal/wire`'s vocabulary with the §4 codes, and §1's status table is asserted
+total over that one list. They shipped for a rung with no status mapping at all, answering 500 for
+conditions nothing had failed on (quince#1375).
 
 **`unsupported_ios` is UNUSED and deliberately untouched.** The failure it was written for is a
 schema the adapter cannot read, and `ios-backup-parser` reports that as a schema **fingerprint**

@@ -457,17 +457,17 @@ type UnavailableVaultBrowse struct{}
 const vaultUnavailable = "no vault is wired (running --demo, or no storage subsystem is configured)"
 
 func (UnavailableVaultBrowse) Unlock(string, string) (wire.Session, string, string) {
-	return wire.Session{}, "unavailable", vaultUnavailable
+	return wire.Session{}, wire.VaultCodeUnavailable, vaultUnavailable
 }
 
 func (UnavailableVaultBrowse) Lock(string) (string, string) {
-	return "unavailable", vaultUnavailable
+	return wire.VaultCodeUnavailable, vaultUnavailable
 }
 
 func (UnavailableVaultBrowse) Browse(string, wire.BrowseQuery) (wire.BrowsePage, string, string) {
-	return wire.BrowsePage{}, "unavailable", vaultUnavailable
+	return wire.BrowsePage{}, wire.VaultCodeUnavailable, vaultUnavailable
 }
 
 func (UnavailableVaultBrowse) OpenFile(string, string) (io.ReadCloser, wire.FileEntry, string, string) {
-	return nil, wire.FileEntry{}, "unavailable", vaultUnavailable
+	return nil, wire.FileEntry{}, wire.VaultCodeUnavailable, vaultUnavailable
 }
