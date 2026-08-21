@@ -148,7 +148,7 @@ func TestFinishEnrolmentRereadsTheSecretAndRefusesARevokedOne(t *testing.T) {
 		t.Fatalf("Revoke: %v", err)
 	}
 
-	_, _, _, err = svc.FinishEnrolment(cer, enr, key, "phone", rpHome, tok, nil, time.Now().UTC(), "", "10.0.0.2")
+	_, _, _, err = svc.FinishEnrolment(cer, enr, key, rpHome, tok, nil, time.Now().UTC(), "", "10.0.0.2")
 	if !errors.Is(err, ErrEnrolmentRevoked) {
 		t.Fatalf("got %v, want ErrEnrolmentRevoked", err)
 	}
@@ -193,7 +193,7 @@ func TestFinishEnrolmentIsRateLimited(t *testing.T) {
 
 	// THE CONTROL: one call from a fresh address is NOT rate-limited. It fails for a ceremony
 	// reason instead, which is what proves the limiter is not simply refusing everything.
-	_, _, _, err := svc.FinishEnrolment(NewPasskeyCeremonies(), enr, "no-such-ceremony", "phone",
+	_, _, _, err := svc.FinishEnrolment(NewPasskeyCeremonies(), enr, "no-such-ceremony",
 		rpHome, tok, nil, time.Now().UTC(), "", "10.0.0.20")
 	if errors.Is(err, ErrRateLimited) {
 		t.Fatalf("control: the first call from a fresh address was rate-limited")
@@ -201,7 +201,7 @@ func TestFinishEnrolmentIsRateLimited(t *testing.T) {
 
 	var lastErr error
 	for range 10 {
-		_, _, _, lastErr = svc.FinishEnrolment(NewPasskeyCeremonies(), enr, "no-such-ceremony", "phone",
+		_, _, _, lastErr = svc.FinishEnrolment(NewPasskeyCeremonies(), enr, "no-such-ceremony",
 			rpHome, tok, nil, time.Now().UTC(), "", "10.0.0.21")
 	}
 	if !errors.Is(lastErr, ErrRateLimited) {

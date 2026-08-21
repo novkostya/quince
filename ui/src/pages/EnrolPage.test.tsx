@@ -27,6 +27,7 @@ afterEach(() => {
 // The page reads `webauthnAvailable`, so every test that wants the button has to stage a browser
 // that has passkeys — otherwise it renders the unsupported panel and asserts nothing.
 function withPasskeys() {
+  vi.stubGlobal("isSecureContext", true);
   vi.spyOn(webauthn, "webauthnAvailable").mockReturnValue(true);
 }
 
@@ -147,4 +148,58 @@ it("passes the secret from the URL to the ceremony", async () => {
   fireEvent.click(screen.getByRole("button", { name: /add a passkey/i }));
   await waitFor(() => expect(reg).toHaveBeenCalled());
   expect(reg.mock.calls[0][1]).toMatchObject({ enrolmentSecret: "SECRET-FROM-THE-QR" });
+});
+
+// THE HTTP CASE IS NOT A BROWSER PROBLEM (quince#1431 review).
+//
+// `webauthnAvailable()` is false over plain http too, because WebAuthn is secure-context-only — so
+// one message for both told a household member on an http address that THEIR browser was at fault
+// and to try Safari. Their browser is fine; Safari will not help; https will. quince supports plain
+// http deliberately, so this is the whole pre-TLS population rather than an edge case.
+describe("an unavailable authenticator says WHICH cause it is", () => {
+  it("plain http names https and never blames the browser", () => {
+    vi.spyOn(webauthn, "webauthnAvailable").mockReturnValue(false);
+    vi.stubGlobal("isSecureContext", false);
+    renderAt("?secret=S1");
+
+    expect(screen.getByText(/secure address/i)).toBeTruthy();
+    // Named more than once (the emphasis and the remedy), so this counts rather than assuming one.
+    expect(screen.getAllByText(/https/i).length).toBeGreaterThan(0);
+    // THE ASSERTION THAT MATTERS: the advice that would waste their time is absent.
+    expect(screen.queryByText(/Safari/i)).toBeNull();
+    expect(screen.queryByText(/this browser cannot/i)).toBeNull();
+  });
+
+  it("a secure context that still lacks passkeys does blame the browser, which is then true", () => {
+    vi.spyOn(webauthn, "webauthnAvailable").mockReturnValue(false);
+    vi.stubGlobal("isSecureContext", true);
+    renderAt("?secret=S1");
+
+    expect(screen.getByText(/this browser cannot add a passkey/i)).toBeTruthy();
+    expect(screen.queryByText(/secure address/i)).toBeNull();
+  });
+});
+
+// THE SUCCESS STATE IS NOT A DEAD END. The finish call sets the session cookies, so this person is
+// signed in — and a screen with no way onward reads as finished when it is not.
+it("offers a way onward after enrolling", async () => {
+  withPasskeys();
+  vi.spyOn(webauthn, "registerPasskey").mockResolvedValue(true);
+  renderAt("?secret=S1");
+
+  fireEvent.click(screen.getByRole("button", { name: /add a passkey/i }));
+  await screen.findByText(/you are set up/i);
+  expect(screen.getByRole("button", { name: /open your device/i })).toBeTruthy();
+});
+
+// THE PAGE SENDS NO NAME. The stored label is derived from the scope on the server, so a
+// client-supplied one would be a household member naming a credential the ADMIN has to identify.
+it("sends no credential name", async () => {
+  withPasskeys();
+  const reg = vi.spyOn(webauthn, "registerPasskey").mockResolvedValue(true);
+  renderAt("?secret=S1");
+
+  fireEvent.click(screen.getByRole("button", { name: /add a passkey/i }));
+  await waitFor(() => expect(reg).toHaveBeenCalled());
+  expect(reg.mock.calls[0][0]).toBe("");
 });
