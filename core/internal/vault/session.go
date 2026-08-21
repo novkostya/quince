@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -156,6 +157,12 @@ func (r *Registry) Unlock(
 
 // With runs fn against a session's Vault, refusing rather than queueing if one is already
 // in flight, and treating an expired session exactly as a locked one.
+//
+// FOR BOUNDED OPERATIONS ONLY — ONE THAT COMPLETES BEFORE fn RETURNS. The busy lock is
+// released when fn returns, so anything still running after that is running unprotected:
+// teardown may then Close the Vault and wipe the scratch tree underneath it. A STREAM IS
+// NOT BOUNDED, which is what OpenStream is for. Do not reach for With and hand the reader
+// out of fn; that shape compiles and tears (quince#1365 review).
 //
 // THE BUSY LOCK IS TAKEN UNDER THE REGISTRY LOCK, and that is a correctness requirement
 // rather than convenience: releasing the registry lock first would leave a window in which
@@ -316,4 +323,77 @@ func TTLFromMinutes(minutes int) time.Duration {
 		return DefaultSessionTTL
 	}
 	return time.Duration(minutes) * time.Minute
+}
+
+// OpenStream opens one file for reading and holds the session BUSY until the returned
+// reader is Closed.
+//
+// THIS EXISTS BECAUSE `With` CANNOT EXPRESS A STREAM. `Open` returns immediately and the
+// decrypt continues afterwards, so a caller that takes the reader out of a `With` block
+// leaves it running with the busy lock already released — and teardown then Closes the
+// Vault and wipes the scratch tree while bytes are still moving. That was a REAL hazard in
+// the natural HTTP shape (hand the reader to the response and return), and it was
+// conditional on an obligation stated nowhere (quince#1365 review).
+//
+// SO THE GUARANTEE IS MADE UNCONDITIONAL RATHER THAN DOCUMENTED. The lock's lifetime is the
+// STREAM's lifetime, not the call's, because that is what the stream actually needs. A
+// caller cannot get it wrong by writing the obvious thing.
+//
+// THE COST, NAMED: a reader that is never Closed holds the session busy forever, and
+// teardown blocks on exactly that lock — so a leaked reader is a session that cannot be
+// locked. That is deliberate and it is the better failure: it is visible (the session stays
+// listed, `lock` does not return), where the alternative is a silent torn read of somebody's
+// backup. Every caller in this repository closes with `defer`, and the HTTP handler does it
+// before it writes a byte.
+//
+// CANCELLATION IS Close's JOB, NOT ctx's. The context bounds the OPENING of the file; the
+// decrypt goroutine behind the reader ends when the file ends or the pipe is closed.
+// Cancelling ctx after this returns does not stop it — close the reader.
+func (r *Registry) OpenStream(ctx context.Context, sessionID, fileID string) (io.ReadCloser, FileEntry, error) {
+	r.mu.Lock()
+	e, ok := r.sessions[sessionID]
+	if !ok {
+		r.mu.Unlock()
+		return nil, FileEntry{}, ErrNoSession
+	}
+	if !e.session.ExpiresAt.After(r.now()) {
+		r.mu.Unlock()
+		_ = r.Lock(sessionID)
+		return nil, FileEntry{}, ErrNoSession
+	}
+	if !e.busy.TryLock() {
+		r.mu.Unlock()
+		return nil, FileEntry{}, ErrSessionBusy
+	}
+	r.mu.Unlock()
+
+	// From here every path must either hand the lock to the reader or release it, or the
+	// session is wedged. Hence the explicit unlocks rather than a defer.
+	entry, err := e.vault.Stat(ctx, fileID)
+	if err != nil {
+		e.busy.Unlock()
+		return nil, FileEntry{}, err
+	}
+	rc, err := e.vault.Open(ctx, fileID)
+	if err != nil {
+		e.busy.Unlock()
+		return nil, FileEntry{}, err
+	}
+	return &streamHold{ReadCloser: rc, release: e.busy.Unlock}, entry, nil
+}
+
+// streamHold releases the session's busy lock when the stream is Closed, exactly once.
+type streamHold struct {
+	io.ReadCloser
+	release func()
+	once    sync.Once
+}
+
+func (s *streamHold) Close() error {
+	err := s.ReadCloser.Close()
+	// ONCE, because a double Close is ordinary in HTTP handling — a `defer rc.Close()` plus
+	// an explicit one on an error path — and releasing a mutex twice panics. The reader's
+	// own Close is idempotent by the io.Closer convention; the release must be made so.
+	s.once.Do(s.release)
+	return err
 }
