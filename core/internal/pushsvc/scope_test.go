@@ -1,8 +1,12 @@
 package pushsvc
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -199,5 +203,72 @@ func TestTheMuteCoversEveryKind(t *testing.T) {
 				t.Fatalf("kind %q survived the mute — the subject axis must cover every kind", kind)
 			}
 		})
+	}
+}
+
+// failingPrefs is the real Sender with ONE read broken — the preference the send loop consults.
+//
+// A WRAPPER RATHER THAN A FULL STUB, so everything else on the path is the real thing and the test
+// is about the one failure it names.
+type failingPrefs struct {
+	Sender
+	err error
+}
+
+func (f failingPrefs) DeviceNotificationsEnabled(string, string) (bool, error) {
+	return false, f.err
+}
+
+// THE READ FAILURE SENDS, AND REPORTS ONE SUBSCRIPTION — not two (quince#1409 review, blocking).
+//
+// The first fix for the swallowed error appended a `Result` carrying it. `Result` is a
+// PER-SUBSCRIPTION record and both `deliver.go` and `toWire` count them, so a row that then
+// delivered produced two: `DeliverDecision` reported "1 of 2 subscriptions did not receive this
+// notification" about one subscription that received it, and Settings rendered the same device
+// twice, once `error` and once `sent`. Both numbers false, in the subsystem whose whole job is to
+// be honest about whether a notification arrived.
+//
+// So the degraded mode is LOGGED and the Result set describes only what happened to subscriptions.
+func TestAnUnreadablePreferenceSendsAndReportsOneSubscription(t *testing.T) {
+	staged := &stagedPush{status: http.StatusCreated}
+	srv := staged.server(t)
+	s, raw := senderWith(t, srv.URL+"/push/token")
+	s = s.WithHTTPClient(srv.Client())
+	// The logger is captured rather than left at slog.Default(), so the degraded mode is asserted
+	// rather than merely not-crashing — and so the suite does not print a warning as noise.
+	var logged bytes.Buffer
+	s = s.WithLogger(slog.New(slog.NewTextHandler(&logged, nil)))
+
+	// THE CONTROL: with the read working, one Result and a delivery.
+	before, err := s.Deliver(context.Background(), raw, decision(), "mailto:ops@example.com")
+	if err != nil {
+		t.Fatalf("control send: %v", err)
+	}
+	if len(before) != 1 || !before[0].Sent {
+		t.Fatalf("control: %d result(s); want 1 that was sent", len(before))
+	}
+
+	staged.got = nil
+	broken := failingPrefs{Sender: raw, err: errors.New("database is locked")}
+
+	got, err := s.Deliver(context.Background(), broken, decision(), "mailto:ops@example.com")
+	if err != nil {
+		t.Fatalf("send with an unreadable preference: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("%d Result(s) for 1 subscription — deliver.go counts these, so a second one is "+
+			"reported as a subscription that did not receive the notification", len(got))
+	}
+	if !got[0].Sent || got[0].Err != nil {
+		t.Fatalf("Result = sent:%v err:%v; want sent and no error — the read failed, the send did not",
+			got[0].Sent, got[0].Err)
+	}
+	if staged.got == nil {
+		t.Fatal("nothing was delivered — a read failure must SEND, not silence")
+	}
+	// AND IT IS NOT SILENT. This is the half the original finding was about; the Result was the
+	// wrong carrier, not the wrong intent.
+	if !strings.Contains(logged.String(), "preference unreadable") {
+		t.Fatalf("the degraded mode was not logged; got %q", logged.String())
 	}
 }

@@ -126,16 +126,17 @@ func (s *Service) Deliver(ctx context.Context, sender Sender, d notify.Decision,
 		on, prefErr := sender.DeviceNotificationsEnabled(d.UDID, owner)
 		switch {
 		case prefErr != nil:
-			// SENT, AND SAID SO. Sending is the right call — see above — but a degraded mode
-			// that nothing records is the silent fallback the hard rules forbid, and this one
-			// makes quince ignore a user instruction. `pushsvc` has no logger, so it uses the
-			// carrier this function already has; `live.go` logs the sibling read for the same
-			// reason and says as much at the code.
+			// SENT, AND LOGGED — not recorded as a Result. Sending is the right call (see above),
+			// and the degraded mode must be visible, but a `Result` is a PER-SUBSCRIPTION record
+			// that `deliver.go` and `toWire` both count. Appending one here for a row that then
+			// delivers made `DeliverDecision` report "1 of 2 subscriptions did not receive this
+			// notification" about one subscription that did — both numbers false, in the subsystem
+			// whose job is to be honest about whether a notification arrived (quince#1409 review).
 			//
-			// A Result WITH AN ERROR AND A DELIVERY BOTH, because the send still happens: the
-			// error names what could not be consulted, not a failure to deliver.
-			out = append(out, Result{Label: row.Label, Err: fmt.Errorf(
-				"device notification preference unreadable for %s; notifying anyway: %w", d.UDID, prefErr)})
+			// `live.go:232` logs the same read for the same reason, and its comment ends "It is
+			// logged rather than swallowed."
+			s.logger().Warn("push: device notification preference unreadable; notifying anyway",
+				"udid", d.UDID, "owner", owner, "error", prefErr)
 		case !on:
 			continue
 		}

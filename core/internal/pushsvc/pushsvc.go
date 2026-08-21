@@ -8,6 +8,7 @@ package pushsvc
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -39,6 +40,18 @@ type IDFunc func() string
 
 // Service owns the VAPID key's lifecycle and the subscription list.
 type Service struct {
+	// log surfaces degraded modes that are not delivery outcomes. NIL MEANS slog.Default() and
+	// deliberately NOT a discard handler: the one thing this field exists for is a preference read
+	// that failed, and defaulting to silence would reintroduce exactly the swallowed error it was
+	// added to fix (quince#1409 review).
+	//
+	// A LOGGER RATHER THAN A `Result`, because a Result is a per-subscription record and
+	// `deliver.go` counts them: appending a second one for a row that was delivered made
+	// `DeliverDecision` report "1 of 2 subscriptions did not receive this notification" for one
+	// subscription that did receive it. Both numbers false, in the subsystem whose whole job is to
+	// be honest about whether a notification arrived — worse than the silence it replaced, because
+	// silence asserted nothing. `live.go:232` logs the same read for the same reason.
+	log *slog.Logger
 	// http is the client deliveries use. Nil means http.DefaultClient; a test injects one so the
 	// send path can be driven against an httptest server without reaching the network.
 	http  *http.Client
@@ -194,3 +207,18 @@ func (s *Service) Subscribe(endpoint, p256dh, auth, label, origin string) (strin
 
 // Unsubscribe removes one by id, reporting whether a row went.
 func (s *Service) Unsubscribe(id string) (bool, error) { return s.store.DeletePushSubscription(id) }
+
+// WithLogger points this service's degraded-mode reporting at a logger.
+//
+// SAME BUILDER SHAPE AS WithHTTPClient, but not for the same reason: that one exists so tests can
+// avoid the network, this one exists so the daemon's logger reaches a path that must not be silent.
+func (s *Service) WithLogger(l *slog.Logger) *Service { s.log = l; return s }
+
+// logger is nil-safe. See the field's comment for why the default is `slog.Default()` and not a
+// discard handler.
+func (s *Service) logger() *slog.Logger {
+	if s.log == nil {
+		return slog.Default()
+	}
+	return s.log
+}
