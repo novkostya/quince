@@ -6,8 +6,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PasswordForm } from "@/features/auth/PasswordForm";
 import { PasswordControls } from "@/features/settings/PasswordControls";
 import { EncryptionDialog } from "@/features/devices/EncryptionDialog";
+import { UnlockDialog } from "@/features/vault/UnlockDialog";
 import { api } from "@/lib/api";
 import { useOpsStore } from "@/stores/ops";
+import type { Version } from "@/lib/types";
 
 // THE THREE PASSWORD SURFACES, ASSERTED TOGETHER — quince#819's follow-up comment, which flagged
 // this as *"worth its own issue if anyone wants it"* and left it unfiled.
@@ -117,6 +119,32 @@ const surfaces: Surface[] = [
       fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "new-pw" } });
     },
   },
+  {
+    // THE FOURTH SURFACE, AND IT SHARES A CREDENTIAL WITH THE THIRD. The backup password is
+    // SET in EncryptionDialog and TYPED here, so both anchor on `deviceName || udid` — the
+    // same value, deliberately. `anchorValue` is identical to the surface above for that
+    // reason, and the assertion below that they agree is the point rather than a coincidence.
+    name: "unlock a backup — features/vault/UnlockDialog",
+    anchorValue: "family-iphone",
+    anchorLabel: "Device",
+    mount: () => {
+      const post = vi.fn().mockResolvedValue({ id: "S1", version_id: "01V", expires_at: "" });
+      vi.spyOn(api, "post").mockImplementation(post);
+      render(
+        <UnlockDialog
+          version={{ id: "01V", udid: "DEV-1", encrypted: true } as Version}
+          deviceName="family-iphone"
+          open
+          onOpenChange={() => {}}
+          onUnlocked={() => {}}
+        />,
+      );
+      return { handler: post };
+    },
+    fill: () => {
+      fireEvent.change(screen.getByLabelText("Backup password"), { target: { value: "backup-pw" } });
+    },
+  },
 ];
 
 describe.each(surfaces)("$name", (surface) => {
@@ -182,4 +210,34 @@ describe.each(surfaces)("$name", (surface) => {
     expect(anchor).not.toBeDisabled();
     expect(anchor).toHaveAttribute("tabindex", "-1");
   });
+});
+
+// THE TWO BACKUP-PASSWORD SURFACES MUST ANCHOR ON THE SAME VALUE, and this is the dimension
+// the per-surface checks above cannot see.
+//
+// Those assert the SHAPE of an anchor — present, labelled, `autocomplete="username"`, not
+// hidden. A fourth surface satisfies all of that while anchoring on something else entirely,
+// and the result is silent: the browser files saved passwords under (origin, username), so two
+// anchors mean two entries for one secret. Encryption keeps working. Unlock keeps working.
+// Every test here stays green. The password the user saved when they turned encryption on is
+// simply never offered on the screen that asks for it, with no error and nothing to bisect.
+//
+// That is one level above the drift this file was written for — `PasswordControls` moving
+// alone to `aria-hidden` — and it is the same lesson: the property is "these agree", so it has
+// to be asserted somewhere that fails when one of them stops.
+it("anchors both backup-password surfaces on the same credential", () => {
+  const backupSurfaces = surfaces.filter((s) => s.anchorLabel === "Device");
+  expect(
+    backupSurfaces.length,
+    "expected the encryption dialog and the unlock dialog, both anchored on the device",
+  ).toBe(2);
+
+  const [first, ...rest] = backupSurfaces;
+  for (const s of rest) {
+    expect(
+      s.anchorValue,
+      `${s.name} anchors on ${s.anchorValue} while ${first.name} anchors on ${first.anchorValue}; ` +
+        "the browser would file two saved passwords for one backup password",
+    ).toBe(first.anchorValue);
+  }
 });

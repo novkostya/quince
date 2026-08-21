@@ -775,3 +775,45 @@ export interface PushDeliveryResult {
 export interface NotificationsTestResponse {
   results: PushDeliveryResult[];
 }
+
+// The vault surface (qn.8, contracts §1's four unlocked-session routes and §2's objects).
+//
+// SEPARATE FROM `Config`'s full-document rule: these are RESPONSE shapes, never sent back, so
+// a field missing here costs a rendering rather than a key zeroed on the server. They are
+// still spelled out in full, because the browser reads every one of them.
+
+// Session is what POST /api/versions/{id}/unlock returns — the handle every other vault route
+// takes, and the expiry the UI counts down.
+export interface Session {
+  id: string;
+  version_id: string;
+  // RFC3339 UTC. The session ends at this instant whether or not anybody is looking; it is a
+  // fact to display, not a timer the client owns.
+  expires_at: string;
+}
+
+export interface VaultFileEntry {
+  file_id: string;
+  domain: string;
+  relative_path: string;
+  kind: "file" | "dir" | "symlink";
+  size: number;
+  // RFC3339 UTC, or EMPTY when the record carries no LastModified. Absent is ordinary rather
+  // than corrupt — the field is optional in the backup format — so an empty string must not
+  // render as 1 January 1970.
+  mtime: string;
+  // PRESENT ONLY WHEN TRUE, and its meaning is exact: the backup holds fewer bytes for this
+  // file than its own index records, so a download delivers what exists and no retry can
+  // change it. Absent means "not known to be incomplete", which is not the same as complete
+  // (contracts §2). It is a FIELD rather than an error code because the read SUCCEEDS.
+  incomplete?: boolean;
+}
+
+export interface BrowsePage {
+  entries: VaultFileEntry[];
+  // Absent on the last page. A cursor is opaque and must be echoed back untouched.
+  next_cursor?: string;
+  // PRESENT ONLY WHEN THE SERVER CLAMPED, so a caller that asked for more than the maximum
+  // can tell a clamp from a short last page — "no silent caps" as a wire field.
+  effective_limit?: number;
+}
