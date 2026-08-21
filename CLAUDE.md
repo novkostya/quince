@@ -5,23 +5,27 @@ Self-hosted iPhone/iPad backup server. Go core daemon + a swappable vault behind
 session-scoped reads, no persistent index; **unbuilt — qn.8**, and its process model is
 open, stack D4) + React/TS UI (Tailwind v4 tokens, vendored shadcn-style components, Zustand;
 device-centric IA — Devices + Settings only), REST + one WebSocket, SQLite app DB,
-never-mutate-committed versioned storage — **one lifecycle across all backends since
-qn.5b** (design §5): `idevicebackup2` writes only into a per-job `working/<udid>` seeded
-from `latest/` at job start (reflink where the filesystem allows it, else copy — never
-hardlink, which would alias the committed tree), and commit is verify →
-`renameat2(RENAME_EXCHANGE)` of `working/<udid>` into `latest/` → snapshot (zfs) or archive
-of the displaced tree into `versions/<ts>/`. `latest/` is a real directory on every backend,
-never unoccupied, and is the sole whole-tree rclone offsite-sync source; a version is a
-`@quince-*` snapshot on zfs (one child dataset per device, browsed via
-`.zfs/snapshot/<snap>/latest/`, so between backups the dataset holds only `latest/`) or a
-`versions/<ts>/` dir on the reflink (FICLONE) / hardlink / copy backends. Commit is
-journaled and startup reconciliation is first-class. **The bolded claim above — *one lifecycle across
-all backends since qn.5b*, and the seed-and-exchange sentence that defines it — is RULED to END for
-`zfs`, which writes into `latest/` IN PLACE: no seed, no working copy, no exchange, commit = verify →
-`zfs snapshot`. `latest/` also stops being a whole-tree offsite source on that backend, because it is
-torn mid-backup. It stays a real directory and stays NEVER UNOCCUPIED — more so than before, not
-less. Design §5's block at the end of the section is the ruling; nothing is built, and the
-*Never mutate a committed version* hard rule below names the three sentences it costs there.** Wi-Fi backup is the PRIMARY use case
+never-mutate-committed versioned storage — **TWO lifecycles, split by backend** (design §5),
+since qn.6h.
+
+**On the namespace backends — reflink (FICLONE) / hardlink / copy** — `idevicebackup2` writes only
+into a per-job `working/<udid>` seeded from `latest/` at job start (reflink where the filesystem
+allows it, else copy — never hardlink, which would alias the committed tree), and commit is verify →
+`renameat2(RENAME_EXCHANGE)` of `working/<udid>` into `latest/` → archive of the displaced tree into
+`versions/<ts>/`. `latest/` is a real directory, never unoccupied, and is the whole-tree rclone
+offsite-sync source; a version is a `versions/<ts>/` dir.
+
+**On `zfs` the child dataset root IS the tree and quince writes into it IN PLACE**: no `latest/`, no
+`working/`, no `versions/`, no seed and no exchange — commit is verify → `zfs snapshot`. A version
+is a `@quince-*` snapshot (one child dataset per device), browsed at `.zfs/snapshot/<snap>/` —
+**the snapshot root, with NO trailing component**. So this backend has no stable whole-tree offsite
+source: the head is torn mid-backup, and offsite must read a snapshot mount. **Snapshots written
+before qn.6h hold their content at `<snap>/latest/`, and pre-qn.5b ones at `<snap>/working/`;
+neither is browsable** — quince logs and skips them rather than dual-reading, so an old storage
+degrades loudly. Ruled 2026-08-04 (quince#591), layout refined by qn.6h D1/D7 on 2026-08-08, and
+**BUILT** — `docs/specs/qn.6h/`, plus design §5's block at the end of the section.
+
+Commit is journaled and startup reconciliation is first-class. Wi-Fi backup is the PRIMARY use case
 under the ASSISTED model — iOS requires on-device passcode entry per backup, so there is
 no unattended mode and no auto-retry: opportunity signal → push → one unlock+confirm;
 failures become `user action required`. Core value: Plex-grade setup, OpenWrt/PVE-grade
@@ -1013,33 +1017,28 @@ in the gitignored `.claude/settings.local.json` (see `.claude/README.md`).
   flags / env vars / API shape, check the live source (registry tags, releases page,
   `--help`, the vendor's own docs) and make that lookup part of the PR's evidence.
   Pinning anything other than the newest stable needs a one-line why.
-- **Never mutate a committed version.** `idevicebackup2` writes only into the per-job
-  `working/<udid>`. `latest/` changes only by the marker-guarded
-  `renameat2(RENAME_EXCHANGE)` at commit, after structural verify has passed; `versions/<ts>/`
-  dirs and `@quince-*` snapshots are immutable once written. `latest/` is not scratch space —
-  it *is* the newest committed version's content, and it is what browse and restore read for
-  that version (older versions come from snapshots or version dirs). A failed job **keeps**
-  its dirty `working/` so a retry resumes without re-transferring, while a seed killed
-  mid-flight is caught by the seed-in-progress sentinel and re-seeded rather than resumed.
-  Roll-forward: once verify has passed and the immutable artifact exists, recovery completes
-  the remaining commit phases — it never unwinds them, because a commit failure must not
-  destroy a multi-hour Wi-Fi transfer. Any storage-touching change re-proves these
-  invariants.
-  **THE HEADLINE SURVIVES THE zfs IN-PLACE RULING. THREE OF THE SENTENCES UNDER IT DO NOT, AND THEY
-  ARE THE THREE AN IMPLEMENTER ACTS ON** (design §5, end of section; ruled 2026-08-04, quince#591,
-  **not built**). On zfs a committed version is a `@quince-*` snapshot and copy-on-write leaves it
-  untouched, so writing into `latest/` cannot reach one — *never mutate a committed version* holds
-  literally. What stops holding on that backend, named rather than counted:
-  **(a)** *`idevicebackup2` writes only into the per-job `working/<udid>`* — on zfs it writes into
-  `latest/`, and this is the one that otherwise reads as forbidding the rung outright;
-  **(b)** *`latest/` changes only by the marker-guarded `renameat2(RENAME_EXCHANGE)` at commit* —
-  there is no exchange; commit is verify → `zfs snapshot`;
-  **(c)** *`latest/` is not scratch space — it is the newest committed version's content* — it
-  becomes the mutable head, and the newest version becomes a snapshot **of** it.
-  Read (c) as separate from the headline, because conflating them is what makes the change look
-  forbidden when it is ruled. Also on zfs: there is no seed and therefore no seed-in-progress
-  sentinel to catch, and the dirty **head** is what a failed job keeps. The new `rollback` verb
-  discards it and is for **abandon** only — never the failure default, never after verify has passed.
+- **Never mutate a committed version.** `versions/<ts>/` dirs and `@quince-*` snapshots are
+  immutable once written, and **the headline is literal on both lifecycles** — but *what* is
+  mutable differs, and an implementer acts on the difference:
+  **On the namespace backends** `idevicebackup2` writes only into the per-job `working/<udid>`.
+  `latest/` changes only by the marker-guarded `renameat2(RENAME_EXCHANGE)` at commit, after
+  structural verify has passed. `latest/` is not scratch space — it *is* the newest committed
+  version's content, and it is what browse and restore read for that version (older versions come
+  from version dirs). A failed job **keeps** its dirty `working/` so a retry resumes without
+  re-transferring, while a seed killed mid-flight is caught by the seed-in-progress sentinel and
+  re-seeded rather than resumed.
+  **On `zfs` there is no `working/`, no `latest/` and no seed** (qn.6h): the tool writes into the
+  child dataset root, which is the **mutable head**, and the newest version is a `@quince-*`
+  snapshot *of* it. Copy-on-write is what keeps the headline true — writing into the head cannot
+  reach a snapshot. So browse and restore are **snapshot-only** on this backend; a read must never
+  resolve to the head, because between the marker write and the snapshot the head is a
+  committed-looking tree that is not yet a version, and after a failure it is a dirty head still
+  carrying the *previous* version's marker. There is no seed-in-progress sentinel, and a failed job
+  keeps the dirty **head**. The `rollback` verb discards it and is for **abandon** only — never the
+  failure default, never after verify has passed.
+  Roll-forward, on both: once verify has passed and the immutable artifact exists, recovery
+  completes the remaining commit phases — it never unwinds them, because a commit failure must not
+  destroy a multi-hour Wi-Fi transfer. Any storage-touching change re-proves these invariants.
 - **No silent caps or fallbacks.** Degraded modes (copy backend, wifi-off,
   adapter-failed, cache-dropped, truncated list) are surfaced in the UI and the logs.
 - **Troubleshooting is ACTIONABLE, not merely honest** — Operator, 2026-08-14 (quince#940).
