@@ -107,13 +107,20 @@ func (d Deps) handleEnrolmentList() http.HandlerFunc {
 // it. The remedy for that case is the passkey list, and the message says so.
 func (d Deps) handleEnrolmentRevoke() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := d.enrolmentDevice(w, r); !ok {
+		dev, ok := d.enrolmentDevice(w, r)
+		if !ok {
 			return
 		}
-		err := d.Enrolments.Revoke(r.PathValue("id"))
+		err := d.Enrolments.Revoke(dev.UDID, r.PathValue("id"))
 		switch {
 		case err == nil:
 			w.WriteHeader(http.StatusNoContent)
+		case errors.Is(err, auth.ErrEnrolmentWrongDevice):
+			// THE PATH CLAIMED A DEVICE AND THE ID BELONGS TO ANOTHER. 404 rather than a
+			// success, because the link this request named does not exist on this device —
+			// and a distinct code, so a UI can say the useful thing rather than "not found".
+			writeError(w, d.Log, http.StatusNotFound, "enrolment_wrong_device",
+				"no enrolment link with that id for this device")
 		case errors.Is(err, auth.ErrEnrolmentNotFound):
 			writeError(w, d.Log, http.StatusNotFound, "not_found",
 				"no such enrolment link — it may have expired already")

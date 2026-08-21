@@ -1341,6 +1341,11 @@ DELETE /api/devices/{udid}/enrolments/{id}
      // THE LISTING IS LIVE ONES ONLY. A spent or expired secret grants nothing, and the
      // question the page answers is *what authority is outstanding*.
      //
+     // THE PATH'S DEVICE IS CHECKED, NOT DECORATIVE. Cancelling a secret issued for another
+     // device through this path is `404 enrolment_wrong_device`, never a 204 — the link this
+     // request named does not exist on this device, and a green tick on the wrong household
+     // member's QR is a wrong SUCCESS rather than a wrong refusal.
+     //
      // 409 ON DELETE DISTINGUISHES ALREADY-USED FROM ALREADY-CANCELLED (`enrolment_spent`
      // vs `enrolment_revoked`), and 404 means no such id. Cancelling a USED link is not a
      // tidy no-op: the credential it minted exists, so the refusal names the passkey list as

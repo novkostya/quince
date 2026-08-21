@@ -117,7 +117,7 @@ func TestEnrolmentRevokeBeforeUse(t *testing.T) {
 	if _, err := e.Check(tok); err != nil {
 		t.Fatalf("before revocation: got %v, want nil (the control)", err)
 	}
-	if err := e.Revoke(minted.ID); err != nil {
+	if err := e.Revoke(enrolDevice, minted.ID); err != nil {
 		t.Fatalf("Revoke: got %v, want nil", err)
 	}
 	if _, err := e.Check(tok); !errors.Is(err, ErrEnrolmentRevoked) {
@@ -137,7 +137,7 @@ func TestEnrolmentRevokeSpentReportsSpent(t *testing.T) {
 	if _, err := e.Spend(tok); err != nil {
 		t.Fatalf("Spend: got %v, want nil (the control)", err)
 	}
-	if err := e.Revoke(minted.ID); !errors.Is(err, ErrEnrolmentSpent) {
+	if err := e.Revoke(enrolDevice, minted.ID); !errors.Is(err, ErrEnrolmentSpent) {
 		t.Fatalf("Revoke of a spent secret: got %v, want ErrEnrolmentSpent", err)
 	}
 }
@@ -146,10 +146,10 @@ func TestEnrolmentRevokeUnknownID(t *testing.T) {
 	e, _ := newEnrolments(t)
 	_, minted := mustMintEnrolment(t, e, enrolDevice)
 
-	if err := e.Revoke(minted.ID); err != nil {
+	if err := e.Revoke(enrolDevice, minted.ID); err != nil {
 		t.Fatalf("Revoke of a live id: got %v, want nil (the control)", err)
 	}
-	if err := e.Revoke("01JNOTHINGATALL"); !errors.Is(err, ErrEnrolmentNotFound) {
+	if err := e.Revoke(enrolDevice, "01JNOTHINGATALL"); !errors.Is(err, ErrEnrolmentNotFound) {
 		t.Fatalf("Revoke of an unknown id: got %v, want ErrEnrolmentNotFound", err)
 	}
 }
@@ -297,7 +297,7 @@ func TestEnrolmentListShowsOnlyLiveOnesForThisDevice(t *testing.T) {
 	if _, err := e.Spend(spentTok); err != nil {
 		t.Fatalf("Spend: %v", err)
 	}
-	if err := e.Revoke(revoked.ID); err != nil {
+	if err := e.Revoke(enrolDevice, revoked.ID); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
 	// Expire the fourth by moving the clock past every mint's TTL, then re-mint the one that is

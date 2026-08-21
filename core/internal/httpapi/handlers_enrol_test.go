@@ -101,7 +101,7 @@ func TestTheFourEnrolmentRefusalsStayDistinctAtTheWire(t *testing.T) {
 			}
 		}, func(tok string) string { return tok }, http.StatusGone, "enrolment_spent"},
 		{"revoked", func(t *testing.T, enr *auth.Enrolments, _ string, en auth.Enrolment) {
-			if err := enr.Revoke(en.ID); err != nil {
+			if err := enr.Revoke("DEVICE-A", en.ID); err != nil {
 				t.Fatalf("Revoke: %v", err)
 			}
 		}, func(tok string) string { return tok }, http.StatusGone, "enrolment_revoked"},
