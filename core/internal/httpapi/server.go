@@ -347,6 +347,7 @@ func NewRouter(deps Deps) http.Handler {
 	// see — leaking it to anyone who can reach the port would say "this quince is not set up yet",
 	// which is precisely what a stranger should not learn.
 	assertRoutesClassified(apiMux.patterns)
+	assertResolversPresent(apiMux.patterns)
 	apiHandler := chain(rawAPIMux, bodyLimit, deps.authGuard, deps.csrfGuard, deps.setupGuard)
 
 	wsHandler := ws.Handler(deps.Bus,
