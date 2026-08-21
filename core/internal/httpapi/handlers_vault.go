@@ -2,9 +2,12 @@ package httpapi
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"strconv"
+	"strings"
 
 	"github.com/novkostya/quince/core/internal/wire"
 )
@@ -87,7 +90,14 @@ func (d Deps) handleSessionFile() http.HandlerFunc {
 		// reports a broken transfer — which is true. Sending no length instead would let a
 		// truncated file arrive looking complete.
 		w.Header().Set("Content-Length", strconv.FormatInt(entry.Size, 10))
+		// `application/octet-stream` IS A SECURITY CONTROL, not a shrug about the file type.
+		// A backup holds arbitrary user files, HTML and SVG among them. Served with a real
+		// content type and `inline`, one of those executes script against quince's OWN origin
+		// with the session cookie in scope — stored XSS reachable by anyone who can put a file
+		// on the device. A preview feature therefore needs a separate origin or a sandbox and
+		// is a rung, not a flag on this route (quince#1397 ruling).
 		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", contentDisposition(entry.RelativePath))
 		// Nothing derived from backup content is cached anywhere (design §7's lazy model),
 		// and an intermediary holding a decrypted file would be exactly that.
 		w.Header().Set("Cache-Control", "no-store")
@@ -188,4 +198,72 @@ func browseQuery(domain, prefix, cursor, limit string) wire.BrowseQuery {
 		n = 0
 	}
 	return wire.BrowseQuery{Domain: domain, Prefix: prefix, Cursor: cursor, Limit: n}
+}
+
+// contentDisposition names a downloaded file, per RFC 6266 with an RFC 5987 `filename*`.
+//
+// WITHOUT IT A DOWNLOAD SAVES AS A 40-CHARACTER SHA-1 WITH NO EXTENSION — the browser names
+// the file after the URL's last segment, which is the file id. Measured on real hardware:
+// 213,780 correct bytes, unopenable without a manual rename the user has nothing to base
+// (quince#1397).
+//
+// `attachment`, ALWAYS. Never `inline`: see the Content-Type comment above — this is the
+// same control, and the two must not drift apart.
+//
+// THE BASENAME, ALWAYS, AND NEVER CONDITIONALLY. A flattened full path is irreversible and
+// still not a path; and disambiguating only when names collide would make a file's name
+// depend on what else you had downloaded, which is not a property anyone can reason about.
+// Browsers already append `(1)`; the domain and path belong in the browse row, which is
+// where a user learns which `Info.plist` they took.
+//
+// SANITIZED AT CONSTRUCTION, NOT TRUSTED TO THE WRITER. A relative path is DEVICE CONTENT: it
+// can carry quotes, newlines and control characters, and it is about to become a response
+// header. Header splitting must be impossible where the value is built, not caught later by
+// something that may or may not be looking.
+func contentDisposition(relativePath string) string {
+	name := path.Base(relativePath)
+	if name == "." || name == "/" || name == "" {
+		// A record with no usable basename still has to download as something. `file` is a
+		// deliberate placeholder rather than the file id: the id is not a name, and putting
+		// it here would reproduce the defect this function exists to fix.
+		name = "file"
+	}
+
+	// The ASCII fallback for clients that do not implement RFC 5987. Anything outside
+	// printable ASCII, plus the two characters that could terminate or split the header, is
+	// replaced rather than escaped — a fallback is a best effort by definition, and an
+	// unambiguous `_` beats a clever encoding that some client mis-parses.
+	var ascii strings.Builder
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f || r > 0x7e || r == '"' || r == '\\' {
+			ascii.WriteByte('_')
+			continue
+		}
+		ascii.WriteRune(r)
+	}
+
+	// filename* carries the truth. url.PathEscape leaves sub-delims that RFC 5987's
+	// `attr-char` excludes, so the encoding is done here against that grammar rather than
+	// borrowed from a URL escaper that answers a different question.
+	var enc strings.Builder
+	for _, b := range []byte(name) {
+		if isAttrChar(b) {
+			enc.WriteByte(b)
+			continue
+		}
+		fmt.Fprintf(&enc, "%%%02X", b)
+	}
+
+	return fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, ascii.String(), enc.String())
+}
+
+// isAttrChar reports whether a byte may appear unescaped in an RFC 5987 ext-value. The set is
+// ALPHA / DIGIT / "!#$&+-.^_`|~" — deliberately narrower than URL-unreserved, because this
+// value sits inside a header parameter rather than a path.
+func isAttrChar(b byte) bool {
+	switch {
+	case b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z', b >= '0' && b <= '9':
+		return true
+	}
+	return strings.IndexByte("!#$&+-.^_`|~", b) >= 0
 }

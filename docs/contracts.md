@@ -2158,6 +2158,23 @@ vocabulary as one list and a test asserts the mapper covers it. Three of these c
 | `unavailable` | 503 | no vault is wired (`--demo`, or no storage subsystem) |
 | `io` | 500 | something below failed and quince will not guess what |
 
+**The file route also sets `Content-Disposition: attachment`** with the entry's **basename**, RFC 6266
+with an RFC 5987 `filename*` (quince#1397). Without it a browser names the download after the URL's
+last segment — the 40-character file id, no extension — and the bytes arrive unopenable.
+
+**`attachment` is a SECURITY control, not a preference, and so is the content type.** A backup holds
+arbitrary user files including HTML and SVG; served `inline` with a real content type, one of those
+executes script against quince's own origin with the session cookie in scope. A preview feature needs
+a separate origin or a sandbox and is a rung, not a flag on this route.
+
+**The basename ALWAYS, never conditionally.** Disambiguating only on collision would make a file's
+name depend on what else the user had already downloaded. Browsers append `(1)`; the domain and path
+belong in the browse row.
+
+**The value is sanitized where it is BUILT.** A relative path is device content and can carry quotes,
+newlines and control characters. Header splitting is made impossible at construction rather than left
+to the writer.
+
 **`effective_limit` is present ONLY when the server clamped**, so a caller that asked for more than
 the maximum can tell a clamp from a short last page — *no silent caps or fallbacks* as a wire field.
 A `limit` that is not a number means the default rather than a `400`: the caller gets a page either
