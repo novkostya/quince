@@ -79,13 +79,43 @@ func (d Deps) handleInsecureTransportSet() http.HandlerFunc {
 		// refuses. So the session AND the token are checked here, explicitly, rather than by trusting
 		// an exempt list to mean for one caller what it means for the other.
 		if configured {
-			if _, err := d.Auth.Authenticate(sessionCookieValue(r)); err != nil {
+			sess, err := d.Auth.Authenticate(sessionCookieValue(r))
+			if err != nil {
 				// THE SAME CODE AND THE SAME SHAPE AS `POST /api/auth/setup`'s one-shot refusal, for
 				// an anonymous caller: the install has been claimed. A 404 would hide the route, which
 				// is worth less than it looks — the UI is public and the path is in the docs — and it
 				// would cost the first-run user a comprehensible answer if they ever reached it late.
 				writeError(w, d.Log, http.StatusConflict, "already_configured",
 					"quince is already set up — sign in to change this")
+				return
+			}
+			// AND IT ASKS WHOSE SESSION, NOT WHETHER THERE IS ONE (quince#1441).
+			//
+			// This route is in `authExempt`, which is what makes it reachable by a first-run user
+			// stranded on plain http — and `authGuard` is the only place a principal is bound. So
+			// NO principal exists on this request, slice 8a's scope guard never runs, and this
+			// route's `adminOnly` entry in `routeScope` is inert. The check has to be here or it
+			// is nowhere.
+			//
+			// WHAT IT COSTS TO GET WRONG. The banner this setting raises says it: *anyone who can
+			// see the traffic can sign in as you* — including as the ADMIN. So without this, a
+			// device-scoped household member could hand the whole install's credentials to the
+			// network: the downgrade primitive quince#908 §3 refuses, reached by the one principal
+			// type this rung exists to confine. Found on hardware, 2026-08-21.
+			scope, err := d.Auth.ScopeOf(auth.PrincipalOf(sess))
+			if err != nil {
+				// A REVOKED CREDENTIAL AND A READ FAILURE ARE BOTH REASONS TO REFUSE HERE, and the
+				// refusal is the same because the alternative is granting a downgrade to a caller
+				// quince could not identify. `listUDID`'s split (quince#1412) is about a READ whose
+				// worst outcome is an unhelpful sentence; this is a write nobody may make unproven.
+				d.Log.Warn("insecure transport: could not resolve the caller", "error", err)
+				writeError(w, d.Log, http.StatusForbidden, "forbidden",
+					"only the administrator can change this")
+				return
+			}
+			if scope != "" {
+				writeError(w, d.Log, http.StatusForbidden, "forbidden",
+					"only the administrator can change this")
 				return
 			}
 			if !auth.CheckCSRF(r) {

@@ -365,6 +365,10 @@ func NewRouter(deps Deps) http.Handler {
 	// see — leaking it to anyone who can reach the port would say "this quince is not set up yet",
 	// which is precisely what a stranger should not learn.
 	assertRoutesClassified(apiMux.patterns)
+	// AND THE CLASSES THAT NOTHING CAN ENFORCE (quince#1441). An `authExempt` route gets no bound
+	// principal, so `scopeGuardFor` cannot apply its class — the entry has to be backed by a check
+	// in the handler, and this refuses a build where it is not.
+	assertExemptRoutesEnforceTheirOwnScope(apiMux.patterns)
 	assertResolversPresent(apiMux.patterns)
 	apiHandler := chain(rawAPIMux, bodyLimit, deps.authGuard, deps.csrfGuard, deps.setupGuard)
 
