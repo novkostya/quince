@@ -115,3 +115,85 @@ func TestDeleteAuthSessionsForNilMatchesPasswordSessions(t *testing.T) {
 		t.Fatal("deleted too much")
 	}
 }
+
+// REVOCATION MUST REACH THE PUSH SUBSCRIPTIONS (quince#1403 review).
+//
+// `scope_udid` is frozen at subscribe, so the send-time filter cannot notice a revocation on its
+// own. Without this the revoked holder's phone keeps receiving that device's notifications
+// indefinitely — every backup, every failure, the device name in the title.
+func TestRemovingADevicesLastCredentialEndsItsSubscriptions(t *testing.T) {
+	svc, _ := newTestAuth(t)
+	if err := svc.SetPassword("test", "1.2.3.4"); err != nil {
+		t.Fatalf("set password: %v", err)
+	}
+	udid := "DEVICE-A"
+	seedScoped(t, svc.store, "cred-scoped-aaa", &udid)
+	seedPushSub(t, svc.store, "sub-a", &udid)
+	seedPushSub(t, svc.store, "sub-admin", nil)
+
+	if _, err := svc.RemovePasskey(NewProofs(), Presented{Password: "test"}, "cred-scoped-aaa",
+		rpHome, "", "1.2.3.4"); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	rows, err := svc.store.PushSubscriptions()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, r := range rows {
+		if r.ID == "sub-a" {
+			t.Fatal("a revoked device's subscription survived — its phone keeps receiving")
+		}
+	}
+	// THE CONTROL. The admin's subscription must be untouched, or this would be a global
+	// unsubscribe wearing the shape of a revocation.
+	found := false
+	for _, r := range rows {
+		if r.ID == "sub-admin" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the admin's subscription was deleted by a scoped credential's removal")
+	}
+}
+
+// A DEVICE WITH A SECOND CREDENTIAL KEEPS RECEIVING. Its holder can still sign in, so removing one
+// passkey is not losing every way in.
+func TestRemovingOneOfTwoCredentialsKeepsTheSubscriptions(t *testing.T) {
+	svc, _ := newTestAuth(t)
+	if err := svc.SetPassword("test", "1.2.3.4"); err != nil {
+		t.Fatalf("set password: %v", err)
+	}
+	udid := "DEVICE-A"
+	seedScoped(t, svc.store, "cred-one-aaaaaa", &udid)
+	seedScoped(t, svc.store, "cred-two-aaaaaa", &udid)
+	seedPushSub(t, svc.store, "sub-a", &udid)
+
+	if _, err := svc.RemovePasskey(NewProofs(), Presented{Password: "test"}, "cred-one-aaaaaa",
+		rpHome, "", "1.2.3.4"); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	rows, err := svc.store.PushSubscriptions()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, r := range rows {
+		if r.ID == "sub-a" {
+			return
+		}
+	}
+	t.Fatal("the subscription was deleted while the device still had a credential — its holder can " +
+		"still sign in and must keep receiving")
+}
+
+func seedPushSub(t *testing.T, st *store.Store, id string, scope *string) {
+	t.Helper()
+	if err := st.AddPushSubscription(store.PushSubscription{
+		ID: id, Endpoint: "https://push.example/" + id, P256DH: "k", Auth: "a",
+		Origin: "https://q.example", CreatedAt: time.Now().UTC(), ScopeUDID: scope,
+	}); err != nil {
+		t.Fatalf("seed subscription %s: %v", id, err)
+	}
+}
