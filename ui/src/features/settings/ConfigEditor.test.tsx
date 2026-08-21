@@ -395,3 +395,39 @@ describe("the reconciliation interval", () => {
     expect(screen.getByText(/adding a storage/i)).toBeInTheDocument();
   });
 });
+
+// THE VAULT SESSION TIMEOUT IS EDITABLE HERE, which is what D12 requires of every setting and what
+// qn.12 was caught not doing — quince#1212, "the rung shipped the config keys with no screen".
+//
+// The key has been live and hand-editable since the session registry landed; only the control was
+// owed. The spec says so in as many words: acceptable while the rung is mid-flight, and NOT
+// acceptable the moment the rung is called done.
+describe("the vault session timeout", () => {
+  it("edits and reaches the server as a number", async () => {
+    renderEditor(config([entry()]));
+
+    saveResult.mockClear();
+    const field = screen.getByLabelText(/vault session timeout/i);
+    fireEvent.change(field, { target: { value: "45" } });
+    fireEvent.submit(screen.getByRole("button", { name: /save/i }).closest("form")!);
+
+    await waitFor(() => expect(saveResult).toHaveBeenCalled());
+    const sent = saveResult.mock.calls[0][0] as Config;
+    // A NUMBER, not the string the input yields. The whole document is replaced on PUT, so a string
+    // here would arrive at a Go `int` and fail to decode — taking every other key with it.
+    expect(sent.vault.session_ttl_minutes).toBe(45);
+  });
+
+  // 0 IS A MEANING, AND IT IS NOT THIS FORM'S OTHER ZERO. The reconciliation interval directly
+  // above uses 0 for OFF; here it means the DEFAULT, because a session holds live decryption keys
+  // and there is deliberately no value expressing "never". A reader who has just met that control
+  // will carry the meaning down, so the helper text has to say which — and this asserts it does,
+  // since a wrong reading here is a user believing their backup stays unlocked indefinitely.
+  it("says that 0 means the default rather than never", () => {
+    renderEditor(config([entry()]));
+
+    const help = screen.getByText(/0 means the default/i);
+    expect(help).toBeInTheDocument();
+    expect(help.closest("p")?.textContent ?? "").toMatch(/never/i);
+  });
+});
