@@ -15,6 +15,7 @@ import { NotificationsInstallPage } from "@/pages/NotificationsInstallPage";
 import { StorageDetailsPage } from "@/pages/StorageDetailsPage";
 import { AddStoragePage } from "@/pages/AddStoragePage";
 import { VaultBrowsePage } from "@/pages/VaultBrowsePage";
+import { EnrolPage } from "@/pages/EnrolPage";
 
 export const router = createBrowserRouter([
   // OUTSIDE EVERY GUARD, and that is the decision rather than an oversight (qn.6f rung-ruled 6).
@@ -31,6 +32,12 @@ export const router = createBrowserRouter([
   // TOP LEVEL, not a child: the catch-all below `Navigate`s to `/`, which is itself behind
   // `RequireAuth`, so a route nested anywhere would bounce an unauthenticated visitor to /login.
   { path: "/onboarding/https", element: <OnboardingHTTPSPage /> },
+  // THE ENROLMENT LANDING PAGE (qn.13 D4, slice 9d), outside every guard for the login page's
+  // reason: whoever scanned the QR has no session, and obtaining one is what this leads to. Its
+  // bound is the secret in its own URL — single-use, minutes-long, and cancellable by the admin
+  // while the page is open. NOT behind `SetupGate` either: an install reaching this is configured
+  // by definition, since only an admin on a device page can issue the code.
+  { path: "/enrol", element: <EnrolPage /> },
   // THE CERTIFICATE STEP'S OWN ROUTE (quince#908 §5, slice 4), outside every guard for the identical
   // reason its parent is: it is reached by somebody who cannot log in yet.
   //

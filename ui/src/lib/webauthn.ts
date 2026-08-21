@@ -75,9 +75,28 @@ export function webauthnAvailable(): boolean {
 // 1 on the FIRST `begin`, so first-run setup never meets a challenge it has nothing to answer with.
 export async function registerPasskey(
   name: string,
-  opts: { firstRun?: boolean; currentPassword?: string; proof?: string } = {},
+  opts: { firstRun?: boolean; currentPassword?: string; proof?: string; enrolmentSecret?: string } = {},
 ): Promise<boolean> {
-  const base = opts.firstRun ? "/api/auth/setup/passkey" : "/api/auth/passkeys/register";
+  // THREE CEREMONIES, ONE IMPLEMENTATION — and this function's own history is the argument. The
+  // comment at the bottom of this file records that "the registration path already cost a bug that
+  // only one of three copies would have carried"; a fourth copy for enrolment would be that bug
+  // waiting. What differs between them is the base and one query parameter, so that is all that
+  // varies here (qn.13 D4).
+  const base = opts.enrolmentSecret
+    ? "/api/enrol/passkey"
+    : opts.firstRun
+      ? "/api/auth/setup/passkey"
+      : "/api/auth/passkeys/register";
+  // THE SECRET RIDES ON BOTH HALVES, because the server re-reads it at finish rather than trusting
+  // begin — the admin can cancel a QR while this phone is sitting on the Face ID sheet.
+  //
+  // ABSENT MEANS NO QUERY AT ALL, not an empty one. An unconditional `?` changed every existing
+  // begin URL from `/begin` to `/begin?`, which the auth tests caught immediately — harmless to a
+  // server and wrong in the one place a URL is compared.
+  const secretQuery = opts.enrolmentSecret
+    ? `secret=${encodeURIComponent(opts.enrolmentSecret)}`
+    : "";
+  const beginPath = secretQuery ? `${base}/begin?${secretQuery}` : `${base}/begin`;
   // Omitted rather than sent empty when there is none: on a passwordless install an empty string is
   // a WRONG password, where an absent field is the case the server decides for itself.
   const present = {
@@ -112,7 +131,7 @@ export async function registerPasskey(
   //
   // SO `reauth_required` NOW REACHES THE CALLER. It carries `accepts`, which is what the caller
   // renders the challenge from (slice 2).
-  const begin = await api.post<BeginRegistration>(`${base}/begin`, present);
+  const begin = await api.post<BeginRegistration>(beginPath, present);
   const pk = begin.options.publicKey;
 
   let cred: PublicKeyCredential | null;
@@ -139,7 +158,7 @@ export async function registerPasskey(
 
   const resp = cred.response as AuthenticatorAttestationResponse;
   await api.post(
-    `${base}/finish?ceremony=${encodeURIComponent(begin.ceremony)}` +
+    `${base}/finish?${secretQuery ? secretQuery + "&" : ""}ceremony=${encodeURIComponent(begin.ceremony)}` +
       `&name=${encodeURIComponent(name)}`,
     {
       id: cred.id,
