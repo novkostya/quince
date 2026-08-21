@@ -85,6 +85,27 @@ function renderPage(v: Version | null = ver()) {
   return { ...r, qc };
 }
 
+
+// openAndUnlock drives the two clicks every session test needs, and then WAITS FOR THE DIALOG TO
+// GO before returning.
+//
+// THE WAIT IS THE POINT, not the deduplication. `UnlockDialog` closes by navigating —
+// `useDialogRoute` models a dialog as a place, so closing is a history pop — and the browse query
+// fires the moment the session lands. Those two settle independently, so the first page can render
+// while the dialog is still on top of it. Radix marks the background `aria-hidden` while a modal is
+// open, which is why the symptom is precisely that `getByText` finds a row and `getByRole` cannot
+// find a button beside it. Left implicit, it made three different tests fail on three consecutive
+// runs as unrelated edits moved the timing — the shape of a flake that gets blamed on whatever was
+// changed last.
+//
+// So the wait is also an assertion: the dialog really does close after a successful unlock, which
+// nothing else here checks.
+async function openAndUnlock() {
+  fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
+  fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+  await waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+}
+
 beforeEach(() => {
   vi.restoreAllMocks();
   useVersionsStore.setState({ byId: {}, order: [] });
@@ -121,8 +142,7 @@ describe("VaultBrowsePage", () => {
     vi.spyOn(api, "get").mockResolvedValue({ entries: [entry()] });
 
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
-    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await openAndUnlock();
 
     expect(await screen.findByText("Library/Notes/notes.sqlite")).toBeTruthy();
     expect(screen.getByText("HomeDomain")).toBeTruthy();
@@ -146,8 +166,7 @@ describe("VaultBrowsePage", () => {
     vi.spyOn(api, "get").mockResolvedValue({ entries: [entry()] });
 
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
-    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await openAndUnlock();
     await screen.findByText("Library/Notes/notes.sqlite");
 
     expect(screen.queryByText(/iOS/)).toBeNull();
@@ -172,8 +191,7 @@ describe("VaultBrowsePage", () => {
       .mockResolvedValueOnce({ entries: [entry({ file_id: "F2", relative_path: "Media/DCIM/a.jpg" })] });
 
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
-    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await openAndUnlock();
     await screen.findByText("Library/Notes/notes.sqlite");
 
     fireEvent.click(screen.getByRole("button", { name: /show more/i }));
@@ -203,8 +221,7 @@ describe("VaultBrowsePage", () => {
     );
 
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
-    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await openAndUnlock();
 
     expect(await screen.findByText(/no longer open/i)).toBeTruthy();
     expect(screen.getByText(/timeout in settings passed, or quince restarted/i)).toBeTruthy();
@@ -222,8 +239,7 @@ describe("VaultBrowsePage", () => {
     vi.spyOn(api, "get").mockResolvedValue({ entries: [entry()] });
 
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
-    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await openAndUnlock();
     await screen.findByText("Library/Notes/notes.sqlite");
 
     post.mockResolvedValueOnce(undefined as never);
@@ -279,8 +295,7 @@ describe("VaultBrowsePage", () => {
     const get = vi.spyOn(api, "get").mockResolvedValue({ entries: [entry()] });
 
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
-    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await openAndUnlock();
     await screen.findByText("Library/Notes/notes.sqlite");
 
     fireEvent.change(screen.getByLabelText("Domain"), { target: { value: "MediaDomain" } });
@@ -308,8 +323,7 @@ describe("VaultBrowsePage", () => {
       .mockResolvedValueOnce({ entries: [] });
 
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
-    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await openAndUnlock();
     await screen.findByText("Library/Notes/notes.sqlite");
 
     fireEvent.change(screen.getByLabelText("Domain"), { target: { value: "HomeDomian" } });
@@ -330,8 +344,7 @@ describe("VaultBrowsePage", () => {
     vi.spyOn(api, "get").mockResolvedValue({ entries: [] });
 
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
-    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await openAndUnlock();
 
     expect(await screen.findByText(/this backup holds no files/i)).toBeTruthy();
     expect(screen.queryByText(/match that domain and path/i)).toBeNull();
@@ -357,8 +370,7 @@ describe("VaultBrowsePage", () => {
       .mockResolvedValueOnce({ entries: [entry()] });
 
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
-    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await openAndUnlock();
     await screen.findByText("Library/Notes/notes.sqlite");
 
     fireEvent.change(screen.getByLabelText("Domain"), { target: { value: "MediaDomain" } });
@@ -379,7 +391,13 @@ describe("VaultBrowsePage", () => {
   // BOTH DIRECTIONS, because the field is PRESENT ONLY WHEN THE SERVER CLAMPED. A test that only
   // proves the notice appears would pass just as happily against a component that shows it always,
   // which would report a clamp on every ordinary page.
-  it("discloses a clamped page size, and stays silent when nothing was clamped", async () => {
+  //
+  // THE SENTENCE NAMES NO CAUSE, and that is asserted rather than left to the copy: it used to say
+  // the server reduced *"the page size this request asked for"*, and this client asks for no page
+  // size at all. If a clamp ever does arrive it will be the server clamping its own default, and
+  // the notice would have described the wrong cause on the one surface whose job is to make a cap
+  // non-silent (review, quince#1418).
+  it("discloses a clamped page size, without claiming this client asked for one", async () => {
     vi.spyOn(api, "post").mockResolvedValue({
       id: "S1",
       version_id: "V1",
@@ -388,18 +406,18 @@ describe("VaultBrowsePage", () => {
     const get = vi.spyOn(api, "get").mockResolvedValue({ entries: [entry()] });
 
     const { unmount } = renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
-    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await openAndUnlock();
     await screen.findByText("Library/Notes/notes.sqlite");
-    expect(screen.queryByText(/reduced the page size/i)).toBeNull();
+    expect(screen.queryByText(/at most/i)).toBeNull();
     unmount();
 
     get.mockResolvedValue({ entries: [entry()], effective_limit: 2000 });
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
-    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
-    expect(await screen.findByText(/reduced the page size/i)).toBeTruthy();
-    expect(screen.getByText(/at most 2000 files per page/i)).toBeTruthy();
+    await openAndUnlock();
+    expect(await screen.findByText(/at most 2000 files per page/i)).toBeTruthy();
+    // The request this client makes carries no `limit`, so nothing may say it asked for one.
+    expect(screen.queryByText(/this request asked for/i)).toBeNull();
+    expect(get).toHaveBeenLastCalledWith("/api/sessions/S1/browse");
   });
 
   // THE SUGGESTIONS ARE SUGGESTIONS. Nothing on the wire enumerates a backup's domains, so a
@@ -416,8 +434,7 @@ describe("VaultBrowsePage", () => {
     });
 
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
-    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await openAndUnlock();
     await screen.findByText("Library/Notes/notes.sqlite");
 
     const box = screen.getByLabelText("Domain") as HTMLInputElement;
@@ -443,8 +460,7 @@ describe("VaultBrowsePage", () => {
     });
 
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
-    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await openAndUnlock();
 
     expect(await screen.findByText(/the domain’s own folder/i)).toBeTruthy();
     expect(screen.getByText("HomeDomain")).toBeTruthy();
@@ -489,8 +505,7 @@ describe("VaultBrowsePage", () => {
     vi.spyOn(api, "get").mockResolvedValue({ entries: [entry()] });
 
     const { qc } = renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
-    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await openAndUnlock();
     await screen.findByText("Library/Notes/notes.sqlite");
     // The control: it really is held before the lock, so the assertion after it can fail.
     expect(heldForSession(qc, "S1")).toBeGreaterThan(0);
@@ -513,8 +528,7 @@ describe("VaultBrowsePage", () => {
     const get = vi.spyOn(api, "get").mockResolvedValueOnce({ entries: [entry()], next_cursor: "CUR-1" });
 
     const { qc } = renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
-    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await openAndUnlock();
     await screen.findByText("Library/Notes/notes.sqlite");
     expect(heldForSession(qc, "S1")).toBeGreaterThan(0);
 
@@ -540,8 +554,7 @@ describe("VaultBrowsePage", () => {
       .mockResolvedValueOnce({ entries: [entry({ file_id: "F2", relative_path: "Media/a.jpg" })] });
 
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
-    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+    await openAndUnlock();
 
     expect(await screen.findByText(/^1 file so far$/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /show more/i }));

@@ -133,6 +133,9 @@ export function VaultBrowsePage() {
   React.useEffect(() => {
     if (expired) dropBrowseCache(sessionID);
   }, [expired, sessionID, dropBrowseCache]);
+  // THE DOMAINS EVERY LOADED PAGE HAS SHOWN, kept in a ref so that accumulating them costs no
+  // render. The union is done below, where `entries` is; only the ref itself has to be a hook.
+  const seenDomains = React.useRef<{ id: string; set: Set<string> }>({ id: "", set: new Set() });
 
   async function lock() {
     setLocking(true);
@@ -185,13 +188,37 @@ export function VaultBrowsePage() {
 
   const entries = browse.data?.pages.flatMap((p) => p.entries) ?? [];
 
-  // THE DOMAINS SEEN SO FAR, offered as SUGGESTIONS and never as the list. A domain filter is an
-  // exact match and nothing on the wire enumerates the domains a backup holds — a page carries
-  // entries, never a catalogue. So a `<select>` here would be a closed list built from whichever
-  // pages happened to be loaded, which is a silent cap wearing a helpful face: the domain you want
-  // is missing precisely because you have not paged to it yet. A `<datalist>` suggests and still
-  // takes anything typed.
-  const suggestions = Array.from(new Set(entries.map((e) => e.domain))).sort();
+  // THE SUGGESTIONS ACCUMULATE ACROSS PAGES *AND* FILTERS, which is the whole point of them and is
+  // not what deriving them from `entries` does.
+  //
+  // THE BUG THIS REPLACES, found in review on quince#1418: `entries` is the FILTERED result, so
+  // "domains seen so far" was really "domains in the current result set" — it forgot everything the
+  // moment it was used. Filter to one domain and the box offered exactly that domain; the way back
+  // to the full set was to clear the filter first, which is the state the user was trying to leave.
+  // That contradicts the argument the datalist is built on: a `<select>` was rejected for missing
+  // the domain you have not paged to yet, and this missed the one you had just come from. On the
+  // stand's numbers — 99 distinct domains on page one — it is the difference between a usable box
+  // and one that helps once.
+  //
+  // ACCUMULATED DURING RENDER, WITH NO STATE AND NO EFFECT, and that is not a micro-optimisation.
+  // The first version of this fix kept a `useState` and unioned in an effect, which adds a render
+  // right after unlock — and **an extra render there leaves the unlock dialog open**, because
+  // `useDialogRoute` closes it by navigating and the pop does not survive a re-render landing on
+  // top of it. Two different tests caught it, one after the other, as the extra render moved. A set
+  // union is idempotent, so doing it in render is safe under StrictMode's double invocation in a
+  // way most render-time mutation is not.
+  //
+  // RESET IS KEYED ON THE SESSION: a different backup has different domains, and carrying them over
+  // would suggest names that are not in the thing being browsed.
+  if (seenDomains.current.id !== sessionID) seenDomains.current = { id: sessionID, set: new Set() };
+  for (const e of entries) seenDomains.current.set.add(e.domain);
+  const suggestions = Array.from(seenDomains.current.set).sort();
+  // The list itself is accumulated above, and offered as SUGGESTIONS rather than as THE list. A
+  // domain filter is an exact match and nothing on the wire enumerates the domains a backup holds —
+  // a page carries entries, never a catalogue. So a `<select>` here would be a closed list built
+  // from whichever pages happened to be loaded, which is a silent cap wearing a helpful face: the
+  // domain you want is missing precisely because you have not paged to it yet. A `<datalist>`
+  // suggests and still takes anything typed.
 
   // THE SERVER CLAMPED, SO THE SCREEN SAYS SO — contracts §1's `effective_limit` is *"no silent caps
   // or fallbacks as a wire field"*, and a client that reads it and shows nothing is where that
@@ -320,11 +347,19 @@ export function VaultBrowsePage() {
           </form>
 
           {/* THE CLAMP, IF ONE HAPPENED. Rendered above the list rather than beside the count,
-              because it changes what the count MEANS. */}
+              because it changes what the count MEANS.
+
+              IT NAMES NO CAUSE, and that is a correction rather than brevity (review, quince#1418).
+              This said the server *"reduced the page size this request asked for"* — and this client
+              asks for no page size at all, which the query above says twice and the stand confirms.
+              So the one request that could ever provoke this notice is a request that did not ask,
+              and the sentence would have arrived describing the wrong cause on the one surface whose
+              whole job is to make a cap non-silent. What the field states is the effective limit;
+              that is what is written. */}
           {clamped ? (
             <p className="mt-3 text-sm text-warn">
-              The server returned at most {clamped} files per page — it reduced the page size this
-              request asked for. Use <b>Show more</b> to read the rest.
+              The server returned at most {clamped} files per page. Use <b>Show more</b> to read the
+              rest.
             </p>
           ) : null}
 
