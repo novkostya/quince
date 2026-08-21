@@ -32,6 +32,7 @@ const FULL_CONFIG = {
     storage: [{ name: "s" }],
     sessions: { allow_insecure_transport: false },
     reconcile: { interval_minutes: 360 },
+    vault: { session_ttl_minutes: 15 },
     ui: { theme: "system" },
   },
   warnings: [],

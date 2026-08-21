@@ -231,6 +231,44 @@ export function ConfigEditor({ config }: { config: Config }) {
         )}
       </Field>
 
+      {/*
+        qn.8 slice 7. LIVE, like everything else on this form: main.go re-reads the key on every
+        config change and calls Registry.SetTTL, so an edit applies without a restart and no
+        restart notice belongs here.
+
+        `min={0}` because 0 is legal — but it is NOT this form's other zero. On the reconciliation
+        interval above, 0 means OFF. Here it means the DEFAULT, and the helper text has to say so,
+        because a reader who has just met that control one field up will carry the meaning down and
+        type 0 expecting a session that never expires. They would get fifteen minutes and no
+        indication they had been overruled.
+
+        There is deliberately no value that expresses "never": a session holds live decryption keys
+        (config schema, VaultConfig).
+      */}
+      <Field label="Vault session timeout (minutes)" error={errFor("vault.session_ttl_minutes")}>
+        {(id) => (
+          <>
+            <Input
+              id={id}
+              type="number"
+              min={0}
+              value={draft.vault.session_ttl_minutes}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  vault: { ...draft.vault, session_ttl_minutes: Number(e.target.value) },
+                })
+              }
+            />
+            <p className="text-xs text-muted">
+              How long an unlocked backup stays open for browsing before quince locks it again.{" "}
+              <strong>0 means the default, 15 minutes</strong> — not &ldquo;never&rdquo;. An open
+              session holds the keys that decrypt your backup, so it always expires.
+            </p>
+          </>
+        )}
+      </Field>
+
       <Field label="Theme" error={errFor("ui.theme")}>
         {(id) => (
           <Select
