@@ -48,7 +48,14 @@ func (d Deps) handleJobs() http.HandlerFunc {
 		if limit > maxJobsLimit {
 			limit = maxJobsLimit
 		}
-		jobs, next := d.Jobs.Jobs(q.Get("udid"), q.Get("cursor"), limit)
+		// SCOPED PRINCIPALS SEE ONLY THEIR OWN DEVICE (spec D8). The query is overridden, not
+		// defaulted — see listUDID.
+		udid, refuse := listUDID(d, r)
+		if refuse {
+			writeError(w, d.Log, http.StatusUnauthorized, "unauthorized", "authentication required")
+			return
+		}
+		jobs, next := d.Jobs.Jobs(udid, q.Get("cursor"), limit)
 		if jobs == nil {
 			jobs = []wire.Job{}
 		}
@@ -88,7 +95,13 @@ func (d Deps) handleJobLog() http.HandlerFunc {
 
 func (d Deps) handleVersions() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		versions := d.Versions.Versions(r.URL.Query().Get("udid"))
+		// SCOPED PRINCIPALS SEE ONLY THEIR OWN DEVICE (spec D8).
+		udid, refuse := listUDID(d, r)
+		if refuse {
+			writeError(w, d.Log, http.StatusUnauthorized, "unauthorized", "authentication required")
+			return
+		}
+		versions := d.Versions.Versions(udid)
 		if versions == nil {
 			versions = []wire.Version{}
 		}
