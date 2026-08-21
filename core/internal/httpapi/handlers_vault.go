@@ -101,12 +101,17 @@ func (d Deps) handleSessionFile() http.HandlerFunc {
 			// was logged as one until quince#1379. net/http refuses the write past the
 			// declared length, so io.Copy fails here on a stream that delivered too MUCH.
 			//
-			// This is the silent case, and that is why it gets its own words: the client
-			// receives exactly Content-Length bytes, the header agrees with the body, and
-			// nothing on the wire says the file was cut. Only this line does.
-			d.Log.Warn("vault: file is longer than its manifest record — the download was "+
-				"truncated at the recorded length. The backup on disk holds more data than its "+
-				"own index claims for this file; a fresh backup of this device re-records it",
+			// The download FAILS rather than arriving quietly truncated: net/http tears the
+			// response, so the client reads ZERO bytes and an `unexpected EOF`. Measured
+			// either side of the response buffer, because a large file could plausibly flush
+			// a complete-looking prefix first; it does not (quince#1381).
+			//
+			// That is why this line gets its own words: `unexpected EOF` is the whole of what
+			// reaches the client, so the log is the only place the reason exists.
+			d.Log.Warn("vault: file is longer than its manifest record, so the download FAILED — "+
+				"net/http refuses the write past the declared Content-Length and the client sees "+
+				"`unexpected EOF`. This backup holds more bytes on disk for this file than its own "+
+				"index records; a fresh backup of this device re-records it",
 				"session", r.PathValue("id"), "file_id", r.PathValue("file_id"),
 				"recorded_size", entry.Size, "err", err)
 		default:
