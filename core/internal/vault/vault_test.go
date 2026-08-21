@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+
+	"github.com/novkostya/quince/core/internal/wire"
 )
 
 // The taxonomy must be TOTAL over the errors this package names, and every code it can
@@ -124,5 +126,30 @@ func TestGarbageCursorIsRefusedNotTreatedAsTheStart(t *testing.T) {
 		if _, err := decodeCursor(bad); err == nil {
 			t.Errorf("decodeCursor(%q) succeeded; a malformed cursor must be refused", bad)
 		}
+	}
+}
+
+// The seam's frozen set and the wire vocabulary must be ONE list, not two that agree today.
+//
+// `frozen` above and wire.VaultErrorCodes are both enumerations of contracts §4, written in
+// different packages a rung apart — the shape that produced quince#1375 one layer up. This
+// is a TEST-ONLY reference: the seam still imports no wire types in production code, because
+// it is also the RPC contract and must not learn quince's JSON shapes to stay that.
+func TestTheFrozenSetIsTheWireVocabulary(t *testing.T) {
+	inWire := map[string]bool{}
+	for _, c := range wire.VaultErrorCodes {
+		inWire[c] = true
+	}
+	for _, err := range []error{
+		ErrBadPassword, ErrCorruptManifest, ErrFileNotFound, ErrNoCanary, ErrNotAFile, ErrLocked,
+	} {
+		code := Code(err)
+		if !inWire[code] {
+			t.Errorf("Code(%v) = %q, which wire.VaultErrorCodes does not name — the HTTP status "+
+				"table cannot be total over a code it has never heard of", err, code)
+		}
+	}
+	if !inWire[Code(errors.New("unnamed"))] {
+		t.Error("the default code is not in wire.VaultErrorCodes")
 	}
 }

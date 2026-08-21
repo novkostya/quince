@@ -328,3 +328,52 @@ func TestVaultRoutesRefuseHonestlyWhenNothingIsWired(t *testing.T) {
 		}
 	}
 }
+
+// The status table must be TOTAL over the vocabulary the vault surface can answer with.
+//
+// This is the test quince#1375 did not have. Every other test in this file asserts one
+// code-to-status pair, and each of them passed while `unsupported_version` and `busy` fell
+// through to 500 — because a test that names the pairs it knows about cannot report the pair
+// nobody thought of. The enumeration is what closes that, so a code added to
+// wire.VaultErrorCodes without a case here fails HERE rather than on a user's browse.
+func TestVaultStatusTableIsTotalOverTheWireCodes(t *testing.T) {
+	for _, code := range wire.VaultErrorCodes {
+		if _, ok := vaultCodeStatus(code); !ok {
+			t.Errorf("vaultCodeStatus(%q) has no case: it would answer 500, which reports a "+
+				"failure that did not happen", code)
+		}
+	}
+}
+
+// And the reverse direction: a status that is 500 must be a DECISION, not a fall-through.
+// `io` is the only code that legitimately means "something below failed and quince will not
+// guess what" (contracts §1).
+func TestOnlyIOAnswers500(t *testing.T) {
+	for _, code := range wire.VaultErrorCodes {
+		status, ok := vaultCodeStatus(code)
+		if ok && status == http.StatusInternalServerError && code != wire.VaultCodeIO {
+			t.Errorf("code %q maps to 500; only %q may", code, wire.VaultCodeIO)
+		}
+	}
+}
+
+// The two codes that shipped unmapped, pinned by name so a regression is legible as itself
+// rather than as a totality count that moved.
+func TestUnsupportedVersionIs422AndBusyIs409(t *testing.T) {
+	if got := statusForVaultCode(wire.VaultCodeUnsupportedVersion); got != http.StatusUnprocessableEntity {
+		t.Errorf("unsupported_version = %d, want %d: the request is well-formed and the "+
+			"artifact is a class this build cannot open", got, http.StatusUnprocessableEntity)
+	}
+	if got := statusForVaultCode(wire.VaultCodeBusy); got != http.StatusConflict {
+		t.Errorf("busy = %d, want %d: the session is real and occupied, and the caller can retry",
+			got, http.StatusConflict)
+	}
+}
+
+// An unrecognised code still answers 500 rather than panicking — the wrapper's contract,
+// asserted because the split above could otherwise drop it silently.
+func TestAnUnknownCodeIs500NotAPanic(t *testing.T) {
+	if got := statusForVaultCode("a_code_no_version_of_this_table_has_seen"); got != http.StatusInternalServerError {
+		t.Errorf("unknown code = %d, want %d", got, http.StatusInternalServerError)
+	}
+}

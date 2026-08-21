@@ -102,34 +102,54 @@ func (d Deps) handleSessionFile() http.HandlerFunc {
 	}
 }
 
-// statusForVaultCode maps a contracts §4 error code to its HTTP status.
+// statusForVaultCode maps a contracts §4 error code to its HTTP status, per §1's table.
 //
-// TOTAL OVER THE CODES THE SEAM CAN PRODUCE, with `internal` as the default rather than a
-// panic: an unmapped code is a bug in this table, and answering 500 tells the truth about it
-// while a panic would take the daemon down over a browse.
+// TOTAL OVER wire.VaultErrorCodes, AND ASSERTED TO BE — the enumeration is not decoration:
+// this function claimed totality in a comment for one rung while answering 500 for two codes
+// the surface really emits (quince#1375). A claim no test can fail is a claim that goes
+// false quietly, which is why the split below exists.
+//
+// vaultCodeStatus reports whether it recognised the code; this wrapper is what the handlers
+// call, and it keeps `internal` as the answer for an unrecognised one rather than a panic —
+// an unmapped code is a bug in that table, and 500 tells the truth about it where a panic
+// would take the daemon down over a browse.
 func statusForVaultCode(code string) int {
+	if status, ok := vaultCodeStatus(code); ok {
+		return status
+	}
+	return http.StatusInternalServerError
+}
+
+// vaultCodeStatus is the table itself. The second return is what the totality test reads:
+// without it a fallen-through code is indistinguishable from one deliberately mapped to 500,
+// which is exactly how `io` hid its two neighbours.
+func vaultCodeStatus(code string) (int, bool) {
 	switch code {
-	case "bad_password":
+	case wire.VaultCodeBadPassword:
 		// 403 rather than 401: the caller IS authenticated (every route here is behind
 		// authGuard). What failed is the backup's own password, which is a different
 		// credential, and a 401 would invite a client to re-run the login flow.
-		return http.StatusForbidden
-	case "not_found", "not_a_file":
-		return http.StatusNotFound
-	case "locked":
+		return http.StatusForbidden, true
+	case wire.VaultCodeNotFound, wire.VaultCodeNotAFile:
+		return http.StatusNotFound, true
+	case wire.VaultCodeLocked:
 		// The session is gone or was never unlocked. 409 rather than 404: the SESSION id may
 		// be perfectly real and simply expired, and "conflict with the current state" is
 		// what that is.
-		return http.StatusConflict
-	case "corrupt_manifest", "unsupported_ios":
-		return http.StatusUnprocessableEntity
-	case "unavailable":
-		return http.StatusServiceUnavailable
-	case "io":
-		return http.StatusInternalServerError
-	default:
-		return http.StatusInternalServerError
+		return http.StatusConflict, true
+	case wire.VaultCodeBusy:
+		// 409 for the same reason as `locked` and NOT 500: the session is real and a stream
+		// is open against it. The caller retries when the download finishes — a remedy that
+		// exists, which a 500 would deny them.
+		return http.StatusConflict, true
+	case wire.VaultCodeCorruptManifest, wire.VaultCodeUnsupportedIOS, wire.VaultCodeUnsupportedVersion:
+		return http.StatusUnprocessableEntity, true
+	case wire.VaultCodeUnavailable:
+		return http.StatusServiceUnavailable, true
+	case wire.VaultCodeIO:
+		return http.StatusInternalServerError, true
 	}
+	return 0, false
 }
 
 // browseQuery parses the browse route's query string.

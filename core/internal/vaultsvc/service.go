@@ -84,17 +84,17 @@ func (s *Service) Unlock(versionID, password string) (wire.Session, string, stri
 	v, ok, err := s.versions.Version(versionID)
 	if err != nil {
 		s.log.Error("vault: reading version", "version", versionID, "error", err)
-		return wire.Session{}, "io", "could not read the version"
+		return wire.Session{}, wire.VaultCodeIO, "could not read the version"
 	}
 	if !ok {
-		return wire.Session{}, "not_found", "no such version"
+		return wire.Session{}, wire.VaultCodeNotFound, "no such version"
 	}
 	// BROWSE_ROOT IS EMPTY FOR A VERSION WHOSE CONTENT CANNOT BE SERVED — storage's own cue,
 	// used rather than reinvented (layout.go: "the caller's cue to surface the version as
 	// UNBROWSABLE WITH A REASON"). On zfs that means a row with no snapshot; falling through
 	// would hand a session the live tree, which is the previous version or a half-written one.
 	if v.BrowseRoot == "" {
-		return wire.Session{}, "not_found",
+		return wire.Session{}, wire.VaultCodeNotFound,
 			"this version has no browsable content on disk (its snapshot is missing)"
 	}
 
@@ -103,7 +103,7 @@ func (s *Service) Unlock(versionID, password string) (wire.Session, string, stri
 		func(scratchDir string) (vault.Vault, error) { return s.open(v, scratchDir) })
 	if err != nil {
 		if errors.Is(err, errUnencryptedUnsupported) {
-			return wire.Session{}, "unsupported_version", err.Error()
+			return wire.Session{}, wire.VaultCodeUnsupportedVersion, err.Error()
 		}
 		return wire.Session{}, vault.Code(err), err.Error()
 	}
@@ -115,7 +115,7 @@ func (s *Service) Unlock(versionID, password string) (wire.Session, string, stri
 func (s *Service) Lock(sessionID string) (string, string) {
 	if err := s.registry.Lock(sessionID); err != nil {
 		s.log.Error("vault: locking session", "session", sessionID, "error", err)
-		return "io", "could not lock the session"
+		return wire.VaultCodeIO, "could not lock the session"
 	}
 	return "", ""
 }
@@ -157,9 +157,9 @@ func (s *Service) OpenFile(sessionID, fileID string) (io.ReadCloser, wire.FileEn
 func codeFor(err error) string {
 	switch {
 	case errors.Is(err, vault.ErrNoSession):
-		return "locked"
+		return wire.VaultCodeLocked
 	case errors.Is(err, vault.ErrSessionBusy):
-		return "busy"
+		return wire.VaultCodeBusy
 	default:
 		return vault.Code(err)
 	}
