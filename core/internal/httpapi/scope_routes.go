@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -256,3 +257,78 @@ func (m *scopedMux) Handle(pattern string, h http.Handler) {
 // tell a bug from a rule, which is *troubleshooting is actionable* failing at the moment a user is
 // most likely to conclude quince is broken.
 const scopeRefusalDetail = "this is an administrator action; your access is limited to one device"
+
+// enforcesItsOwnPrincipal names the `authExempt` routes whose scope class the scope guard CANNOT
+// enforce, and which therefore check the caller themselves.
+//
+// WHY THIS EXISTS AT ALL. `authGuard` binds the principal, and it skips every route in
+// `authExempt` — so for an exempt route no principal is ever bound and `scopeGuardFor` has nothing
+// to test. Its `routeScope` entry is inert: a comment that reads like a control.
+//
+// THAT IS NOT HYPOTHETICAL. `POST /api/config/insecure-transport` was classified `adminOnly` and
+// carried, on a configured install, only *is there a session* — never *whose*. A device-scoped
+// household member could turn on plain-http transport for the whole install, which is the
+// downgrade the banner describes as *anyone who can see the traffic can sign in as you*, including
+// as the admin. Found on hardware, 2026-08-21 (quince#1441). The classification was right and
+// enforced nowhere.
+//
+// SO THE COMBINATION IS ASSERTED RATHER THAN TRUSTED. An exempt route whose class is anything but
+// `openToAll` must appear here, and appearing here is a claim that the handler does the check
+// itself. A route added to `authExempt` with an `adminOnly` entry and no line here fails at
+// construction, which is the same shape as the totality assertion above and for the same reason:
+// this is a mistake nobody would see, because the wrong version looks exactly like the right one.
+var enforcesItsOwnPrincipal = map[string]string{
+	"POST /api/config/insecure-transport": "handleInsecureTransportSet refuses a scoped principal " +
+		"after authenticating (quince#1441)",
+
+	// THE CERTIFICATE MUTATIONS ARE BOUNDED BY `Configured()`, not by a principal — on a claimed
+	// install they refuse every caller, which closes them to a scoped holder as a side effect of
+	// closing them to everyone. Verified at each handler rather than assumed.
+	"POST /api/onboarding/certificate/apply":   "Configured()-gated in the handler (quince#908 §5)",
+	"POST /api/onboarding/certificate/confirm": "Configured()-gated in the handler (quince#908 §5)",
+	"POST /api/onboarding/certificate/cancel":  "Configured()-gated in the handler (quince#1158)",
+
+	// THESE FOUR HAVE NO PRINCIPAL CHECK AND NEED NONE, and saying so is the point of listing them.
+	// They are ruled pre-auth READS — the page explaining why you cannot log in, its probe pair, and
+	// the offline certificate check — so anyone who can reach quince at all can already read them
+	// WITHOUT a session. A scoped holder learns nothing they could not learn logged out, which is
+	// why this is an accepted exposure rather than a hole.
+	//
+	// THEIR `adminOnly` ENTRY IS ARGUABLY THE WRONG LABEL and is left alone deliberately: these are
+	// Operator-ruled pre-auth routes, so re-classifying them is a decision rather than a tidy-up.
+	// Recorded here so the next reader meets the question instead of the silence.
+	"GET /api/onboarding/https":        "ruled pre-auth read; readable with no session at all",
+	"GET /api/onboarding/probe":        "ruled pre-auth read; readable with no session at all",
+	"GET /api/onboarding/probe/nonce":  "ruled pre-auth read; readable with no session at all",
+	"POST /api/onboarding/certificate": "ruled pre-auth READ of two named files (quince#908)",
+}
+
+// assertExemptRoutesEnforceTheirOwnScope refuses a build where an `authExempt` route claims a scope
+// class that nothing can apply to it.
+func assertExemptRoutesEnforceTheirOwnScope(patterns []string) {
+	var unenforced []string
+	for _, p := range patterns {
+		method, path, ok := strings.Cut(p, " ")
+		if !ok {
+			continue
+		}
+		// Built rather than parsed: `authExempt` reads method and path off a request, and calling
+		// it with one is what keeps this assertion honest if that function's shape ever changes.
+		if !authExempt(&http.Request{Method: method, URL: &url.URL{Path: path}}) {
+			continue
+		}
+		class, known := scopeOfPattern(p)
+		if !known || class == openToAll {
+			continue
+		}
+		if _, declared := enforcesItsOwnPrincipal[p]; !declared {
+			unenforced = append(unenforced, p)
+		}
+	}
+	if len(unenforced) > 0 {
+		panic("httpapi: authExempt routes whose scope class NOTHING ENFORCES — `authGuard` binds no " +
+			"principal for an exempt route, so scopeGuardFor cannot test one. Either check the " +
+			"caller inside the handler and record it in enforcesItsOwnPrincipal, or classify the " +
+			"route openToAll: " + strings.Join(unenforced, ", "))
+	}
+}
