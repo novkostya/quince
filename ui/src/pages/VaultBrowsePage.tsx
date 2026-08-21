@@ -230,6 +230,11 @@ export function VaultBrowsePage() {
   // arrive unannounced — if a page-size control is ever added, the disclosure is already wired
   // rather than being remembered.
   const clamped = browse.data?.pages.find((p) => p.effective_limit)?.effective_limit;
+  // WHETHER ANYTHING ON SCREEN CARRIES A FLAG, which decides whether the words below the header
+  // appear at all. Derived from the loaded rows rather than kept in state: the flags come from the
+  // session's own memory of what it has read, so they arrive with a page rather than being events.
+  const anyIncomplete = entries.some((e) => e.incomplete);
+  const anyOverlong = entries.some((e) => e.overlong);
 
   return (
     <section>
@@ -375,17 +380,72 @@ export function VaultBrowsePage() {
               </div>
             ) : (
               <div className="mt-4">
-                <FileTable entries={entries} />
+                {/* A DEGRADED MODE, SO IT IS PERSISTENT AND NAMES THE CONSEQUENCE (ui.design §1,
+                    Operator ruling quince#446): no dismiss, no timeout, and it says what the
+                    download will do rather than that something is wrong.
+
+                    IT DOES NOT SAY THE OTHER FILES ARE FINE. Both flags are only known after quince
+                    has READ a file, and `overlong` is detected on the unencrypted backend alone —
+                    so "no badge" means nothing was reported, never that anything was checked
+                    (quince#1379 review). The sentence about Refresh is what makes that
+                    actionable instead of merely true. */}
+                {anyIncomplete || anyOverlong ? (
+                  <div className="mb-3 rounded-card border border-line bg-accent-soft p-3 text-sm text-warn">
+                    {anyIncomplete ? (
+                      <p>
+                        <b>incomplete</b> — the backup holds fewer bytes for that file than its own
+                        index records, so the download ends early and cannot be completed by
+                        retrying. A fresh backup of this device re-records it.
+                      </p>
+                    ) : null}
+                    {anyOverlong ? (
+                      <p className={anyIncomplete ? "mt-2" : undefined}>
+                        <b>overlong</b> — the backup holds more bytes for that file than its index
+                        records. quince delivers the recorded length and stops there.
+                      </p>
+                    ) : null}
+                    <p className="mt-2">
+                      quince learns either of these only by reading a file, so a row you have just
+                      downloaded may need <b>Refresh</b> before it says so — and a row with no badge
+                      is one nothing has been reported about, not one that has been checked.
+                    </p>
+                  </div>
+                ) : null}
+                <FileTable entries={entries} sessionID={sessionID} />
                 {/* NO INFINITE SCROLL. A page is a decrypt, and one that happens because the reader
                     scrolled is a decrypt nobody asked for. The count is shown so "more" is a
                     quantity rather than a promise. */}
                 <div className="mt-3 flex items-center justify-between gap-2">
-                  <span className="font-mono text-xs tabular-nums text-subtle">
-                    {/* "so far" WHEN THERE IS MORE. The header goes to real trouble not to invent a
-                        total (quince#1408), and a bare count beside a button whose whole meaning is
-                        "there is more" reads as one. Review finding, quince#1410. */}
-                    {entries.length} file{entries.length === 1 ? "" : "s"}
-                    {browse.hasNextPage ? " so far" : ""}
+                  <span className="flex items-center gap-3">
+                    <span className="font-mono text-xs tabular-nums text-subtle">
+                      {/* "so far" WHEN THERE IS MORE. The header goes to real trouble not to invent
+                          a total (quince#1408), and a bare count beside a button whose whole meaning
+                          is "there is more" reads as one. Review finding, quince#1410. */}
+                      {entries.length} file{entries.length === 1 ? "" : "s"}
+                      {browse.hasNextPage ? " so far" : ""}
+                    </span>
+                    {/* REFRESH EXISTS FOR THE FLAGS, and without it they would be unreachable in
+                        practice. `incomplete` and `overlong` live in the SESSION's memory of what it
+                        has read (`Registry.IncompleteIn`), so a file first discovered to be short
+                        during your own download is flagged on the NEXT browse — and these pages are
+                        held with `staleTime: Infinity`, deliberately, because a refetch is a
+                        decrypt. So the one thing that would never happen on its own is the one
+                        thing a reader needs after a download that looked wrong.
+
+                        MEASURED ON THE STAND: zero flagged rows across six pages, then 15 overlong
+                        and 12 incomplete across the same six after reading 600 real files. Nothing
+                        on that screen changes on its own.
+
+                        IT REFETCHES EVERY LOADED PAGE, which is why it is a button rather than
+                        something automatic on focus. */}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => void browse.refetch()}
+                      disabled={browse.isRefetching}
+                    >
+                      {browse.isRefetching ? "Refreshing…" : "Refresh"}
+                    </Button>
                   </span>
                   {browse.hasNextPage ? (
                     <Button
