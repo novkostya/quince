@@ -227,3 +227,32 @@ func fromSession(d Deps, r *http.Request) (string, bool) {
 	}
 	return v.UDID, v.UDID != ""
 }
+
+// listUDID decides which device a LIST endpoint may report on.
+//
+// THE THIRD SHAPE (spec D8, slice 8c). `GET /api/jobs` and `GET /api/versions` are permitted for a
+// scoped principal, so refusing them would take away their own device's history — but the response
+// must be narrowed, and both readers already take a udid filter where "" means every device.
+//
+// A SCOPED PRINCIPAL'S FILTER IS FORCED, NOT DEFAULTED. The caller supplies `?udid=`, so honouring
+// it would let a scoped holder read another device's jobs by asking for them — the filter has to
+// OVERRIDE the query rather than fill in when it is absent. That distinction is the whole of this
+// function, and getting it the other way round would look identical in a test that only ever asks
+// for its own device.
+//
+// THE ADMIN KEEPS THE QUERY, including "" for all devices, so nothing changes for them.
+func listUDID(d Deps, r *http.Request) (udid string, refuse bool) {
+	p, ok := PrincipalFrom(r.Context())
+	if !ok {
+		return r.URL.Query().Get("udid"), false
+	}
+	scope, err := d.Auth.ScopeOf(p)
+	if err != nil {
+		// A principal we cannot resolve gets nothing, rather than the unfiltered list that "" means.
+		return "", true
+	}
+	if scope == "" {
+		return r.URL.Query().Get("udid"), false
+	}
+	return scope, false
+}
