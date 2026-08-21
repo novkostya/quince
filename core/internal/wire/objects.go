@@ -990,3 +990,28 @@ func (d Device) DeviceUDID() string  { return d.UDID }
 func (j Job) DeviceUDID() string     { return j.UDID }
 func (v Version) DeviceUDID() string { return v.UDID }
 func (o Op) DeviceUDID() string      { return o.UDID }
+
+// Enrolment is one outstanding enrolment secret, as the ADMIN sees it — qn.13 slice 9c, spec D4.
+//
+// NO SECRET FIELD, AND THAT IS THE CONTRACT RATHER THAN AN OMISSION. The value is returned exactly
+// once, by the mint call, in `EnrolmentIssued`. A listing that could re-display it would make every
+// GET of the device page a fresh chance to leak a live credential into a screenshot, a cache or a
+// log — and the ruling asked that unused secrets be VISIBLE and REVOCABLE, not re-displayable.
+type Enrolment struct {
+	// ID names this secret for revocation. Safe in a response, a URL path and a log line, which is
+	// exactly what the secret is not.
+	ID string `json:"id"`
+	// UDID is the device the credential this mints will be confined to.
+	UDID      string `json:"udid"`
+	CreatedAt string `json:"created_at"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+// EnrolmentIssued is the mint response, and the ONLY place a secret appears on the wire.
+type EnrolmentIssued struct {
+	Enrolment
+	// Secret is shown once. The client composes the QR's URL from it and its OWN address — quince
+	// never guesses one (spec D5): the address the admin is currently using is knowable in the
+	// browser and not on the server, which may sit behind a proxy that strips or misreports it.
+	Secret string `json:"secret"`
+}

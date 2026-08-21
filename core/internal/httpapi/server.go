@@ -310,6 +310,14 @@ func NewRouter(deps Deps) http.Handler {
 	// field of local state with the value in the body — idempotent, no op, no id — which is what
 	// PUT /api/config and PUT /api/auth/password already are here.
 	apiMux.HandleFunc("PUT /api/devices/{udid}/notifications", deps.handleDeviceNotifications())
+	// THE ADMIN'S ENROLMENT SURFACE (qn.13 slice 9c). Registered under the same `Enrolments != nil`
+	// guard as the ceremony itself, so a router without a secret store exposes neither the door nor
+	// the thing that opens it.
+	if deps.Enrolments != nil {
+		apiMux.HandleFunc("POST /api/devices/{udid}/enrolments", deps.handleEnrolmentCreate())
+		apiMux.HandleFunc("GET /api/devices/{udid}/enrolments", deps.handleEnrolmentList())
+		apiMux.HandleFunc("DELETE /api/devices/{udid}/enrolments/{id}", deps.handleEnrolmentRevoke())
+	}
 	apiMux.HandleFunc("POST /api/devices/{udid}/reset-working", deps.handleResetWorking())
 	apiMux.HandleFunc("GET /api/ops/{op_id}", deps.handleOp())
 	apiMux.HandleFunc("POST /api/jobs", deps.handleJobCreate())
