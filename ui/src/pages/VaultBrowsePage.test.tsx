@@ -171,10 +171,12 @@ describe("VaultBrowsePage", () => {
     expect(screen.queryByRole("button", { name: /show more/i })).toBeNull();
   });
 
-  // STORY 9's UI HALF, and story 10's. A 409 `locked` mid-browse is the TTL doing its job, which is
-  // the route a real user takes — nobody clicks Lock, they leave the tab open. Rendering that as a
-  // generic failure tells them something broke when what happened is what the setting is for.
-  it("reads an expired session as the timeout, not as a failure", async () => {
+  // STORY 9's UI HALF, and story 10's. A 409 `locked` mid-browse means the session is gone, and
+  // quince cannot say which way: the TTL collecting it is the common route — nobody clicks Lock,
+  // they leave the tab open — but a daemon restart gives the identical `vault: no such session`,
+  // measured on the stand. So the copy names BOTH causes, and this asserts that rather than the
+  // likelier one, because asserting one cause is how a collapsed diagnostic gets pinned in place.
+  it("reads a dead session as the session ending, and names both ways it can", async () => {
     vi.spyOn(api, "post").mockResolvedValue({
       id: "S1",
       version_id: "V1",
@@ -188,8 +190,10 @@ describe("VaultBrowsePage", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
     fireEvent.submit(document.querySelector("form") as HTMLFormElement);
 
-    expect(await screen.findByText(/locked itself/i)).toBeTruthy();
-    expect(screen.getByText(/reached the timeout set in settings/i)).toBeTruthy();
+    expect(await screen.findByText(/no longer open/i)).toBeTruthy();
+    expect(screen.getByText(/timeout in settings passed, or quince restarted/i)).toBeTruthy();
+    // NOT rendered as a failure: no alert, and the way back is on screen.
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByRole("button", { name: /^open$/i })).toBeTruthy();
   });
 
@@ -245,5 +249,30 @@ describe("VaultBrowsePage", () => {
     const anchor = (await screen.findByLabelText("Device")) as HTMLInputElement;
     expect(anchor.value).toBe("family-iphone");
     expect(anchor.getAttribute("autocomplete")).toBe("username");
+  });
+
+  // FOUND ON HARDWARE, NOT IN A FIXTURE. The first page of a real encrypted iPad version is 500
+  // rows of which 99 carry an EMPTY `relative_path` — one per domain, every one a `dir` of size 0.
+  // The row rendered a blank line for each of them. A fixture author writes the rows they are
+  // thinking about, which is why this one arrived from the stand and not from this file.
+  it("names a domain-root row instead of rendering a blank line", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({
+      id: "S1",
+      version_id: "V1",
+      expires_at: "2026-08-20T00:15:00Z",
+    });
+    vi.spyOn(api, "get").mockResolvedValue({
+      entries: [entry({ file_id: "R1", relative_path: "", kind: "dir", size: 0, mtime: "" })],
+    });
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /^open$/i }));
+    fireEvent.submit(document.querySelector("form") as HTMLFormElement);
+
+    expect(await screen.findByText(/the domain’s own folder/i)).toBeTruthy();
+    expect(screen.getByText("HomeDomain")).toBeTruthy();
+    // An absent mtime is ordinary in this format and must not render as 1 January 1970.
+    expect(screen.queryByText(/1970/)).toBeNull();
+    expect(screen.getByText("dir")).toBeTruthy();
   });
 });

@@ -23,8 +23,16 @@ export function FileTable({ entries }: { entries: VaultFileEntry[] }) {
       {entries.map((e) => (
         <li key={e.file_id} className="flex items-baseline justify-between gap-4 px-4 py-2">
           <div className="min-w-0">
-            <div className="truncate text-sm" title={e.relative_path}>
-              {e.relative_path}
+            {/* AN EMPTY `relative_path` IS THE DOMAIN'S OWN FOLDER, and rendering it as an empty
+                line is what a real backup does to this row. Measured on the stand, 2026-08-21: the
+                first page of a real encrypted iPad version is 500 rows of which **99 carry an empty
+                path** — one per domain, every one a `dir` of size 0. No fixture had it, because a
+                fixture author writes the rows they are thinking about.
+
+                The domain is on the line below either way, so this says what the row IS rather
+                than repeating the name. */}
+            <div className="truncate text-sm" title={e.relative_path || e.domain}>
+              {e.relative_path || <span className="text-muted">the domain&rsquo;s own folder</span>}
             </div>
             <div className="mt-0.5 truncate text-xs text-muted" title={e.domain}>
               {e.domain}
