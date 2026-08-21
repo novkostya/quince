@@ -44,9 +44,13 @@ func (p *Provider) setJob(j wire.Job) {
 
 const demoLogCap = 500 // bound the per-job demo log buffer served by GET /api/jobs/{id}/log
 
-func (p *Provider) logJob(chunk string) { p.logJobFor(jobID, chunk) }
+func (p *Provider) logJob(chunk string) { p.logJobFor(jobID, udidPhone, chunk) }
 
-func (p *Provider) logJobFor(jid, chunk string) {
+// THE UDID IS A PARAMETER, NOT A CONSTANT. The demo drives several devices, so a fixed value
+// would label every log line with one of them — and the socket now decides which principal an
+// envelope may reach by reading exactly this field (spec D8). A wrong udid here would be a
+// scope filter working perfectly on a lie.
+func (p *Provider) logJobFor(jid, udid, chunk string) {
 	p.mu.Lock()
 	buf := append(p.jobLog[jid], chunk)
 	if len(buf) > demoLogCap {
@@ -54,7 +58,7 @@ func (p *Provider) logJobFor(jid, chunk string) {
 	}
 	p.jobLog[jid] = buf
 	p.mu.Unlock()
-	p.bus.PublishEvent(wire.EventJobLog, wire.JobLogChunk{JobID: jid, Chunk: chunk})
+	p.bus.PublishEvent(wire.EventJobLog, wire.JobLogChunk{JobID: jid, UDID: udid, Chunk: chunk})
 }
 
 // deviceChurn toggles the iPad's Wi-Fi presence so the dashboard shows a device appearing

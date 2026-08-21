@@ -966,3 +966,13 @@ type PushDeliveryResult struct {
 	// Error is present only for `error`, and never carries an endpoint path.
 	Error string `json:"error,omitempty"`
 }
+
+// DeviceUDID lets `EventDevice` read a payload's device without `wire` importing its producer.
+//
+// ONE METHOD PER DEVICE-BEARING PAYLOAD, and the set is closed by the gate over the event constants.
+// A payload that gains a device later must gain this too, or its events reach only the admin — which
+// is the safe direction to be wrong in, and the gate names it either way.
+func (d Device) DeviceUDID() string  { return d.UDID }
+func (j Job) DeviceUDID() string     { return j.UDID }
+func (v Version) DeviceUDID() string { return v.UDID }
+func (o Op) DeviceUDID() string      { return o.UDID }

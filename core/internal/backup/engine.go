@@ -1132,7 +1132,7 @@ func (e *Engine) flushLogRun(lj *liveJob) {
 // that reached the pane and not the ring would make the stored log a different document.
 func (e *Engine) emitLog(lj *liveJob, line string) {
 	e.logs.append(lj.row.ID, line+"\n")
-	e.bus.PublishEvent(wire.EventJobLog, wire.JobLogChunk{JobID: lj.row.ID, Chunk: line + "\n"})
+	e.bus.PublishEvent(wire.EventJobLog, wire.JobLogChunk{JobID: lj.row.ID, UDID: lj.row.UDID, Chunk: line + "\n"})
 }
 
 func (e *Engine) warnDiskLow(lj *liveJob, low *diskLowInfo) {
@@ -1140,7 +1140,7 @@ func (e *Engine) warnDiskLow(lj *liveJob, low *diskLowInfo) {
 		"WARNING: target filesystem low on space — %d MiB free; backup continues, free space to avoid a disk-full failure",
 		low.free>>20)
 	e.logs.append(lj.row.ID, msg+"\n")
-	e.bus.PublishEvent(wire.EventJobLog, wire.JobLogChunk{JobID: lj.row.ID, Chunk: msg + "\n"})
+	e.bus.PublishEvent(wire.EventJobLog, wire.JobLogChunk{JobID: lj.row.ID, UDID: lj.row.UDID, Chunk: msg + "\n"})
 	e.log.Warn("backup: target filesystem low on space", "job", lj.row.ID, "free_mib", low.free>>20)
 }
 

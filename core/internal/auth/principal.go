@@ -1,6 +1,10 @@
 package auth
 
-import "github.com/novkostya/quince/core/internal/store"
+import (
+	"errors"
+
+	"github.com/novkostya/quince/core/internal/store"
+)
 
 // Principal is WHO a request is acting as.
 //
@@ -39,3 +43,32 @@ func PrincipalOf(sess store.AuthSession) Principal {
 // and would be a claim this slice cannot support: it is a fact about how the session was created,
 // and only slice 4's scope column makes it a fact about authority.
 func (p Principal) IsPasswordLogin() bool { return p.CredentialID == "" }
+
+// ScopeOf resolves a principal's device confinement: "" for the admin, a udid for a scoped holder.
+//
+// THE JOIN THAT slice 3 DELIBERATELY DID NOT MAKE A FOREIGN KEY. A session points at the credential
+// that created it, and that credential may have been REMOVED since — quince#1001's case. A missing
+// row is therefore an ordinary state rather than corruption, and it must fail CLOSED: a revoked
+// credential's session must not resolve to the admin on its way out.
+func (s *Service) ScopeOf(p Principal) (string, error) {
+	if p.IsPasswordLogin() {
+		// A password is the admin's, and there is nothing else it could be (0014).
+		return "", nil
+	}
+	pk, ok, err := s.store.GetPasskey(p.CredentialID)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		// The credential is gone. quince#1001 ends such sessions at removal time, so this is the
+		// window between the two, and the answer is the narrow one rather than the generous one.
+		return "", ErrCredentialRevoked
+	}
+	if pk.ScopeUDID == nil {
+		return "", nil
+	}
+	return *pk.ScopeUDID, nil
+}
+
+// ErrCredentialRevoked — the credential that created this session no longer exists.
+var ErrCredentialRevoked = errors.New("auth: the credential this session was created with has been removed")

@@ -345,7 +345,26 @@ func NewRouter(deps Deps) http.Handler {
 	apiHandler := chain(apiMux, bodyLimit, deps.authGuard, deps.csrfGuard, deps.setupGuard)
 
 	wsHandler := ws.Handler(deps.Bus,
-		func(sessionID string) error { _, err := deps.Auth.Authenticate(sessionID); return err },
+		// THE SESSION IS NO LONGER DISCARDED HERE EITHER. This closure was
+		// `func(id string) error { _, err := Authenticate(id); return err }` — the same discard
+		// qn.13 slice 3 removed from `authGuard`, still present on the one path that bypasses it.
+		func(sessionID string) (ws.Principal, error) {
+			sess, err := deps.Auth.Authenticate(sessionID)
+			if err != nil {
+				return ws.Principal{}, err
+			}
+			scope, err := deps.Auth.ScopeOf(auth.PrincipalOf(sess))
+			if err != nil {
+				// A PRINCIPAL WE CANNOT RESOLVE DOES NOT GET A SOCKET. Falling back to the admin
+				// principal would hand a caller everything on a database error, which is the
+				// permissive default this rung exists to remove.
+				return ws.Principal{}, err
+			}
+			if scope == "" {
+				return ws.AdminPrincipal(), nil
+			}
+			return ws.DevicePrincipal(scope), nil
+		},
 		deps.Version, deps.AllowedOrigins, deps.Log)
 
 	root := http.NewServeMux()

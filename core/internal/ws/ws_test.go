@@ -20,7 +20,7 @@ import (
 	"github.com/novkostya/quince/core/internal/wire"
 )
 
-func setup(t *testing.T) (*bus.Bus, func(string) error, string) {
+func setup(t *testing.T) (*bus.Bus, func(string) (Principal, error), string) {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "q.db"))
 	if err != nil {
@@ -35,11 +35,11 @@ func setup(t *testing.T) (*bus.Bus, func(string) error, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authFn := func(id string) error { _, err := svc.Authenticate(id); return err }
+	authFn := func(id string) (Principal, error) { _, err := svc.Authenticate(id); return AdminPrincipal(), err }
 	return bus.New(), authFn, sess.ID
 }
 
-func newServer(b *bus.Bus, authFn func(string) error) *httptest.Server {
+func newServer(b *bus.Bus, authFn func(string) (Principal, error)) *httptest.Server {
 	return httptest.NewServer(Handler(b, authFn, "1.2.3", nil, slog.New(slog.NewTextHandler(io.Discard, nil))))
 }
 
