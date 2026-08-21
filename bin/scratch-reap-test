@@ -243,6 +243,72 @@ else
 	cat "$WORK/flat.out"
 fi
 
+# NARROWNESS CONTROL 3: A ROOT OF ONLY DETACHED-HEAD CLONES IS THE ARCHITECT BOX — quince#1422.
+#
+# THE MEASURED FAILURE, on a correctly-pointed root with a declared runner and no `--root`: eight
+# clones, every one skipped as a detached HEAD, and the tool answered
+#
+#   scratch-reap: DID NOT RUN — judged 0 clones in /root/scratch/arch2 …
+#   scratch-reap: this root is one level too shallow …
+#   scratch-reap: Point it at one — --root /root/scratch/arch2/<runner> …
+#
+# Every clause false: `arch2` IS the runner, it WAS declared, no `--root` was passed, and the path it
+# suggests cannot exist. The old predicate was `reaped + kept`, so a root where every clone was
+# UNJUDGED counted as zero and the too-shallow inference fired — a PATH diagnosis for a JUDGEMENT
+# problem, at `/retire` §7, the one moment canon schedules the reaper.
+#
+# This is the sharpest narrowness control in the file, because the clones are RIGHT HERE. The
+# refusal above must not fire, and the run must produce the numbers §7 asks for.
+DETACH=$WORK/detachedroot
+mkdir -p "$DETACH"
+git clone -q "$WORK/origin.git" "$DETACH/pr-1409"
+git -C "$DETACH/pr-1409" checkout -q --detach HEAD
+git clone -q "$WORK/origin.git" "$DETACH/pr-1410"
+git -C "$DETACH/pr-1410" checkout -q --detach HEAD
+# THE `local` SYMLINK IS WHY THE OLD REFUSAL WAS UNCONDITIONAL RATHER THAN OCCASIONAL, and the
+# fixture is worthless without it. `/kickoff` §3 puts `local -> $QUINCE_PRIVATE_LAYER` in EVERY
+# clone, and the private layer is itself a git repository — so the nested-clone probe
+# (`[ -d "$c/.git" ]`, which follows symlinks) finds one inside every single clone on a real box.
+#
+# So `_nested` is non-empty for ANY root holding real clones, and once the judged count reached zero
+# the too-shallow inference had nothing left to discriminate on: it fired every time. That is why the
+# architect box degraded from under-reaping straight to refusing, in a day, with no middle state.
+git clone -q "$WORK/origin.git" "$WORK/fakelayer"
+ln -sfn "$WORK/fakelayer" "$DETACH/pr-1409/local"
+ln -sfn "$WORK/fakelayer" "$DETACH/pr-1410/local"
+
+dout=$WORK/detached.out
+"$REAP" --root "$DETACH" >"$dout" 2>&1 && drc=0 || drc=$?
+
+if [ "$drc" -eq 0 ]; then
+	ok "a root of only detached-HEAD clones is exit 0 — the clones are HERE, not one level down"
+else
+	bad "a root of only unjudged clones exited $drc — the too-shallow refusal fired on a correct root"
+	cat "$dout"
+fi
+# The false diagnosis is the defect, so its absence is asserted directly rather than via the exit.
+if grep -q 'one level too shallow' "$dout"; then
+	bad "a root whose clones are all unjudged was blamed on the PATH — quince#1422 exactly"
+	cat "$dout"
+else
+	ok "no path blame: the root is not called too shallow when the clones are in it"
+fi
+# `/retire` §7 asks for `N reaped, M kept, K unjudged`. Refusing produces none of them.
+if grep -q '2 unjudged' "$dout"; then
+	ok "the counts /retire §7 asks for are produced — 2 unjudged, rather than a refusal"
+else
+	bad "the run did not report its unjudged count"
+	cat "$dout"
+fi
+# NOT SILENT EITHER. A run that could reap nothing is a degraded mode and must say so, or exit 0
+# reads as "nothing to do" over a disk full of clones nobody judged.
+if grep -q 'judged NONE' "$dout" && grep -q 'quince#823' "$dout"; then
+	ok "judging nothing is reported as a degraded mode, naming the cause"
+else
+	bad "0 reaped with every clone unjudged passed as an ordinary clean run"
+	cat "$dout"
+fi
+
 
 # ---------------------------------------------------------------------------------------------
 # A REPOSITORY WHOSE DEFAULT BRANCH IS NOT `main` — quince#1297.
