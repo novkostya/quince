@@ -2908,12 +2908,34 @@ One socket per client, server→client only (commands go via REST). Envelope:
 | `device.attached` / `device.detached` | `Device` + `{transport}` | emitted per transport edge |
 | `device.updated` | `Device` | name/pairing/info refresh |
 | `job.updated` | `Job` | every state or progress change; progress throttled to ≤2/s |
-| `job.log` | `{job_id, chunk}` | raw log tail chunks |
+| `job.log` | `{job_id, udid, chunk}` | raw log tail chunks. **`udid` is new in `qn.13`** — it is what lets the socket decide which principal may receive the frame; every other device-bearing event already named its device. Additive: a client ignoring it is unaffected. |
 | `op.updated` | `Op` | pair/encryption op narration + state changes |
 | `version.created` / `version.deleted` | `Version` | includes adopted versions found on disk |
 | `session.locked` | `{session_id, reason: "user" \| "ttl" \| "vault_crash"}` | UI drops decrypted views |
 | `config.updated` | `{}` — **empty by ruling** | the configuration SURFACE changed; refetch `GET /api/config` |
 | `hello` | `{server_version, time}` | first frame after auth |
+
+**THE SOCKET IS SCOPED AT SEND — `qn.13`, Operator-directed 2026-08-21.** Until then every envelope
+reached every client, which was correct while quince had one principal: *everyone* and *the admin*
+were the same set. A device-scoped credential makes them different.
+
+- **An ADMIN principal receives every frame**, exactly as before. Nothing changes for an install
+  without scoped credentials, which is every install until enrolment ships.
+- **A DEVICE-SCOPED principal receives its own device's frames and the GLOBAL ones** — `hello`,
+  `session.locked`, `config.updated`. Those are facts about quince rather than about a device, and
+  withholding them would break the socket rather than confine it: `hello` is the first frame, and
+  `session.locked` is how a client learns its own session ended. `config.updated` carries no data by
+  ruling, so it discloses nothing.
+- **Filtered at SEND, not at subscribe.** A scope can change and a credential can be revoked while a
+  socket is open; a subscription narrowed once at connect would keep delivering under authority that
+  has since gone.
+- **An unclassified event type reaches only the admin.** A gate asserts every declared event is
+  classified, so a new one fails the build rather than silently choosing a side.
+
+**`/api/ws` bypasses the JSON API chain and therefore `authGuard`**, which is where the principal is
+bound for every REST route. Its own auth closure resolves one instead. That bypass is why the socket
+was missed when the principal landed, and it is why this paragraph exists rather than the rule being
+inherited.
 
 **`config.updated` carries no data and fires on THREE transitions** — Operator ruling 2026-08-17,
 [quince#1162](https://github.com/novkostya/quince/issues/1162), option C.

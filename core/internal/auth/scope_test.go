@@ -232,3 +232,43 @@ func scopeArg(scopeUDID *string) store.Scope {
 	}
 	return store.DeviceScope(*scopeUDID)
 }
+
+// ScopeOf is the join qn.13 slice 3 deliberately did NOT make a foreign key: a session points at a
+// credential that may since have been removed. These assert the three answers.
+func TestScopeOfAPasswordLoginIsAdmin(t *testing.T) {
+	svc, _ := newTestAuth(t)
+	scope, err := svc.ScopeOf(Principal{})
+	if err != nil {
+		t.Fatalf("ScopeOf: %v", err)
+	}
+	if scope != "" {
+		t.Fatalf("a password login resolved to a scope: %q", scope)
+	}
+}
+
+func TestScopeOfResolvesACredentialsScope(t *testing.T) {
+	svc, _ := newTestAuth(t)
+	udid := "DEVICE-A"
+	seedScoped(t, svc.store, "scoped-1", &udid)
+	seedScoped(t, svc.store, "admin-1", nil)
+
+	scope, err := svc.ScopeOf(Principal{CredentialID: "scoped-1"})
+	if err != nil || scope != udid {
+		t.Fatalf("scoped credential: got %q err=%v want %q", scope, err, udid)
+	}
+	adminScope, err := svc.ScopeOf(Principal{CredentialID: "admin-1"})
+	if err != nil || adminScope != "" {
+		t.Fatalf("admin credential: got %q err=%v want empty", adminScope, err)
+	}
+}
+
+// A REVOKED CREDENTIAL FAILS CLOSED, which is the direction that matters. quince#1001 ends such
+// sessions at removal time, so this is the window between the two — and resolving it to the ADMIN
+// would hand a revoked holder everything on their way out.
+func TestScopeOfRefusesARevokedCredential(t *testing.T) {
+	svc, _ := newTestAuth(t)
+	_, err := svc.ScopeOf(Principal{CredentialID: "never-existed"})
+	if !errors.Is(err, ErrCredentialRevoked) {
+		t.Fatalf("got %v — want ErrCredentialRevoked rather than an admin scope", err)
+	}
+}

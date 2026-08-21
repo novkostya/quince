@@ -370,6 +370,46 @@ surface whose shape follows the principal.
 use; the API refuses it regardless. A hidden route that answers 200 to a typed URL is not
 confinement.
 
+### D8.1 — The WebSocket is a confinement surface, and it bypasses everything D8 describes
+
+**Found while inventorying slice 8; Operator-directed 2026-08-21 (quince#1342).** D8 was written
+about routes and the shell, and `/api/ws` is neither.
+
+`server.go` registers it outside the API chain — `root.Handle("/api/ws", wsHandler)`, with the
+comment *"self-guarding; bypasses the JSON API chain"* — so it never passes through `authGuard`,
+**which is where D1's principal is bound.** Its own auth closure read
+`if _, err := Authenticate(...)`, discarding the session: the exact pattern quince#1342 named, still
+present on the one path slice 3 did not reach. **Slice 3's PR body claimed the session was no longer
+discarded; that was true of `authGuard` and false here**, and the claim is corrected rather than
+quietly narrowed.
+
+**Why it outranks any single route.** The bus carries `device.attached`, `device.updated`,
+`job.updated`, `job.log`, `op.updated` and `version.*`, and the loop wrote **every envelope to every
+client**. A scoped holder would have received every device in the household by name, model and iOS
+version, plus every job and every version — without doing anything wrong, and while every REST route
+refused them correctly. **A socket streaming the devices list defeats D8's *unreachable rather than
+merely unlinked* on its own.**
+
+**The rule:** an admin principal receives every frame; a scoped principal receives its own device's
+frames plus the global ones (`hello`, `session.locked`, `config.updated`). Global events are facts
+about quince rather than about a device, and withholding them would break the socket rather than
+confine it — `hello` is the first frame, `session.locked` is how a client learns its own session
+ended, and `config.updated` carries no data by ruling.
+
+**Filtered at SEND, not at subscribe**, for D7's reason exactly: scope can change and a credential
+can be revoked while a socket is open, so a subscription narrowed at connect would keep delivering
+under authority that has since gone.
+
+**Totality, not a `default`.** Every declared event constant is classified as global or
+device-bearing, and a gate asserts it, so a thirteenth event fails the build rather than silently
+choosing a side. An unclassified type is treated as device-scoped **with no device**, so it reaches
+only the admin — the fail-closed direction, for the window between somebody adding a constant and
+the gate telling them.
+
+**`job.log` gained a `udid`**, and it is the only wire change. Every other device-bearing payload
+already named its device; that one named only the job, and resolving the device at send time would
+put a store lookup on a log stream's hot path and answer differently once the job was gone.
+
 ### D9 — Revocation, and the recovery ceremony this rung must NOT build
 
 **No recovery ceremony.** `qn.6k` designed around a lost phone locking the user out of their own
@@ -530,6 +570,12 @@ Beyond `make gates` / `make image`:
   a remembered credential which no longer exists **falls back to the discoverable flow** rather than
   dead-ending. The last one is the failure mode a revocation creates, and it is the one a
   happy-path test would miss.
+- **G9 — the socket cannot leak, and a new event cannot leak either.** Three assertions: a scoped
+  principal receives its own device's frames and not another's; the classification is **total** over
+  the declared event constants, parsed from source rather than from a list kept by hand in the test;
+  and an unclassified type reaches only the admin. The confinement assertion is **mutation-checked** —
+  admitting everything makes it fail naming the leak — because an absence passes just as readily
+  against a broken instrument, and its standing control is that an admin still receives every frame.
 
 ---
 
@@ -578,7 +624,8 @@ Each is one PR carrying one reviewable claim, **sequenced from `main`, not stack
 | **5** | quince#1001, and quince#1259's reachable-and-scope-aware `ErrLastCredential` (D9) | no |
 | **6** | the credential username: scoped rows carry their device, admin rows keep `quince-admin` (D2.1, G7) | no |
 | **7** | the remembered principal and the subtle *change user* — `passkeyHint` holds a credential id, login sends `allowCredentials` (D2.2, G8) | no |
-| **8** | authorization at every route, and the shell's shape (D3, D8, G3) | no |
+| **7b** | **the socket: a principal, and a send-time scope filter** (D8.1, G9) — landed FIRST of the confinement work because it is the only surface that leaks with nobody acting | no |
+| **8** | authorization at every route, and the shell's shape (D3, D8, G3) — **four shapes, not one check**: refuse · resource-check · response-filter · a body-check for `POST /api/jobs`, whose device is in the payload rather than the path. Slice further before building | no |
 | **9** | the enrolment ceremony and the QR, against fact 8's precedent, excluding nothing (D4, D4.1, D5, G4) — **AFTER slice 8; see the ordering rule below** | no |
 | **10** | the send-path filter and the preference's owner column, backfilled admin-owned (D7, G5) | no |
 | **11** | the admin's view: marked rows, listed secrets, revocation from the device page (D9) | no |

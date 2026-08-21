@@ -59,8 +59,18 @@ type DeviceEvent struct {
 }
 
 // JobLogChunk is the data for job.log.
+//
+// IT CARRIES THE DEVICE, AND THAT FIELD IS NEW IN qn.13. Every other device-bearing event
+// already names its device — `Device.UDID`, `Job.UDID`, `Version.UDID`, `Op.UDID` — and this
+// one named only the job. The socket now has to decide which principal an envelope may reach
+// (spec D8), and it cannot do that for a frame whose device is knowable only by looking the
+// job up. Resolving it at SEND time would put a store lookup on the hot path of a log stream
+// and answer differently once the job is gone; the producer knows it for free.
+//
+// ADDITIVE ON THE WIRE: a client that ignores the field is unaffected.
 type JobLogChunk struct {
 	JobID string `json:"job_id"`
+	UDID  string `json:"udid"`
 	Chunk string `json:"chunk"`
 }
 
@@ -69,3 +79,12 @@ type SessionLocked struct {
 	SessionID string `json:"session_id"`
 	Reason    string `json:"reason"` // user | ttl | vault_crash
 }
+
+// DeviceUDID — see the note on `Device.DeviceUDID`.
+//
+// `DeviceEvent` embeds `Device`, so it ALREADY inherits that method and this declaration is
+// redundant; it is written out anyway because the embedding is easy to remove by accident and
+// the inherited version would vanish silently with it. `e.UDID` rather than `e.Device.UDID`
+// because staticcheck QF1008 refuses the longer form.
+func (e DeviceEvent) DeviceUDID() string { return e.UDID }
+func (c JobLogChunk) DeviceUDID() string { return c.UDID }

@@ -195,7 +195,7 @@ func (p *Provider) scriptBackup(run *demoRun, job wire.Job) {
 		job.Progress.Liveness = s.liveness
 		p.setJob(job)
 		if s.note != "" {
-			p.logJobFor(job.ID, s.note)
+			p.logJobFor(job.ID, job.UDID, s.note)
 		}
 		switch p.waitStep(run, s.wait) {
 		case "cancel":
@@ -220,7 +220,7 @@ func (p *Provider) scriptBackup(run *demoRun, job wire.Job) {
 	job.FinishedAt = &fin
 	job.VersionID = &ver.ID
 	p.setJob(job)
-	p.logJobFor(job.ID, "backup completed · structure verified")
+	p.logJobFor(job.ID, job.UDID, "backup completed · structure verified")
 	p.bus.PublishEvent(wire.EventVersionCreated, ver)
 	p.refreshLastBackup(job.UDID, job.ID, fin, "succeeded")
 }
@@ -253,7 +253,7 @@ func (p *Provider) finishCancelled(job *wire.Job) {
 	job.FinishedAt = &fin
 	job.Error = &wire.JobError{Code: "cancelled", Message: "cancelled"}
 	p.setJob(*job)
-	p.logJobFor(job.ID, "backup cancelled")
+	p.logJobFor(job.ID, job.UDID, "backup cancelled")
 }
 
 // demoResolveTransport mirrors the engine's resolveTransport (design §4/(bp)) for the fixture world.
