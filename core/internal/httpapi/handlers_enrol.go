@@ -18,10 +18,19 @@ import (
 // revocable, and carrying its own scope (slice 9a). Being exempt is what makes it reachable; being
 // authorized by a secret quince minted is what makes it safe.
 //
-// THE SECRET TRAVELS IN A QUERY PARAMETER, matching `setup/passkey/finish`'s `?ceremony=`. It is a
-// bearer value in a URL and D4 assumes the URL leaks — which is why it is one-shot and short-lived
-// rather than why it should be moved to a header: a header would not survive the QR, which is a URL
-// by construction.
+// THE SECRET TRAVELS IN A QUERY PARAMETER, matching `setup/passkey/finish`'s `?ceremony=`, and the
+// honest reason is CONSISTENCY rather than necessity.
+//
+// A HEADER OR A BODY WOULD WORK HERE AND WOULD BE TIGHTER. The QR is a URL by construction, so the
+// secret arrives in the page address whatever these routes do — but by the time the page calls
+// them it already holds the value and is issuing a POST, so it could put it anywhere. Sending it
+// in the query keeps it out of nothing: access logs, proxy logs and referer headers all see it
+// again.
+//
+// WHAT BOUNDS THE LEAK IS SINGLE-USE, NOT PLACEMENT. D4 assumes the URL leaks and answers that
+// with one-shot plus minutes, which holds wherever the value rides. So the API mirrors the QR's
+// shape and the mitigation is the secret's lifecycle — and if a later change wants it in a header,
+// nothing in D4 is standing in the way.
 
 // enrolmentSecret pulls the secret out of the request, or writes the refusal.
 //
@@ -131,6 +140,13 @@ func (d Deps) handleEnrolPasskeyFinish() http.HandlerFunc {
 			auth.RPIDFromRequest(r), token, r, time.Now().UTC(), sessionCookieValue(r), d.Proxies.ClientIP(r))
 		if err != nil {
 			switch {
+			case errors.Is(err, auth.ErrRateLimited):
+				// REACHABLE SINCE quince#1426 METERED THIS DOOR, and falling through to the
+				// default told a throttled household member their passkey was invalid and to
+				// START AGAIN — false, and the worst available advice, since starting again is
+				// more requests at the limiter. A client that would back off on a 429 got a 400,
+				// and the daemon logged an Error for an ordinary throttle.
+				writeError(w, d.Log, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
 			case d.writeEnrolmentError(w, err):
 				// THE SECRET IS RE-READ AT FINISH, so these are reachable here and not only at
 				// begin: the admin can revoke a QR while the phone is on the unlock sheet.

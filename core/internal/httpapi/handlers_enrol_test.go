@@ -158,3 +158,39 @@ func TestTheEnrolmentRoutesAreAbsentWithoutAnEnrolmentStore(t *testing.T) {
 		t.Fatalf("status = %d, want 404 — a router with no secret store must not serve the ceremony", status)
 	}
 }
+
+// A THROTTLED FINISH IS A 429, NOT "your passkey is bad, start again" (quince#1428 review).
+//
+// `FinishEnrolment` has been metered since quince#1426, so `ErrRateLimited` is reachable here. It
+// fell to the default arm, which told a household member their passkey could not be verified and to
+// START AGAIN — false, and the worst available advice, because starting again is more requests at
+// the limiter. A client that would back off on a 429 got a 400 instead.
+func TestAThrottledFinishSaysSoRatherThanBlamingThePasskey(t *testing.T) {
+	srv, enr := enrolServer(t)
+	tok, _, err := enr.Mint(store.DeviceScope("DEVICE-A"))
+	if err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	path := "/api/enrol/passkey/finish?secret=" + tok + "&ceremony=no-such-ceremony&name=phone"
+
+	// THE CONTROL: the first call is NOT throttled, and fails for a ceremony reason instead. That
+	// is what proves the assertion below is about the limiter and not about a handler that answers
+	// 429 to everything.
+	status, code := postEnrol(t, srv, path)
+	if status == http.StatusTooManyRequests {
+		t.Fatalf("control: the first request was already throttled")
+	}
+	if code != "passkey_rejected" && code != "no_ceremony" {
+		t.Fatalf("control: got %d/%q, want a ceremony refusal", status, code)
+	}
+
+	var lastStatus int
+	var lastCode string
+	for range 12 {
+		lastStatus, lastCode = postEnrol(t, srv, path)
+	}
+	if lastStatus != http.StatusTooManyRequests || lastCode != "rate_limited" {
+		t.Fatalf("got %d/%q after twelve attempts, want 429/rate_limited — a throttled caller told "+
+			"to start again is sent back at the limiter", lastStatus, lastCode)
+	}
+}
