@@ -651,6 +651,11 @@ func (s *Service) RemovePasskey(proofs *Proofs, pres Presented, credentialID, rp
 		return false, ErrSelfRemoval{Detail: "a passkey cannot authorise its own removal — " +
 			"use your password, or a different passkey."}
 	}
+	// READ THE SCOPE BEFORE DELETING, because afterwards there is nothing to read it from.
+	var removedScope string
+	if pk, ok, err := s.store.GetPasskey(credentialID); err == nil && ok && pk.ScopeUDID != nil {
+		removedScope = *pk.ScopeUDID
+	}
 	deleted, err := s.store.DeletePasskey(credentialID)
 	if err != nil || !deleted {
 		return deleted, err
@@ -667,6 +672,27 @@ func (s *Service) RemovePasskey(proofs *Proofs, pres Presented, credentialID, rp
 			"err", err, "note", "the credential WAS removed; its sessions may still be live")
 	} else if n > 0 {
 		s.audit("sessions_ended_passkey_removed", clientIP)
+	}
+	// AND ITS PUSH SUBSCRIPTIONS, ONCE THE DEVICE HAS NO CREDENTIAL LEFT (quince#1403 review).
+	//
+	// `scope_udid` is frozen at subscribe, so the send-time filter cannot notice a revocation
+	// on its own — placement decides WHERE a stale answer is applied, not whether it is stale.
+	// Revocation therefore has to reach the subscriptions, which is quince#1366's shape moved
+	// from sessions to push.
+	//
+	// ONLY WHEN THE LAST ONE GOES. A device may hold two passkeys, and the first being removed
+	// leaves its holder able to sign in — so their phone must keep receiving. What ends the
+	// subscription is losing every way in.
+	//
+	// Best effort, like the sessions above: the credential IS gone, so reporting failure would
+	// misdescribe what happened.
+	if removedScope != "" && !s.scopeHasCredential(removedScope) {
+		if n, err := s.store.DeletePushSubscriptionsForScope(removedScope); err != nil {
+			s.log.Warn("could not end push subscriptions after a passkey removal",
+				"err", err, "note", "the credential WAS removed; its device may still receive")
+		} else if n > 0 {
+			s.audit("push_subscriptions_ended_passkey_removed", clientIP)
+		}
 	}
 	return deleted, nil
 }
@@ -817,3 +843,23 @@ func (s *Service) audit(event, clientIP string) {
 // QUINCE_TRUSTED_PROXIES; nil or unset means believe X-Forwarded-Proto from anyone, which is the
 // pre-quince#555 behaviour and what every direct deployment does.
 func (s *Service) SetTrustedProxies(t *TrustedProxies) { s.proxies = t }
+
+// scopeHasCredential reports whether any credential still confines to this device.
+//
+// THE "LAST ONE" TEST. A device with a second passkey still has a holder who can sign in, so its
+// subscriptions must survive the first being removed.
+func (s *Service) scopeHasCredential(udid string) bool {
+	rows, err := s.store.ListPasskeys()
+	if err != nil {
+		// A READ FAILURE MUST NOT DELETE. Reporting "there is still a credential" leaves the
+		// subscriptions alone, which is the recoverable direction: the alternative silently
+		// unsubscribes a device over a transient database fault.
+		return true
+	}
+	for _, p := range rows {
+		if p.ScopeUDID != nil && *p.ScopeUDID == udid {
+			return true
+		}
+	}
+	return false
+}
