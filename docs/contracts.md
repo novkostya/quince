@@ -475,8 +475,22 @@ a sentence describing the WHOLE is the part nobody updates when a part changes (
 Passkeys — assertion (qn.6k):
 
 ```
-POST /api/auth/passkeys/login/begin  → 200 {ceremony, options}
-     // PRE-AUTH. Discoverable: no username, no account picker — one admin, no accounts.
+POST /api/auth/passkeys/login/begin  {credential_id?}  → 200 {ceremony, options}
+     // PRE-AUTH. Discoverable by default: no username, no account picker — one admin, no accounts.
+     // `credential_id` IS A HINT AND NOTHING ELSE (qn.13 D2.2). Present, it becomes the ceremony's
+     // `allowCredentials`, so the platform offers that credential instead of choosing. Absent — and
+     // an absent body is still valid — the ceremony is discoverable, which is qn.6k's behaviour.
+     // IT CAN ONLY NARROW. go-webauthn enforces a non-empty allow-list at finish, so naming a
+     // credential that is not yours restricts you to a signature you cannot produce; authority is
+     // still resolved from the ASSERTED credential id, never from what was requested here.
+     // THE ID IS ECHOED, NEVER LOOKED UP, and that is the contract rather than an implementation
+     // detail: a lookup would make this endpoint answer "does this quince know this passkey" to
+     // anyone who can reach it — the same property /finish protects with its indistinguishable 401.
+     // So an unknown id and a real one produce the same shaped response, and a client whose
+     // remembered credential has been revoked learns it from the PLATFORM (no passkey available)
+     // and retries without the hint.
+     // A malformed `credential_id` is IGNORED, not refused: it is a hint, and the sign-in page must
+     // not fail for a memory that makes no sense.
      // 429 when the per-visitor login rate limit trips — THE SAME BUCKET as POST /api/auth/login,
      // because they are the same resource and the same attacker.
      // 426 insecure_origin, as the password login is.

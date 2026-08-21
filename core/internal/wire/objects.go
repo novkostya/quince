@@ -706,6 +706,20 @@ type PasskeyRegisterBegin struct {
 	Options  any    `json:"options"`
 }
 
+// PasskeyLoginBegin is POST /api/auth/passkeys/login/begin's REQUEST (qn.13 slice 7, spec D2.2).
+//
+// `credential_id` is the credential this browser remembers, or absent. It is a HINT: it selects
+// which credential the platform offers and grants nothing, because authority resolves from the
+// assertion afterwards (D2). A caller naming an id that is not theirs narrows themselves to a
+// signature they cannot produce.
+//
+// OPTIONAL, AND THE ABSENT CASE IS THE OLD BEHAVIOUR. The body was `{}` before this rung and still
+// may be, which is what keeps a browser that has never stored an id — or one holding qn.6k's
+// boolean `"1"` — on the discoverable flow rather than broken.
+type PasskeyLoginBegin struct {
+	CredentialID string `json:"credential_id,omitempty"`
+}
+
 // Passkey is one registered credential as the API renders it (qn.6k).
 //
 // NO PUBLIC KEY AND NO CREDENTIAL ID. Neither is a secret, and neither is any use to the UI — the

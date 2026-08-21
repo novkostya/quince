@@ -4,22 +4,18 @@ import { signInWithPasskey, webauthnAvailable } from "@/lib/webauthn";
 import { hasPasskeyHint } from "@/lib/passkeyHint";
 import type { AuthStatus } from "@/lib/types";
 
-// THROWAWAY VARIANT — NEVER MERGE. Staging only, for the Operator to judge.
+// The on-load sign-in sheet: open quince, Face ID, in.
 //
-// This fires the MODAL on page load instead of arming conditional mediation. The two are mutually
-// exclusive on iOS: the platform grants exactly ONE gesture-free `navigator.credentials.get()` per
-// page load, and whichever path runs first spends it.
+// IT FIRES THE MODAL ON PAGE LOAD RATHER THAN ARMING CONDITIONAL MEDIATION, and the two are
+// mutually exclusive on iOS: the platform grants exactly ONE gesture-free
+// `navigator.credentials.get()` per page load, and whichever path runs first spends it. The
+// conditional version was found on hardware only by tapping the key icon on the keyboard, past a
+// suggestion list whose first entry was a password — undiscoverable, which is what decided this.
 //
-// What it buys: open quince, Face ID, in. No tap, no hunting for the key icon on the keyboard —
-// which is how the conditional version was found on hardware, past a suggestion list whose first
-// entry was a password.
-//
-// What it costs, and this is the thing to judge on the screen rather than from my description: the
-// sheet fires at anyone WITHOUT a passkey too, because credential presence is undetectable. On this
-// stand that means a fresh install, a box after `quince auth reset`, and the public demo.
-//
-// NOT GATED on "does this quince have any credential at all", deliberately — that gate is the real
-// design and it needs a pre-auth endpoint, which is a decision rather than a test build.
+// WHAT IT COSTS is that credential presence is undetectable, so an unprompted sheet would fire at
+// people who have none — a fresh install, a box after `quince auth reset`, the public demo. The
+// memory gate below is what removes every one of those cases without a device heuristic and without
+// asking the server anything.
 export function usePasskeyLogin(onSuccess: (status: AuthStatus) => void | Promise<void>): void {
   const armed = useRef(false);
 
@@ -34,7 +30,7 @@ export function usePasskeyLogin(onSuccess: (status: AuthStatus) => void | Promis
 
     // THE GATE. Only fire an unprompted sheet where a passkey has already been created or used in
     // THIS browser. A device that has never had one never sees a modal — which is the fresh
-    // install, the box after , and the public demo, all removed without a
+    // install, the box after `quince auth reset`, and the public demo, all removed without a
     // device heuristic and without asking the server anything.
     //
     // The BUTTON is unconditional and is what the first time looks like.

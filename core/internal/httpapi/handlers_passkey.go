@@ -234,8 +234,17 @@ func (d Deps) handlePasskeyLoginBegin() http.HandlerFunc {
 		if d.refuseInsecureOrigin(w, r) {
 			return
 		}
+		// A BODY IS OPTIONAL AND AN ABSENT ONE IS NOT AN ERROR — the same idiom
+		// `handlePasskeyRegisterBegin` uses, and for a stronger reason here: the field is a HINT,
+		// so the failure to read one costs the discoverable flow rather than the sign-in. A
+		// malformed body on a PRE-AUTH page must not produce an error the visitor cannot act on.
+		//
+		// `DisallowUnknownFields` means qn.6k's browsers, which post `{}`, still decode cleanly.
+		var body wire.PasskeyLoginBegin
+		_ = decodeJSON(r, &body)
+
 		options, ceremony, err := d.Auth.BeginPasskeyAssertion(d.Passkeys,
-			auth.RPIDFromRequest(r), d.Proxies.ClientIP(r))
+			auth.RPIDFromRequest(r), d.Proxies.ClientIP(r), strings.TrimSpace(body.CredentialID))
 		if err != nil {
 			if errors.Is(err, auth.ErrRateLimited) {
 				writeError(w, d.Log, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
