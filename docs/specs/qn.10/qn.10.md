@@ -44,18 +44,18 @@ Read on the stand across three device trees, by the format's public file id for
 
 | device | `sms.db` on disk | `-wal` | `-shm` | `-journal` |
 | --- | --- | --- | --- | --- |
-| A | 479,232 B | absent | absent | absent |
-| B | **468,078,608 B — 446 MiB** | absent | absent | absent |
-| C | absent | absent | absent | absent |
+| A — unencrypted | 479,232 B | absent | absent | absent |
+| B — encrypted | **468,078,608 B — 446 MiB** | absent | absent | absent |
+| C — not a backup (fact 7) | absent | absent | absent | absent |
 
-**These are encrypted sizes.** Plaintext will be close but is not measured; nothing below
-depends on the difference.
+**These are sizes on disk**; for B that is the encrypted file. Fact 4 measures the decrypted
+one and the difference turned out not to matter.
 
-**Three consequences, and they are this rung.** `Materialize` must decrypt and copy 446 MiB
-into session scratch before the first chat lists. Device C proves *no messages in this backup*
-is a real case, not a hypothetical for the capability report. And **no real backup here carries a
-sidecar** — `parserfs`'s sidecar handling is correct and, on this evidence, exercised by nothing,
-which is a fixture obligation (D8), not a reason to remove it.
+**Two consequences, and one non-consequence.** `Materialize` must decrypt and copy 446 MiB
+before the first chat lists — measured in fact 4, and it is cheap. **No real backup here carries
+a sidecar**, so `parserfs`'s sidecar copy — the code that keeps *never mutate a committed
+version* true — is exercised by nothing, which is a fixture obligation (D8, G5) and not a reason
+to remove it. **Device C is not evidence of anything**: it has no `Manifest.db` at all.
 
 ### 2. The parser's read API is a full scan, with no filter and no cursor
 
@@ -89,27 +89,77 @@ because `fillChatIDs` and `fillAttachments` run one query per message against an
 table. Real iOS ships those indexes; the parser's fixture does not, which is why this was
 measurable at all. **It bounds a fixture rule (D8) and a refusal (D2).**
 
-### 4. Extrapolating to device B — a range, honestly
+### 4. The real database, measured end to end — and the estimate this replaces was WRONG
 
-The synthetic rows are ~254 B each. Real `message` rows carry ~100 columns and larger blobs,
-so real bytes-per-row is higher and the real row count correspondingly lower. At 300–900 B/row,
-446 MiB is **roughly 0.5M–1.6M messages**, and one full scan at 25.4 µs/row is **roughly
-13–40 s**.
+Run on the stand through **quince's own path** — `vault.OpenEncrypted` → `Unlock` →
+`parserfs.New` → `Materialize` → `messages.Open` — with `/mnt/quince` mounted **read-only**, so
+the run could not perturb a committed version even in principle. Password read from a file into
+memory; never in argv, never in an env var, never printed. Device B, iOS 26.6:
 
-**The exact figure needs the real row count, which needs the backup password**, and is
-therefore owed to the Operator (Gate G6). **The range is enough to decide the design**: at
-either end, a full scan per page is not a user interface.
+| | |
+| --- | --- |
+| `Unlock` | 1.926 s |
+| **`Materialize`** | **928 ms for 468,078,608 B — 481 MiB/s** |
+| `messages.Open` | 11 ms |
+| capability | `schema=messages.1 supported=true` **`missing=[]`** |
+| `Chats()`, all | **10 ms**, 390 chats (9 groups) |
+| **`Messages()`, all** | **8.437 s, 254,949 messages — 33.1 µs/row** |
+| `BodyUndecoded` | **0** |
+| row errors | **0** |
+| attachments | **21,777 yielded vs 21,777 join rows** |
+| tapbacks / balloons | 5,878 / 4,811 |
+| bytes per message | **1,836 B** |
 
-### 5. The parser trusts `message.cache_has_attachments`
+**An earlier revision of this section predicted 0.5M–1.6M messages and a 13–40 s scan, by
+extrapolating synthetic bytes-per-row. It was wrong in both.** Real rows are 1,836 B against the
+synthetic 254 B — 95 columns, not 26 — so the real message count is **a quarter of the low end of
+that range**, and the scan is 8.4 s rather than 13–40.
 
-`enrich` calls `fillAttachments` only when `row.cacheHasAttachments != 0`. Measured with a
-control: a database with five valid, non-dangling `message_attachment_join` rows and the cache
-column at its default `0` yields **1000 messages, 0 with attachments** — the join is never read.
+**The guard, which is why the failed estimate is recorded rather than deleted: do not size an
+iOS table from a synthetic row.** The column count alone was a 7× error, and it moved the answer
+in the direction that flatters the design. The measurement was cheap; the estimate was not worth
+making.
 
-**This is correct for a healthy database and is a silent-drop risk for a stale one**, which
-*no silent caps or fallbacks* forbids. D5 says what quince does about it.
+**`Materialize` is not the problem, and that was worth checking rather than assuming.** 446 MiB
+of decrypt and copy costs under a second — below the `Unlock` that precedes it.
 
-### 6. `backup.Capability` has no notion of search
+### 5. Real iOS ships the join indexes. The 127× is a FIXTURE hazard, and now a measured one
+
+The real database carries **82 indexes** over 95 message columns, among them
+`chat_message_join_idx_chat_id`, `chat_message_join_idx_message_id_only` and
+`message_attachment_join_idx_message_id` — exactly the ones fact 3's slow run lacked.
+
+**So the 127× cannot happen on a real backup and can happen in CI**, because the parser's own
+fixture has none of them. That makes it a fixture rule (D8), not a runtime risk.
+
+### 6. The attachment cache was ACCURATE on the real backup — the check stays anyway
+
+`enrich` calls `fillAttachments` only when `message.cache_has_attachments` is non-zero.
+Measured with a control on a synthetic database: five valid, non-dangling
+`message_attachment_join` rows with the column at its default `0` yields **1000 messages, 0 with
+attachments** — the join is never read.
+
+**On the real backup there is no shortfall**: 17,294 messages carry the flag, and all **21,777**
+join rows surfaced as 21,777 attachments. **No defect was found in the Operator's data**, and this
+paragraph must not be read as reporting one.
+
+The reconciliation in D5 stays because it costs one `COUNT(*)` per session and converts a
+would-be silent drop into a named warning. **It is a guard, not a fix.**
+
+### 7. The third tree is NOT a backup, and the second one is the empty case
+
+- **Device C has no `Manifest.db`** — `vault: manifest is unreadable`. It is a 512-byte
+  directory, not a backup with no messages. **An earlier revision of this spec cited it as
+  proof that *no messages in this backup* is a real case. That was wrong.**
+- **Device A is UNENCRYPTED** (`iosbackup: backup is not encrypted`) and needs
+  `OpenUnencrypted`. Through that path: `Unlock` 103 ms, `Materialize` 8 ms, schema
+  `messages.1`, `supported=true`, `missing=[]` — and **0 messages, 0 chats**.
+
+**Device A is the case story 7 needs, and it is a better one**: a valid, supported, *empty*
+messages database. *You have no messages* and *quince cannot read your messages* are different
+sentences, and this is the backup that can tell them apart.
+
+### 8. `backup.Capability` has no notion of search
 
 `Capability` is `{Domain, Supported, Schema, Missing}`. The envelope's advertised
 `"search"` capability is **quince's**, not the library's — so it is quince's to build and
@@ -134,10 +184,12 @@ had exactly one purpose, which is now served.
 
 ### D2 — ONE scan at unlock builds a session projection. Every UI read hits the projection
 
-Fact 2 says the parser cannot page a thread; fact 3 says a scan costs ~25 µs/row; fact 4 says
-device B is 13–40 s of scan. Three routes were considered and the measurement chose between them:
+Fact 2 says the parser cannot page a thread; fact 4 says one full scan of the Operator's real
+254,949-message database is **8.437 s**. Three routes were considered and the measurement chose
+between them:
 
-- **Full scan per page.** Refused. 13–40 s per page at the far end of a thread.
+- **Full scan per page.** Refused. **8.4 s to open a conversation, and 8.4 s again for a page at
+  the far end of it.** That is not a user interface at any scan speed this API can reach.
 - **quince opens the materialized `sms.db` with its own SQL.** Refused. It duplicates the
   schema-fingerprint and `attributedBody` work the library exists to own, and puts two
   parsers of one format in the project.
@@ -148,17 +200,24 @@ device B is 13–40 s of scan. Three routes were considered and the measurement 
 **The ruling: quince performs ONE `Messages()` scan per session, at unlock, and writes a
 session-scoped projection into the session's own scratch** — a small SQLite database holding
 the fields the surfaces need (message id, guid, chat ids, date, direction, handle, text,
-attachment refs, association and edit markers). Chats come from `Chats()`, which is cheap
-enough to read live.
+attachment refs, association and edit markers). Chats come from `Chats()`, which is **10 ms on
+the real backup** and cheap enough to read live.
+
+**The measured cost of that ruling is one unlock-time bill of about 9.4 s** — 928 ms to
+materialize plus 8.437 s to scan — **paid once per session instead of once per page.** Fact 4 is
+what makes this a cheap decision rather than a reluctant one; an earlier revision of this spec
+argued the same ruling from an estimate of 13–40 s that turned out to be wrong in the direction
+that flattered it.
 
 **This is not a persistent index and does not become one.** It lives in the session scratch
 `qn.8` already wipes on lock, TTL and shutdown; nothing version-keyed, nothing on the app DB,
 nothing surviving the lock. That is the same rule the roadmap states for FTS5 —
 *"session-scratch FTS5 search"* — arriving one layer earlier.
 
-**The scan is surfaced, never hidden.** It is work the user waits for, so it reports progress
-and its failure is a named state, per *no silent caps or fallbacks*. The upstream accessor
-stays worth doing as a later optimisation and is **not** this rung's dependency.
+**The scan is surfaced, never hidden.** ~9 s is long enough to need a progress report and a
+named failure state, per *no silent caps or fallbacks*, and short enough that no background-job
+machinery is warranted. The upstream accessor stays worth doing as a later optimisation and is
+**not** this rung's dependency.
 
 ### D3 — A thread pages by `(date, ROWID)` cursor, in the frozen envelope
 
@@ -248,8 +307,9 @@ not decode the payload.
 5. An attachment whose file is not in the backup says so, and offers no broken link.
 6. Searching a word finds the conversations containing it, or the search box is absent and the
    report says why.
-7. A backup with no `sms.db` (device C) reports *no messages in this backup* — not an error,
-   not an empty list without explanation.
+7. A backup whose messages database is present, supported and EMPTY (device A) reports *no
+   messages in this backup* — not an error, not a bare empty list. A tree that is not a backup
+   at all (device C) is a different sentence again.
 8. A message whose body cannot be decoded is shown as unknown, never as empty.
 9. Locking the session removes the projection, the FTS index and every materialized file.
 10. The unlock scan reports progress and, if it fails, says what failed and what to do.
@@ -265,15 +325,17 @@ Beyond `make gates` and `make gates-ui-e2e`:
 - **G3** — fixture test: `BodyUndecoded` renders as unknown (story 8), asserted at the surface,
   not only in the reader.
 - **G4** — fixture test: a database whose `cache_has_attachments` is stale produces the D5
-  warning naming both counts. **This gate is the control for fact 5** and fails if the check is
+  warning naming both counts. **This gate is the control for fact 6** and fails if the check is
   removed.
 - **G5** — fixture test: a fixture carrying a live `-wal` opens through `parserfs` and the
   committed bytes are unchanged afterwards (hash before/after).
-- **G6 — OWED TO THE OPERATOR, on hardware.** M7's rung gate: renders the real backup
-  correctly, spot-checked against iMazing. Also the only way to close fact 4's range —
-  the real message and chat counts, and the real `Materialize` time for 446 MiB. **Owner:
-  the Operator**, on a dev-deploy build with a click-list. It is not a park: the build ships
-  with the slice.
+- **G6 — the SIZING half is CLOSED (fact 4); the CORRECTNESS half is owed.** M7's rung gate is
+  *renders the Operator's real backup correctly, spot-checked against iMazing*, and it has two
+  halves that this spec deliberately separates. **Closed:** the real counts, the scan time and the
+  `Materialize` time are measured — a session can now size this rung without the Operator.
+  **Owed:** whether the 254,949 messages render *correctly* is a human comparison against iMazing
+  that no measurement substitutes for. **Owner: the Operator**, on a dev-deploy build with a
+  click-list. It is not a park — the build ships with slice 7.
 - **G7** — `make privacy-check` over the branch, and by eye over every fixture, before merge.
 
 ## Fixtures
@@ -315,7 +377,9 @@ themselves invented. **No byte of any fixture comes from a real device.**
   hardware run does not print it and the projection never stores it.
 - **Interface facts looked up live** — every parser fact above was read from the `v0.2.0` tree,
   and the pin from `core/go.mod`. The 127× index finding and the `cache_has_attachments` gate
-  were **measured with controls**, not inferred.
+  were **measured with controls**, not inferred; facts 4–7 are quince’s own code path against the
+  Operator’s real backups, read-only, rather than an extrapolation — which is what caught the
+  extrapolation this spec had to withdraw.
 - **Docs are part of the diff** — `contracts.md` gains `messages.*` in the slice that builds it.
   Each PR declares `go test -cover` plus a known-untested list.
 - **Every bug found on hardware becomes a replay fixture** — anything G6 turns up becomes a
