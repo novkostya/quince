@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { useAuthStatus } from "@/lib/auth";
+import { useAuthStatus, scopeOfSession } from "@/lib/auth";
 import { useConfig } from "@/lib/config";
 import { useInsecureOrigin } from "@/lib/health";
 
@@ -124,5 +124,48 @@ export function RequireStorage({ children }: { children: ReactNode }) {
   if (storages === null || storages.length === 0) {
     return <Navigate to="/onboarding/storage" replace />;
   }
+  return <>{children}</>;
+}
+
+// RequireAdmin holds the routes a device-scoped holder must not reach — qn.13 slice 8d, spec D8,
+// ruled on quince#1443.
+//
+// D8: *the devices list is UNREACHABLE, not merely unlinked; Settings is HIDDEN, not merely empty.*
+// Hiding a nav item leaves the URL working, and a typed or bookmarked URL is exactly how a household
+// member arrives at a screen whose every read then errors at them.
+//
+// IT IS NOT THE ENFORCEMENT AND MUST NOT BE READ AS ONE. D8 is explicit that *unreachable is a
+// server property, not a routing one*: every route behind this refuses a scoped principal at the
+// API regardless, and quince#1441's `enforcesItsOwnPrincipal` gate is what keeps that true. This
+// decides what the shell OFFERS. A user who defeated it would meet the server's refusal, which is
+// the same answer in a worse sentence.
+//
+// TO HOME, NOT TO A REFUSAL PAGE. A scoped holder's Home *is* their device page (D8), so redirecting
+// there lands them on the one screen that is theirs rather than on an apology. `replace`, so Back
+// does not bounce them between the two.
+//
+// WHILE THE STATUS IS LOADING IT RENDERS NOTHING RATHER THAN GUESSING. Admitting the children would
+// flash an admin screen at a household member on every reload; redirecting would flash the reverse
+// at the admin. `Loading` is the only answer that is not wrong for somebody.
+export function RequireAdmin({ children }: { children: ReactNode }) {
+  const { data, isLoading } = useAuthStatus();
+  if (isLoading) return <Loading />;
+  const udid = scopeOfSession(data);
+  if (udid !== "") return <Navigate to={`/devices/${encodeURIComponent(udid)}`} replace />;
+  return <>{children}</>;
+}
+
+// ScopedHome routes `/` to whoever is asking — qn.13 slice 8d, D8: *the scoped holder's Home IS their
+// device page.*
+//
+// THIS IS THE ONE THAT FIXES THE FALSE STATEMENT. Before it, Home rendered the devices list to a
+// scoped holder, `GET /api/devices` refused them, and the empty-state card said *"No devices
+// connected"* — a screen asserting something untrue about the user's own data, which is why
+// quince#1443 was filed as a bug rather than as a missing feature. One of those devices is theirs.
+export function ScopedHome({ children }: { children: ReactNode }) {
+  const { data, isLoading } = useAuthStatus();
+  if (isLoading) return <Loading />;
+  const udid = scopeOfSession(data);
+  if (udid !== "") return <Navigate to={`/devices/${encodeURIComponent(udid)}`} replace />;
   return <>{children}</>;
 }
