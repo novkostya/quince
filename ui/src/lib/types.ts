@@ -932,3 +932,64 @@ export interface VersionOverviewCellular {
   iccid: string;
   phone_number: string;
 }
+
+// SessionOverview is GET /api/sessions/{id}/overview — qn.9's POST-UNLOCK tier, in contracts
+// §1's frozen domain envelope plus the two fields qn.9 amends it with.
+//
+// IT IS A DIFFERENT OBJECT FROM VersionOverview, and deliberately so: that one describes a
+// version before it is opened and has no session; this one describes its CONTENTS and cannot
+// exist without one. Sharing a type would mean a screen holding a value that is half unknown
+// for reasons the type could not express.
+export interface SessionOverview {
+  // What THIS ADAPTER can do — the frozen envelope field. It is NOT the per-domain report;
+  // that is `domains`, and the two sharing a word is what quince#1459 was filed about.
+  capabilities: string[];
+  adapter_version: string;
+  warnings: string[];
+  // Null for overview: it can always serve something, because the domain totals do not depend
+  // on any domain parsing. The per-domain equivalent is each row's own `state`.
+  unsupported_reason: string | null;
+  page: { items: DomainSummary[]; next_cursor?: string };
+  // ABSENT, not null, when an endpoint has no report (`omitempty` on the Go side). A client
+  // tests for the key rather than distinguishing null from empty.
+  domains?: DomainCapability[];
+  // The whole-version figures the page's rows sum to. CARRIED BECAUSE THE PAGE IS PAGINATED:
+  // a client holding one page of 1,264 rows cannot compute the total itself, and D3 requires
+  // that what the surface shows and what it claims as a total reconcile.
+  totals: OverviewTotals;
+}
+
+// DomainSummary is one DOMAIN's files and bytes — NOT one app's.
+//
+// The difference is not cosmetic: one measured backup yields 21 user-installed apps, 1,203
+// bundles with a container, 1,205 app domains holding files and 1,264 domains in total. This
+// is the last of those. Folding them into apps is D3's partition, in `appSizes.ts`.
+export interface DomainSummary {
+  domain: string;
+  files: number;
+  bytes: number;
+}
+
+export interface OverviewTotals {
+  files: number;
+  bytes: number;
+  // NOT len(page.items) unless every page has been walked — named `domain_count` rather than
+  // `domains` because the envelope already has a `domains`, and one response carrying two
+  // fields of that name is the confusion quince#1459 was filed about.
+  domain_count: number;
+}
+
+// DomainCapability is one row of the capability report — qn.9 D6.
+export interface DomainCapability {
+  domain: string;
+  // FOUR states, because an unrecognised schema and bytes that are not a database have
+  // different remedies: the first invites a schema-support issue and needs the fingerprint,
+  // the second means the backup is damaged and no parser work will help.
+  state: "supported" | "unsupported_schema" | "absent" | "unreadable";
+  schema?: string;
+  // What this backup's schema cannot provide — "no silent caps" as a data structure.
+  missing?: string[];
+  // The observed structure, present only on unsupported_schema. It is what a schema-support
+  // issue needs; without it "unsupported" is a dead end for whoever adds support.
+  fingerprint?: string;
+}
