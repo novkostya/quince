@@ -63,16 +63,32 @@ Auth (endpoints ruled in qn.1, Operator 2026-07-19):
 
 ```
 GET  /api/auth/status  → {state: "needs_setup" | "needs_login" | "authenticated",
-                          csrf_token}
+                          csrf_token, scope}
      // first-run detection + reload-auth check + CSRF-token delivery in one call;
      // always reachable without a session.
-POST /api/auth/setup {password}  → 200 {state, csrf_token} + session cookie
+     // `scope` IS null FOR AN ADMIN and {udid} for a device-scoped principal (qn.13 slice 8d,
+     // D8, ruled on quince#1443). SAME TYPE AND SAME SPELLING as `scope` on a row of
+     // GET /api/auth/passkeys — one concept, one shape, across both objects.
+     // `state` IS THE DISAMBIGUATOR, NOT THE FIELD'S PRESENCE. `scope` is meaningful only when
+     // `state == authenticated`; on any other state its value carries no claim. It is not
+     // `omitempty`, deliberately: making ABSENCE mean both "not authenticated" and "admin" is
+     // one value standing for several states with no way to tell them apart.
+     // IT AUTHORIZES NOTHING. The shell hides what a principal cannot use; every route refuses
+     // regardless (D8: unreachable is a server property, not a routing one). A forged `scope`
+     // hides things from its own user and grants nothing.
+     // A SESSION WHOSE CREDENTIAL HAS BEEN REMOVED ANSWERS `needs_login`, not `authenticated`
+     // with a null scope — null means ADMIN, so the generous reading would tell a revoked
+     // household member they administer quince. quince#1001 ends such sessions at removal, so
+     // this is the window between the two.
+POST /api/auth/setup {password}  → 200 {state, csrf_token, scope} + session cookie
      // FIRST-RUN ONLY: 409 if this install is already CONFIGURED — setup succeeds exactly
      // once and can never be an unauthenticated password reset. Auto-logs-in on success.
      // 426 insecure_origin, BEFORE the password is stored (see below).
-POST /api/auth/login {password}  → 200 {state, csrf_token} + HttpOnly session cookie
+POST /api/auth/login {password}  → 200 {state, csrf_token, scope} + HttpOnly session cookie
      // 401 on bad password; 429 when the per-IP login rate limit trips;
      // 426 insecure_origin, BEFORE the password is checked (see below).
+     // `scope` is always null here: a password is the admin's and there is nothing else it
+     // could be (0014). It is present rather than omitted so one client path reads one shape.
 POST /api/auth/logout            → 204, clears the cookie.
 ```
 
