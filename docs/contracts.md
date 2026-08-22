@@ -1425,6 +1425,20 @@ Storage becomes plural at `qn.6c`, so a backup must be able to say *where*. Addi
 ```
 GET  /api/storages                                        → {storages: Storage[]}
 GET  /api/storages?udid=<udid>                            → {storages: Storage[]}  // adds will_be_full
+     // ANSWERS DIFFERENTLY PER PRINCIPAL since qn.13 slice 8f (spec D3's second exception,
+     // Operator 2026-08-22). An ADMIN gets the whole Storage object. A DEVICE-SCOPED principal
+     // gets {id, name, reachable} and nothing else — the same rows, projected — because they read
+     // this list to choose where their own backup goes and capacity, health, backend, path and
+     // will_be_full are the admin's operational picture.
+     // THE ID IS REQUIRED, NOT DECORATION: POST /api/jobs addresses a storage by storage_id.
+     // FEWER KEYS, NOT BLANK ONES. A zeroed Storage would send "path":"" which a client cannot
+     // tell from "this storage has no path" — one value for two states (cf. quince#744).
+     // UNREACHABLE STORAGES ARE LISTED, not omitted: hiding them collapses "exists but
+     // unreachable" into "does not exist", and only the first has a remedy.
+     // ITS SCOPE CLASS IS `scopedProjection`, which exists for this route — every other
+     // scope-aware route filters ROWS by device, and this one filters FIELDS with no device in it.
+     // STORAGE MANAGEMENT IS UNTOUCHED: create, delete, probe, recheck and set-default are all
+     // still adminOnly. The D3 row SPLIT; it did not flip.
 POST /api/storages/{name}/recheck                          → 200 {storage} | 404
 POST /api/storages/probe {path}                            → 200 {probe} | 422
 POST /api/storages/probe/hook {parent_dataset, ssh_user, ssh_host,

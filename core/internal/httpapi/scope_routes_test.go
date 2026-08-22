@@ -27,7 +27,8 @@ func TestTheAdminOnlySurfaceIsRefusedToScopedPrincipals(t *testing.T) {
 	mustRefuse := []string{
 		"GET /api/config", "PUT /api/config",
 		"POST /api/config/storage", "DELETE /api/config/storage/{name}",
-		"GET /api/storages", "POST /api/storages/probe",
+		"POST /api/storages/probe", "POST /api/storages/{name}/recheck",
+		"POST /api/config/storage/{name}/default",
 		"GET /api/auth/passkeys", "DELETE /api/auth/passkeys/{id}",
 		"POST /api/auth/passkeys/register/begin", "POST /api/auth/passkeys/register/finish",
 		"PUT /api/auth/password", "DELETE /api/auth/password",
@@ -103,5 +104,30 @@ func TestTheRefusalNamesTheBoundary(t *testing.T) {
 	}
 	if !strings.Contains(scopeRefusalDetail, "one device") {
 		t.Fatalf("the refusal text %q does not say what access the caller DOES have", scopeRefusalDetail)
+	}
+}
+
+// THE D3 ROW SPLIT, AND BOTH HALVES ARE ASSERTED — qn.13 slice 8f, Operator 2026-08-22.
+//
+// `GET /api/storages` USED TO BE IN THE LIST ABOVE, and it was removed from it by a ruling rather
+// than by an oversight. A scoped holder reads that list to choose where their own backup goes; the
+// projection is what keeps the admin's operational picture out of it (`storage_projection_test.go`).
+//
+// SO THIS TEST EXISTS TO STOP THE REMOVAL GENERALISING. Storage MANAGEMENT is still the admin's, and
+// the tempting next step — "storages are readable now" — is the one that would hand a household
+// member the ability to delete one. The management routes are asserted above; this asserts the read
+// is deliberately NOT among them, so a future edit that puts it back has to argue with the ruling.
+func TestTheStorageLISTIsReadableByAScopedPrincipal(t *testing.T) {
+	class, ok := scopeOfPattern("GET /api/storages")
+	if !ok {
+		t.Fatal("GET /api/storages has no scope decision")
+	}
+	if class.refusesScoped() {
+		t.Fatal("GET /api/storages refuses a scoped principal — spec D3's SECOND exception says " +
+			"they read it to choose a destination for their own backup")
+	}
+	if class != scopedProjection {
+		t.Fatalf("GET /api/storages is %v, want scopedProjection — the response carries FEWER "+
+			"FIELDS for a scoped principal, which is not what any other class means", class)
 	}
 }

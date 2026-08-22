@@ -34,6 +34,21 @@ const (
 	// Slice 8c's.
 	scopedFiltered
 
+	// scopedProjection — permitted, and the response carries FEWER FIELDS for a scoped principal.
+	// The same rows, projected. Slice 8f's, and the first of its kind here.
+	//
+	// WHY NOT `scopedFiltered`, WHICH IS THE TEMPTING REUSE. That class means *narrowed to the
+	// principal's DEVICE*, and every route carrying it filters ROWS by udid. `GET /api/storages`
+	// has no device in it at all: a scoped holder sees every storage the admin does, and what is
+	// withheld is capacity, health, backend, path and the `will_be_full` projection — the admin's
+	// operational picture (spec D3, second exception). Rows and fields are different narrowings
+	// and a map that called them one thing would be describing this route wrongly to the next
+	// reader, which is the whole job of the map.
+	//
+	// IT IS NOT A WEAKER `adminOnly` EITHER. The route is not being relaxed; the handler returns
+	// DIFFERENT CONTENT per principal, which is a shape the enumeration has to be able to state.
+	scopedProjection
+
 	// openToAll — no device in it, and nothing a scoped principal must not see: health, its own
 	// session, its own notification subscription.
 	openToAll
@@ -46,13 +61,16 @@ const (
 // in any test rather than serving a scoped principal something nobody considered.
 var routeScope = map[string]scopeClass{
 	// ── Admin only. Not their device, or not their authority (spec D3). ──────────────────────────
-	"GET /api/config":                          adminOnly,
-	"PUT /api/config":                          adminOnly,
-	"POST /api/config/storage":                 adminOnly,
-	"DELETE /api/config/storage/{name}":        adminOnly,
-	"POST /api/config/storage/{name}/default":  adminOnly,
-	"POST /api/config/insecure-transport":      adminOnly,
-	"GET /api/storages":                        adminOnly,
+	"GET /api/config":                         adminOnly,
+	"PUT /api/config":                         adminOnly,
+	"POST /api/config/storage":                adminOnly,
+	"DELETE /api/config/storage/{name}":       adminOnly,
+	"POST /api/config/storage/{name}/default": adminOnly,
+	"POST /api/config/insecure-transport":     adminOnly,
+	// THE SECOND EXCEPTION (spec D3, Operator 2026-08-22): a scoped holder reads this list in
+	// order to choose a destination for their own backup. Storage MANAGEMENT stays adminOnly —
+	// every other route in this block is untouched.
+	"GET /api/storages":                        scopedProjection,
 	"POST /api/storages/probe":                 adminOnly,
 	"POST /api/storages/probe/hook":            adminOnly,
 	"POST /api/storages/zfs/hostkey":           adminOnly,

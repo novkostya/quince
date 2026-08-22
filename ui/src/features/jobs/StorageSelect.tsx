@@ -80,7 +80,12 @@ export function StorageSelect({
         {storages.map((s) => (
           <option key={s.id} value={s.id} disabled={!s.reachable}>
             {s.name}
-            {s.reachable ? ` (${s.backend})` : " — not connected"}
+            {/* THE BACKEND IS THE ADMIN'S DETAIL AND A SCOPED HOLDER IS NOT SENT IT (qn.13 slice
+                8f, spec D3's second exception). `GET /api/storages` projects to
+                `{id, name, reachable}` for them, so this renders the name alone rather than
+                `(undefined)` — which is what it would have said if the projection had landed
+                without this guard. */}
+            {s.reachable ? (s.backend ? ` (${s.backend})` : "") : " — not connected"}
           </option>
         ))}
       </select>

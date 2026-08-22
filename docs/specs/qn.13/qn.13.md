@@ -253,7 +253,7 @@ owed is a measurement — enrol a scoped credential on a phone already holding t
 see what survives.
 
 
-### D3 — What a scoped holder may do: a rule, and the one exception the Operator ruled
+### D3 — What a scoped holder may do: a rule, and the TWO exceptions the Operator ruled
 
 **The rule (architect, quince#1342): a scoped holder may CREATE and READ their device's data, and
 CONTROL operations on it. They may not DESTROY data, and they may not affect the admin's ability to
@@ -268,7 +268,9 @@ restore.**
 | **the backup encryption password** | **yes — the exception** | see below |
 | delete a version | **no** | it sits on the admin's storage under the admin's retention policy; causing something is not owning it |
 | restore to the device | **no** | it overwrites a device; out of scope here, and the rule pre-answers it |
-| Settings, storages, other devices, pairing, issuing passkeys | **no** | not their device, or not their authority |
+| **choosing which storage their backup goes to** | **yes — the second exception** | see below |
+| creating, deleting or probing a storage · setting the default | **no** | storage MANAGEMENT is the admin's; the exception is a read and a choice, not a write |
+| Settings, other devices, pairing, issuing passkeys | **no** | not their device, or not their authority |
 
 **The exception, stated with its reason because the rule alone generates the wrong answer.** The
 architect's rule yields **no** for the encryption password: a scoped holder changing it can
@@ -287,6 +289,53 @@ were made with, which is true today, with or without this rung, and with or with
 **RULED — REQUIRED** (quince#1347 review): the admin is notified when a scoped holder changes it — *"the encryption password for
 `<device>` was changed"*. That is the state-honesty rule applied to a real consequence, not a
 permission check. See *Ruled at spec review*, item 3.
+
+
+**THE SECOND EXCEPTION — CHOOSING A DESTINATION, and the row it comes from SPLITS rather than
+flips.** The architect's rule yields **no** for storages, and the original row bundled reading a
+storage list together with managing one. **The Operator ruled yes** (2026-08-22, in session): *"I
+guess we have to give ro access to storage so that you can select what storage to back up to"* —
+confirmed as theirs on quince#1472 when the architect declined to act on a relayed quote.
+
+**Transcribed rather than cited, because an in-session ruling is binding and UNCITABLE**
+(quince-devlog#292): there is no comment URL, so this text is the record. The same is true of the
+exception above it, and for the same reason.
+
+**What moved is one word in one direction.** Reading the storage list *in order to choose a
+destination for their own backup* becomes yes. **Storage management stays no** — creating, deleting,
+probing, rechecking, setting the default. So the reader arriving later sees a row that was **split**,
+not a rule that was wrong.
+
+**Why the rule alone gets it wrong.** *Control operations on their device* plainly covers choosing
+where their own backup goes; the rule said no only because the row it lived in was about the admin's
+infrastructure. The clause it must not breach — *may not affect the admin's ability to restore* — is
+untouched: a destination choice writes no configuration and removes nothing.
+
+**What it discloses, and the bound is deliberate.** `{id, name, reachable}` and nothing else. Not
+capacity, health, backend, path, or the `will_be_full` projection — those are the admin's operational
+picture, and a household member choosing a destination does not need them. The `id` is not
+decoration: `POST /api/jobs` addresses a storage by it and `StorageSelect` is built on it.
+
+**PER-BACKUP, NEVER PERSISTED.** A remembered per-device preference is a config write, which the rule
+does not grant. Per-backup keeps the choice an argument to an operation they already control — and
+the ASSISTED model already puts a human at the device for every backup, so the question is asked at a
+moment that already exists rather than buying a new capability for a ceremony nobody performs.
+
+**An unusable destination REFUSES at job time and names the admin as the remedy** — never a silent
+fallback to the default. Because the picker offers only what is reachable, this is a race rather than
+a routine path, so refusing costs almost nothing and guessing would cost the user a backup on a disk
+they did not choose.
+
+**Unreachable storages are shown DISABLED, not omitted.** Hiding them collapses *exists but
+unreachable* into *does not exist*, and the first has a remedy while the second does not.
+
+**And the remedy must not send a scoped holder to `/storage/<name>`.** That is an admin page, and
+linking it would be the shell offering a route the API refuses — a live instance of quince#1468. For
+them the remedy is the admin.
+
+**Nothing new is owed for admin visibility.** `Job.StorageID` and `Version.StorageID` already record
+the resolved destination — *never the word "default"* — and `BackupControls` already resolves it to a
+name on screen. Measured on quince#1472 before proposing a surface.
 
 ### D4 — Enrolment: a one-shot authorization for a registration, not a token quince stores
 

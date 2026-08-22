@@ -17,14 +17,53 @@ import (
 // is a plain resource. "Will the next backup be full" is a property of a (device, storage) pair,
 // not of a storage, so putting it on the object unconditionally would distort the resource for the
 // storage-cards rung that follows.
+//
+// AND IT ANSWERS DIFFERENTLY PER PRINCIPAL SINCE qn.13 SLICE 8f — spec D3's second exception,
+// ruled by the Operator 2026-08-22. A device-scoped holder reads this list to choose where their
+// own backup goes, and gets `{id, name, reachable}`; the admin gets the whole object. That is the
+// `scopedProjection` class, and this is the route it was added for.
+//
+// THE PROJECTION IS BUILT HERE, NOT IN THE PROVIDER. `d.Storages.Storages()` answers what exists;
+// deciding who may see which fields is an authorization question and belongs at the boundary that
+// knows the principal. A provider that took a principal would put that decision behind an interface
+// several implementations satisfy, which is where a projection quietly stops being applied.
 func (d Deps) handleStorages() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		list := d.Storages.Storages(r.URL.Query().Get("udid"))
 		if list == nil {
 			list = []wire.Storage{}
 		}
+		// SCOPE RESOLVED, AND A FAILURE PROJECTS RATHER THAN REFUSES. `ScopeOf` errors when the
+		// credential is gone (quince#1001's window), and the narrow answer is the safe one here:
+		// showing a household member's projection to somebody quince cannot identify withholds
+		// fields, where the generous answer would hand them the admin's operational picture.
+		// NO PRINCIPAL FALLS THROUGH TO THE FULL OBJECT, and that is safe only because it is
+		// unreachable: this route is not in `authExempt`, so `authGuard` has always bound one by
+		// the time it runs. Said out loud because it is the branch here that hands out the
+		// admin's picture, and because a dropped bool reads as a password login, which reads as
+		// the admin — `scopeGuardFor` documents its equivalent branch the same way.
+		if p, ok := PrincipalFrom(r.Context()); ok {
+			udid, err := d.Auth.ScopeOf(p)
+			if err != nil || udid != "" {
+				writeJSON(w, d.Log, http.StatusOK, wire.ScopedStoragesResponse{Storages: storageChoices(list)})
+				return
+			}
+		}
 		writeJSON(w, d.Log, http.StatusOK, wire.StoragesResponse{Storages: list})
 	}
+}
+
+// storageChoices narrows the list to what a scoped principal may see (spec D3, second exception).
+//
+// UNREACHABLE STORAGES STAY IN THE LIST, DISABLED RATHER THAN OMITTED. Hiding them collapses
+// *exists but unreachable* into *does not exist*, and only the first has a remedy — so the picker
+// can say "not connected" instead of silently offering a shorter world.
+func storageChoices(list []wire.Storage) []wire.StorageChoice {
+	out := make([]wire.StorageChoice, 0, len(list))
+	for _, s := range list {
+		out = append(out, wire.StorageChoice{ID: s.ID, Name: s.Name, Reachable: s.Reachable})
+	}
+	return out
 }
 
 // handleStorageRecheck serves POST /api/storages/{name}/recheck → 200 {storage} | 404.

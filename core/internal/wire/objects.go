@@ -369,6 +369,36 @@ type StoragesResponse struct {
 	Storages []Storage `json:"storages"`
 }
 
+// StorageChoice is what a DEVICE-SCOPED principal sees of a storage — qn.13 slice 8f, spec D3's
+// second exception (Operator, 2026-08-22).
+//
+// THREE FIELDS, AND THE BOUND IS THE POINT. A scoped holder reads this list to choose where their
+// own backup goes, and that needs an identifier, a label, and whether it can accept one. Capacity,
+// health, backend, path and the `will_be_full` projection are the admin's operational picture and
+// are withheld — they would tell a household member the shape of the install rather than help them
+// pick a disk.
+//
+// THE ID IS NOT DECORATION. `POST /api/jobs` addresses a storage by `storage_id` and `StorageSelect`
+// is built on it, so a name-only projection would be a picker that cannot submit. (Ruled name-only
+// first and corrected on quince#1472 for exactly that reason.)
+//
+// A SEPARATE TYPE RATHER THAN A ZEROED `Storage`. Emitting the full object with blanks would send
+// `"path": ""` and `"backend": ""`, which a client cannot tell from *this storage has no path* — a
+// value standing for two states, which is the defect quince#744 is open about. Fewer keys says
+// *not sent*; an empty string says something false.
+type StorageChoice struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Reachable bool   `json:"reachable"`
+}
+
+// ScopedStoragesResponse is GET /api/storages for a device-scoped principal. Same `storages` key,
+// narrower objects — the route returns different CONTENT per principal rather than being refused,
+// which is what `scopedProjection` names in the scope map.
+type ScopedStoragesResponse struct {
+	Storages []StorageChoice `json:"storages"`
+}
+
 type StorageResponse struct {
 	Storage Storage `json:"storage"`
 }
