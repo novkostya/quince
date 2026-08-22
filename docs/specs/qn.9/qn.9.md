@@ -571,11 +571,11 @@ Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewa
 | **3** | `ios-backup-crypt`: `Status.plist` + `Info.plist` readers (D2b, D2c) | **merged** — `ios-backup-crypt#16` |
 | **4** | `ios-backup-crypt/fixture`: generate both plists (D8) | **merged** — `ios-backup-crypt#15`, and taken BEFORE 3 so 3 landed with no declared gap |
 | **5** | the aggregate on the seam, both implementations, conformance + G5 (D4) | **merged** — quince#1454 |
-| **6** | `GET /api/versions/{id}/overview`, the pre-unlock tier, contracts §1 (D11) | **in review** — quince#1432 |
+| **6** | `GET /api/versions/{id}/overview`, the pre-unlock tier, contracts §1 (D11) | **merged** — quince#1470 |
 | **7** | `parserfs` — `backup.FS` over a vault session (D7) | **merged** — quince#1456. `ReadDirFS` implemented, not assertable until a parser tag |
 | **8** | the capability report, four states, lazy + session-cached (D6) | **merged** — quince#1458 |
 | **9** | `GET /api/sessions/{id}/overview`, contracts §1/§4 (D4, D11) | **merged** — quince#1461 |
-| **10** | the surface (D3, D9, D10), then G7 to the Operator | not open — slice 6 is its dependency, not the tag |
+| **10** | the surface (D3, D9, D10), then G7 to the Operator | **in review** — quince#1471 is the PRE-UNLOCK half; the unlock enrichment is not open |
 
 **THIS TABLE IS A SECOND PART DESCRIBING THE WHOLE, so it is stale by default after every merge** —
 quince#409's finding, which cost four of five rows in the PR that fixed the heading above them. The
