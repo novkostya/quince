@@ -74,6 +74,8 @@ func Run(t T, f Fixture) {
 	guard(func() { testOpenUnknown(t, f) })
 	guard(func() { testCanary(t, f) })
 	guard(func() { testFilters(t, f) })
+	guard(func() { testAggregateAgreesWithWalk(t, f) })
+	guard(func() { testAggregateLocked(t, f) })
 }
 
 func unlocked(t T, f Fixture) vault.Vault {
@@ -378,5 +380,88 @@ func assertEntries(t T, got, want []vault.FileEntry) {
 		if !want[i].MTime.IsZero() && !got[i].MTime.Equal(want[i].MTime) {
 			t.Errorf("entry %s MTime = %v, want %v", got[i].FileID, got[i].MTime, want[i].MTime)
 		}
+	}
+}
+
+// testAggregateAgreesWithWalk is the ONLY thing that makes "same contract, two bodies"
+// mean anything for Aggregate. The two implementations reach the answer by entirely
+// different routes — one walks the library's iterator, one runs its own SQL — so the suite
+// pins the ANSWER and deliberately says nothing about the route.
+//
+// It compares against a full paginated walk, which is the expensive thing Aggregate exists
+// to avoid: if the two ever disagree, the cheap path is wrong and the surface built on it
+// is reporting numbers no browse can corroborate.
+func testAggregateAgreesWithWalk(t T, f Fixture) {
+	v := unlocked(t, f)
+	defer func() { _ = v.Close() }()
+
+	entries := walkAll(t, v, vault.Query{}, len(f.Entries)+10)
+	want := map[string]vault.DomainTotals{}
+	var wantFiles, wantBytes int64
+	for _, e := range entries {
+		d := want[e.Domain]
+		d.Domain = e.Domain
+		d.Files++
+		d.Bytes += e.Size
+		want[e.Domain] = d
+		wantFiles++
+		wantBytes += e.Size
+	}
+
+	got, err := v.Aggregate(context.Background())
+	if err != nil {
+		t.Fatalf("Aggregate: %v", err)
+	}
+	if got.TotalFiles != wantFiles {
+		t.Errorf("Aggregate TotalFiles = %d, walk saw %d", got.TotalFiles, wantFiles)
+	}
+	if got.TotalBytes != wantBytes {
+		t.Errorf("Aggregate TotalBytes = %d, walk saw %d", got.TotalBytes, wantBytes)
+	}
+	if len(got.Domains) != len(want) {
+		t.Errorf("Aggregate returned %d domains, walk saw %d", len(got.Domains), len(want))
+	}
+
+	// THE PER-DOMAIN ROWS MUST SUM TO THE TOTALS. This is the spec's D3 reconciliation
+	// requirement asserted at the seam rather than at the surface: a surface that shows some
+	// domains and a total cannot detect a dropped one, so the seam must not be able to
+	// produce that shape in the first place.
+	var sumFiles, sumBytes int64
+	for i, d := range got.Domains {
+		w, ok := want[d.Domain]
+		if !ok {
+			t.Errorf("Aggregate reports domain %q that the walk never saw", d.Domain)
+			continue
+		}
+		if d.Files != w.Files || d.Bytes != w.Bytes {
+			t.Errorf("domain %q: Aggregate {files=%d bytes=%d}, walk {files=%d bytes=%d}",
+				d.Domain, d.Files, d.Bytes, w.Files, w.Bytes)
+		}
+		sumFiles += d.Files
+		sumBytes += d.Bytes
+		if i > 0 && got.Domains[i-1].Domain >= d.Domain {
+			t.Errorf("Aggregate domains are not sorted: %q then %q", got.Domains[i-1].Domain, d.Domain)
+		}
+	}
+	if sumFiles != got.TotalFiles || sumBytes != got.TotalBytes {
+		t.Errorf("per-domain rows sum to {files=%d bytes=%d}, totals say {files=%d bytes=%d}",
+			sumFiles, sumBytes, got.TotalFiles, got.TotalBytes)
+	}
+}
+
+// testAggregateLocked: Aggregate answers ErrLocked before Unlock and after Close, like every
+// other method. Without this an implementation could reach the index while the vault claims
+// to hold no keys.
+func testAggregateLocked(t T, f Fixture) {
+	v := f.Open(t)
+	if _, err := v.Aggregate(context.Background()); !errors.Is(err, vault.ErrLocked) {
+		t.Errorf("Aggregate before Unlock = %v, want ErrLocked", err)
+	}
+	_ = v.Close()
+
+	v2 := unlocked(t, f)
+	_ = v2.Close()
+	if _, err := v2.Aggregate(context.Background()); !errors.Is(err, vault.ErrLocked) {
+		t.Errorf("Aggregate after Close = %v, want ErrLocked", err)
 	}
 }

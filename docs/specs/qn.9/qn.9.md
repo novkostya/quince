@@ -130,9 +130,12 @@ backup at all). Read from each of the seven domain packages and `errors.go`.
 **10. The parser exposes no domain registry.** No `Domains()`, no slice, no map — the seven packages
 are reachable only by importing each. `grep` over the repository.
 
-**11. The fixture generator writes `Manifest.plist` and `Manifest.db` and nothing else.** No
-`Info.plist`, no `Status.plist` — read from `fixture/fixture.go` and `internal/builder/builder.go`.
-D8.
+**11. The fixture generator wrote `Manifest.plist` and `Manifest.db` and nothing else — AT
+SCOPING TIME. THIS RUNG CHANGED IT.** Read from `fixture/fixture.go` and
+`internal/builder/builder.go` on 2026-08-22, and superseded the same day by
+`novkostya/ios-backup-crypt#15`, which generates both other plists. **Kept in the past tense as
+provenance**, because it is the measurement D8 was written from and a reader arriving at D8
+needs to see the premise as well as its resolution. Do not read it as a present state.
 
 **12. `iosbackup.Open` refuses an unencrypted backup** with `ErrNotEncrypted`, so the library's
 single-pass `List` — the cheap aggregate of fact 8 — is reachable only on encrypted versions.
@@ -311,17 +314,24 @@ here.** This one is thin and real, and D6 runs on it.
 owns — one path for lock, TTL and shutdown alike — gains the domain closes, rather than growing a
 second teardown beside it.
 
-### D8 — Fixtures: the generator cannot yet build what the pre-unlock tier reads
+### D8 — Fixtures: the pre-unlock tier's fixtures come from upstream, and they have ARRIVED
 
-Fact 11: it writes `Manifest.plist` and `Manifest.db` only. **So `Info.plist` and `Status.plist` —
-D2(b) and D2(c), including the app list — cannot be fixture-tested today**, and M7's gate is *"fixture
-tests in CI"*.
+Fact 11 recorded that the generator wrote `Manifest.plist` and `Manifest.db` only, so `Info.plist`
+and `Status.plist` — D2(b) and D2(c), including the app list — could not be fixture-tested, against
+an M7 gate of *"fixture tests in CI"*. **That was this rung's one dependency outside itself, and it
+is met**: `novkostya/ios-backup-crypt#15` generates both, in the formats iOS actually writes them in
+(XML `Info.plist`, binary `Status.plist`), and `#16` reads them back.
 
-**This is the one dependency this rung has outside itself.** It is upstream work in
-`ios-backup-crypt/fixture`, it is small (two plists of known shape), and the spec names it rather than
-letting a slice discover it. Until it lands, the pre-unlock tier's tests cover D2(a) — which needs
-only `Manifest.plist`, already generated — and the two other reads are **declared untested with the
-reason**, which is accepted debt; undeclared would be a finding.
+**So nothing here is declared untested any more.** The clause that stood here — cover D2(a), declare
+the other two as accepted debt — is spent, and is recorded rather than deleted because a reader
+arriving from a citation needs to see that the dependency was met rather than dropped.
+
+**This heading asserted `cannot yet build` after it could**, and that is quince#408's signature
+exactly: a heading describes the whole, so it is stale by default after every flip, and a stale
+heading is read as authority. It survived four merges and two seats — the reviewer who approved every
+one of them found it, not the author. **The habit it earns: a PR that closes a dependency sweeps
+whatever DECLARED that dependency.** `make stale-refs-report` catches the issue side of this; nothing
+catches the prose side.
 
 **EVERY IDENTIFIER IN EVERY FIXTURE IS INVENTED.** Not trimmed from a real backup, not anonymised —
 made up. A fixture carrying a real `IMEI`, `Serial Number`, `Phone Number` or bundle id puts device
@@ -422,19 +432,21 @@ Beyond `make gates`:
 
 ## Fixtures
 
-- A **large** fixture — 100,000 rows, ~1,200 domains — for G5. Generated, not captured; shared with
+- A **large** fixture — 100,000 rows, ~1,200 domains — for **G5b**, the catastrophic-case bound.
+  **Not for G5**, which became structural in quince#1448 and asserts a query count on a few hundred
+  rows; that dependency was real only while G5 asserted seconds. Generated, not captured; shared with
   quince#1444. **BLOCKED, and not on this rung:** the generator inserts each row in its own implicit
   transaction, so this fixture costs **15 m 20 s** to build today — measured, and a 300,000-row build
   exceeded a 40-minute timeout without reaching the measurement it was for. One `BEGIN`/`COMMIT`
-  makes it ~1.3 s (**776×**, measured). That is `novkostya/ios-backup-crypt#11`, it is test-support
-  only, and until it lands neither G5 nor quince#1444 can run their fixture in CI.
+  makes it ~1.3 s. **FIXED** in `novkostya/ios-backup-crypt#12` — measured end to end at
+  **1.844 s**, so the block is now only that no release tag carries it yet (quince#1432).
 - **A version history holding BOTH encrypted and unencrypted versions of one device** — story 9.
   Not invented: measured on the Operator's iPad, whose head reads `IsEncrypted=false` while twelve
   older snapshots read `true` with a wrapped `ManifestKey`. It is the fixture shape most likely to
   catch a tier that assumes a device is uniformly one or the other.
 - One fixture per D6 state: a readable domain, an unrecognisable one, an absent one.
-- Pre-unlock fixtures **blocked on D8's upstream work** for `Info.plist` / `Status.plist`; D2(a)'s are
-  buildable today.
+- Pre-unlock fixtures **available** — `ios-backup-crypt#15` generates both plists and `#16` reads
+  them back, so D2(a), D2(b) and D2(c) are all fixture-testable. See D8.
 - **Every identifier invented.** See D8.
 
 ## Rule check
@@ -446,7 +458,7 @@ Beyond `make gates`:
 | **State honesty** | D5 (`Known`), story 7, story 3 (pending is not zero), G7 (the hardware gate is owed, not ticked). D6 reports *absent* and *unsupported* as different things. |
 | **No silent caps or fallbacks** | D3's remainder row and G3's reconciliation; D6's `Missing[]`; the frozen envelope's `warnings`. A clamped page already discloses via `effective_limit` and overview does not paginate. |
 | **Troubleshooting is ACTIONABLE** | D3 (naming which app count), D6 (three states, with the fingerprint an issue would need). Both are cases where every word of the collapsed version would be true. |
-| **Docs are part of the diff** | D4 and D11 write contracts §1 and §4 in the PR that implements them. Coverage summary plus a declared known-untested list per PR — D8's gap is the first entry. |
+| **Docs are part of the diff** | D4 and D11 write contracts §1 and §4 in the PR that implements them. Coverage summary plus a declared known-untested list per PR. **D8 was that list's first entry and is now closed** — `ios-backup-crypt#15`/`#16` landed, so nothing in this rung is declared untested on fixture grounds. |
 | **Interface facts looked up live** | Facts 1–13, all measured 2026-08-22, each saying how. Fact 7's versions from the tags endpoint. |
 | **Don't improvise architecture** | The three ruled questions are transcribed at D1, D5, D6. Rung-local calls — `Known bool` over an error, "apps" meaning the 21, three capability states, D10's default view — are recorded here, in the spec, which is the cheapest durable home. **D4 touches a contract surface**, so it is written into contracts in the same PR rather than decided in code. |
 | **Secrets discipline** | The backup password reaches `Unlock` and nothing else; overview never logs it and the pre-unlock route never receives one. Fixture password stays `test`. |
@@ -461,18 +473,29 @@ is why D8 and D10 exist and why this line is in the table rather than left impli
 
 Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewable claim.
 
-| | claim |
-| --- | --- |
-| **1** | this spec |
-| **2** | `ios-backup-crypt`: `Lockdown`'s five extra fields + `FileCount.Known` (D2a, D5) |
-| **3** | `ios-backup-crypt`: `Status.plist` + `Info.plist` readers (D2b, D2c) |
-| **4** | `ios-backup-crypt/fixture`: generate both plists (D8) — unblocks slice 3's tests |
-| **5** | the aggregate on the seam, both implementations, conformance + G5 (D4) |
-| **6** | `GET /api/versions/{id}/overview`, the pre-unlock tier, contracts §1 (D11) |
-| **7** | `parserfs` — `backup.FS` + `ReadDirFS` over a session (D7) |
-| **8** | the capability report, three states, lazy + session-cached (D6) |
-| **9** | `GET /api/sessions/{id}/overview`, contracts §1/§4 (D4, D11) |
-| **10** | the surface (D3, D9, D10), then G7 to the Operator |
+| | claim | state |
+| --- | --- | --- |
+| **1** | this spec | **merged** — quince#1445, and quince#1448 for G5/story 9 |
+| **2** | `ios-backup-crypt`: `Lockdown`'s five extra fields + `FileCountKnown` (D2a, D5) | **merged** — `ios-backup-crypt#13` |
+| **3** | `ios-backup-crypt`: `Status.plist` + `Info.plist` readers (D2b, D2c) | **merged** — `ios-backup-crypt#16` |
+| **4** | `ios-backup-crypt/fixture`: generate both plists (D8) | **merged** — `ios-backup-crypt#15`, and taken BEFORE 3 so 3 landed with no declared gap |
+| **5** | the aggregate on the seam, both implementations, conformance + G5 (D4) | in review |
+| **6** | `GET /api/versions/{id}/overview`, the pre-unlock tier, contracts §1 (D11) | **blocked on a release tag** — quince#1432 |
+| **7** | `parserfs` — `backup.FS` + `ReadDirFS` over a session (D7) | not open; needs `ios-backup-parser` at its existing `v0.1.0` |
+| **8** | the capability report, three states, lazy + session-cached (D6) | not open |
+| **9** | `GET /api/sessions/{id}/overview`, contracts §1/§4 (D4, D11) | not open |
+| **10** | the surface (D3, D9, D10), then G7 to the Operator | not open; partly blocked with 6 |
 
-**Slices 2–4 are upstream**, in a different repository, and 4 unblocks 3's tests rather than 3's code —
-so 3 can land with its gap declared and 4 can follow. **Nothing here is blocked**; slice 1 is this PR.
+**THIS TABLE IS A SECOND PART DESCRIBING THE WHOLE, so it is stale by default after every merge** —
+quince#409's finding, which cost four of five rows in the PR that fixed the heading above them. The
+`state` column exists so that going stale is visible rather than silent; **update it in the diff that
+changes what it describes.**
+
+**Slices 2–4 are upstream**, in a different repository, and all three have merged. **4 was taken
+before 3**, reversing this list: the spec originally had 3 land with a declared gap and 4 close it
+afterwards, and doing the fixture first meant there was no gap to declare. Nothing depended on the
+original order.
+
+**Slice 6 is the only one blocked**, and not on code: `main` of `ios-backup-crypt` carries slices
+2–4 and no release tag does, so `core/go.mod` cannot reach them. Who cuts a release tag on the
+sibling libraries is unwritten and is the Operator's — quince#1432.

@@ -43,6 +43,8 @@ func (f *fakeVault) Stat(context.Context, string) (FileEntry, error) {
 }
 func (f *fakeVault) VerifyCanary(context.Context) error { return nil }
 
+func (f *fakeVault) Aggregate(context.Context) (Totals, error) { return Totals{}, nil }
+
 func (f *fakeVault) Open(context.Context, string) (io.ReadCloser, error) {
 	if f.blockOpen != nil {
 		<-f.blockOpen

@@ -93,7 +93,7 @@ func (u *unencrypted) Unlock(ctx context.Context, _ string) (Info, error) {
 	// root at all, so the same write would fail rather than corrupt anything. The guard is
 	// right on every backend; only one of them is where it matters.
 	dbPath := filepath.Join(u.dir, "Manifest.db")
-	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&immutable=1")
+	db, err := sql.Open(sqliteDriverName, "file:"+dbPath+"?mode=ro&immutable=1")
 	if err != nil {
 		return Info{}, fmt.Errorf("%w: %w", ErrCorruptManifest, err)
 	}
@@ -459,3 +459,65 @@ func prefixEnd(prefix string) (string, bool) {
 	}
 	return "", false
 }
+
+// Aggregate scans the Files table ONCE, unordered, with no cursor.
+//
+// IT CANNOT DELEGATE THE WAY THE ENCRYPTED IMPLEMENTATION DOES. iosbackup.Open refuses an
+// unencrypted backup with ErrNotEncrypted, so there is no *iosbackup.Backup here and no
+// library iterator to walk (qn.9 spec fact 12). Same contract, two bodies — which the
+// conformance suite is what holds together.
+//
+// NO `ORDER BY`, DELIBERATELY. An aggregate needs no order, and asking for one here is what
+// makes paging expensive on this backend: Apple ships no composite index on
+// (domain, relativePath), so an ordered query sorts the whole table (quince#1444). Sorting
+// happens once at the end, over ~1,200 domains rather than ~100,000 rows.
+//
+// Size comes from the per-row record blob, so this decodes every row — 13 µs each, measured.
+// A row whose record will not decode still COUNTS, with zero bytes, for the same reason
+// entryFromRow keeps it: the row exists, and dropping it would make the totals disagree with
+// the version's own file count.
+func (u *unencrypted) Aggregate(ctx context.Context) (Totals, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.db == nil || u.closed {
+		return Totals{}, ErrLocked
+	}
+	if err := ctx.Err(); err != nil {
+		return Totals{}, err
+	}
+
+	rows, err := u.db.QueryContext(ctx, `SELECT domain, file FROM Files`)
+	if err != nil {
+		return Totals{}, fmt.Errorf("%w: %w", ErrCorruptManifest, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	acc := newTotalsAccumulator()
+	for rows.Next() {
+		var domain string
+		var blob []byte
+		if err := rows.Scan(&domain, &blob); err != nil {
+			return Totals{}, fmt.Errorf("%w: %w", ErrCorruptManifest, err)
+		}
+		var size int64
+		if rec, derr := iosbackup.DecodeFileRecord(blob); derr == nil {
+			size = rec.Size
+		}
+		acc.add(domain, size)
+	}
+	if err := rows.Err(); err != nil {
+		return Totals{}, fmt.Errorf("%w: %w", ErrCorruptManifest, err)
+	}
+	return acc.totals(), nil
+}
+
+// sqliteDriverName is the registered driver this implementation opens with.
+//
+// A VARIABLE ONLY SO A TEST CAN COUNT QUERIES. G5 asserts that Aggregate reads the manifest
+// in ONE pass rather than paging it, and a query count is the only signal for that from
+// outside: this type holds its *sql.DB privately and exposes no hook, and wrapping the Vault
+// does not help because Aggregate's internal calls never cross the wrapper.
+//
+// It is unexported and never reassigned in production. If that changes, the shape D4 chose
+// stops being checkable and G5 becomes decorative.
+var sqliteDriverName = "sqlite"

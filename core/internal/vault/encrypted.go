@@ -313,3 +313,30 @@ func manifestSHA256(dir string) (string, error) {
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
+
+// Aggregate walks the library's iterator ONCE, with no cursor.
+//
+// This is the cheap route and it is available here because the library's List, called with
+// no domain and no prefix, is a single unordered scan: 1.08 s for 84,570 rows on a real
+// encrypted backup, against 31.8 s to 2 m 05 s for the same totals assembled by paging
+// (qn.9 spec fact 8). The difference is entirely the O(offset) re-walk List does to honour a
+// cursor — see List's comment. Nothing here has a cursor to honour.
+func (e *encrypted) Aggregate(ctx context.Context) (Totals, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.backup == nil || e.closed {
+		return Totals{}, ErrLocked
+	}
+	if err := ctx.Err(); err != nil {
+		return Totals{}, err
+	}
+
+	acc := newTotalsAccumulator()
+	for entry := range e.backup.List("", "") {
+		acc.add(entry.Domain, entry.Size)
+	}
+	if err := e.backup.Err(); err != nil {
+		return Totals{}, translate(err)
+	}
+	return acc.totals(), nil
+}

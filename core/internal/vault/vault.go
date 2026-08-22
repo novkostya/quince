@@ -27,6 +27,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sort"
 	"time"
 )
 
@@ -63,6 +64,20 @@ type Vault interface {
 	// the basis for a version's content_verified_at (design §4). It reports the reason
 	// when no eligible entry exists rather than passing vacuously.
 	VerifyCanary(ctx context.Context) error
+
+	// Aggregate returns per-domain file counts and sizes for the WHOLE version, in ONE
+	// PASS. It is the only method here that is not paginated, and that is the point of it.
+	//
+	// PAGINATION IS THE BROWSER'S CONTRACT, NOT AN AGGREGATE'S. Walking List to build a
+	// whole-version total re-pays a per-page cost for every page — measured on a real backup
+	// at 9.4 s to 2 m 05 s against 1.1 s for a single pass, for the same answer (qn.9 spec
+	// D4, fact 8). The two implementations are slow for two DIFFERENT reasons there
+	// (quince#1444), which is the argument for a method that avoids the shape rather than a
+	// fix in each.
+	//
+	// It needs no order and no cursor, so an implementation is free to answer it however is
+	// cheapest — the conformance suite gates the ANSWER, not the route.
+	Aggregate(ctx context.Context) (Totals, error)
 
 	// Close locks the vault: keys are dropped and any decrypted index is removed. It is
 	// idempotent, and every other method answers ErrLocked afterwards.
@@ -249,4 +264,66 @@ func Code(err error) string {
 	default:
 		return "io"
 	}
+}
+
+// DomainTotals is one domain's contribution to a version, as Aggregate reports it.
+type DomainTotals struct {
+	Domain string
+	Files  int64
+	Bytes  int64
+}
+
+// Totals is the whole-version aggregate: per-domain counts and sizes, plus the totals they
+// sum to.
+//
+// THE TOTALS ARE CARRIED RATHER THAN LEFT TO THE CALLER TO ADD UP. A surface that shows some
+// domains and a total must be able to prove the two agree; recomputing the sum at the
+// surface would make a dropped domain invisible, which is what "no silent caps" forbids.
+type Totals struct {
+	Domains    []DomainTotals // ordered by domain
+	TotalFiles int64
+	TotalBytes int64
+}
+
+// totalsAccumulator is shared by both implementations so they cannot disagree about what
+// the aggregate MEANS — ordering, and whether directories count.
+//
+// EVERY ROW COUNTS, INCLUDING DIRECTORIES AND SYMLINKS, and their size counts too. A domain
+// summary that silently dropped them would not sum to the version's own file count, and
+// FileCount (contracts §4's `initialize` reply) is a row count over the same table. Two
+// numbers on one screen that disagree because one of them quietly filtered is exactly the
+// defect the spec's D3 reconciliation requirement exists to prevent.
+type totalsAccumulator struct {
+	byDomain map[string]*DomainTotals
+}
+
+func newTotalsAccumulator() *totalsAccumulator {
+	return &totalsAccumulator{byDomain: make(map[string]*DomainTotals)}
+}
+
+func (a *totalsAccumulator) add(domain string, size int64) {
+	d := a.byDomain[domain]
+	if d == nil {
+		d = &DomainTotals{Domain: domain}
+		a.byDomain[domain] = d
+	}
+	d.Files++
+	d.Bytes += size
+}
+
+// totals returns the accumulated result, ordered by domain.
+//
+// SORTED, because an aggregate whose order depends on map iteration would make every
+// consumer's output nondeterministic — including the conformance suite, which would then
+// have to sort before comparing and would stop noticing if an implementation started
+// dropping rows in a stable-looking way.
+func (a *totalsAccumulator) totals() Totals {
+	t := Totals{Domains: make([]DomainTotals, 0, len(a.byDomain))}
+	for _, d := range a.byDomain {
+		t.Domains = append(t.Domains, *d)
+		t.TotalFiles += d.Files
+		t.TotalBytes += d.Bytes
+	}
+	sort.Slice(t.Domains, func(i, j int) bool { return t.Domains[i].Domain < t.Domains[j].Domain })
+	return t
 }
