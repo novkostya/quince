@@ -263,25 +263,30 @@ export interface Config {
   // the built-in default, where `muxers: []` is DELIBERATELY NONE. The Go side is a pointer for
   // exactly that reason.
   muxers: MuxerEntry[] | null;
-  devices: { manage_muxer: boolean; usbmuxd_socket: string; netmuxd_addr: string };
   // `tls` MUST be here, and its absence would not have been the harmless kind. PUT /api/config
   // decodes into a zero-valued `config.Config`, so a key the client omits arrives as the Go zero
   // value rather than its default — and for `tls` the zero value is two empty strings, which is
   // TLS OFF. A UI that reconstructed a config document without this field would silently stop
   // quince serving HTTPS on the next save (qn.6f, interface fact 6).
   //
-  // `devices.manage_muxer` WAS missing from this type and is now here (quince#493). It had been
-  // harmless purely by luck: `ConfigEditor` spreads a document it FETCHED rather than building one,
-  // so the undeclared key survived the round trip — an accident of one component, not a property of
-  // the contract. Its zero value is `false`, so a client that built a config from this type would
-  // have told quince to stop managing its muxers on the next save.
+  // AUDITED RATHER THAN SPOT-FIXED, and RE-AUDITED after the `devices:` retirement (quince#1382):
+  // every json path on `config.Config` is dumped by marshalling a zero value and compared against
+  // this interface. 18 paths — 16 scalars plus `storage` and `muxers`, which are pointers to slices
+  // and marshal to `null` when absent — and this interface declares exactly those 18 and nothing
+  // else.
   //
-  // AUDITED RATHER THAN SPOT-FIXED: every json path on `config.Config` was dumped by marshalling a
-  // zero value and compared against this interface. Nineteen paths — eighteen scalars plus
-  // `storage`, which is an array and marshals to `null` when empty — and `manage_muxer` was the
-  // ONLY one missing — which is what quince#493 said it could not claim. So this interface is
-  // COMPLETE as of that audit, and nothing enforces that it stays so; the gate for the class is
-  // still quince#493's.
+  // THE RE-AUDIT LOOKED IN BOTH DIRECTIONS, WHICH IS WHY IT FOUND ANYTHING. The first one asked
+  // only which wire paths this type omits. `devices` was the reverse: three fields declared here
+  // that marshalling a zero value CANNOT produce, because `Config.Devices` carries `json:"-"` on
+  // the struct and on every field — a retired section that must never reach the wire, replaced by
+  // `muxers`. A type that declares more than the wire carries is as wrong as one that declares
+  // less; it is merely quieter, because nothing breaks.
+  //
+  // DROPPED, NOT MADE OPTIONAL. `?` means *may or may not be present*, and this was never present
+  // in either direction. Optional would also let the completeness fixture omit the key with no
+  // compiler complaint — the enforced-by-a-comment state that fixture exists to leave behind.
+  //
+  // Nothing enforces that this stays complete; the gate for the class is still quince#493's.
   tls: { cert_file: string; key_file: string };
   // allow_insecure_transport is a DEGRADED MODE the user opted into (qn.6f slice 8), not a
   // preference: with it on, session and CSRF cookies are served without `Secure` to plain-http
