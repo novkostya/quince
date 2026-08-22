@@ -19,6 +19,7 @@ import (
 type stubVault struct {
 	session  wire.Session
 	page     wire.BrowsePage
+	overview wire.Overview
 	entry    wire.FileEntry
 	content  string
 	code     string
@@ -36,6 +37,11 @@ func (s *stubVault) Lock(string) (string, string) { return s.code, s.message }
 func (s *stubVault) Browse(_ string, q wire.BrowseQuery) (wire.BrowsePage, string, string) {
 	s.lastQ = q
 	return s.page, s.code, s.message
+}
+
+func (s *stubVault) Overview(_ string, q wire.BrowseQuery) (wire.Overview, string, string) {
+	s.lastQ = q
+	return s.overview, s.code, s.message
 }
 func (s *stubVault) OpenFile(_, fileID string) (io.ReadCloser, wire.FileEntry, string, string) {
 	s.lastFile = fileID

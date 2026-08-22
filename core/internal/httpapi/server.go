@@ -356,6 +356,7 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("POST /api/versions/{id}/unlock", deps.handleVersionUnlock())
 	apiMux.HandleFunc("POST /api/sessions/{id}/lock", deps.handleSessionLock())
 	apiMux.HandleFunc("GET /api/sessions/{id}/browse", deps.handleSessionBrowse())
+	apiMux.HandleFunc("GET /api/sessions/{id}/overview", deps.handleSessionOverview())
 	apiMux.HandleFunc("GET /api/sessions/{id}/file/{file_id}", deps.handleSessionFile())
 	apiMux.HandleFunc("/api/", deps.handleAPINotFound())
 

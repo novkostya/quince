@@ -1063,3 +1063,105 @@ type EnrolmentIssued struct {
 	// browser and not on the server, which may sit behind a proxy that strips or misreports it.
 	Secret string `json:"secret"`
 }
+
+// Overview is GET /api/sessions/{id}/overview — contracts §1's frozen domain envelope, plus
+// the two additive fields qn.9 amends it with.
+//
+// THE ENVELOPE'S OWN FIELDS KEEP THEIR SHAPES AND MEANINGS EXACTLY, which is what makes this
+// additive rather than a spend of the freeze (architect ruling, quince#1459). A client that
+// ignores the new fields behaves identically, and no domain endpoint that never sets them can
+// be observed to have changed.
+type Overview struct {
+	// Capabilities is what THIS adapter can do — the frozen field, unchanged. It is NOT the
+	// per-domain capability report; that is Domains below, and the two sharing a word is
+	// what quince#1459 was filed about.
+	Capabilities []string `json:"capabilities"`
+
+	AdapterVersion string `json:"adapter_version"`
+
+	// Warnings is the home for anything degraded, per the envelope.
+	Warnings []string `json:"warnings"`
+
+	// UnsupportedReason is null for overview: it can always serve something, because the
+	// device summary and the domain totals do not depend on any domain parsing. The
+	// per-domain equivalent is each DomainCapability's own State.
+	UnsupportedReason *string `json:"unsupported_reason"`
+
+	Page OverviewPage `json:"page"`
+
+	// Domains is the per-domain capability report (qn.9 D6).
+	//
+	// ABSENT, NOT NULL, when an endpoint has no report — `omitempty` on a nil slice. Ruled
+	// explicitly rather than left to the implementation (quince#1459 condition 1), because
+	// this project already has quince#744 open about a field that means three things and a
+	// client cannot tell them apart. A client tests for the key's presence; it never has to
+	// distinguish a null from an empty list, because an endpoint WITH a report always sends
+	// at least one row and one WITHOUT sends no key at all.
+	Domains []DomainCapability `json:"domains,omitempty"`
+
+	// Totals are the whole-version figures the Page's rows sum to.
+	//
+	// CARRIED BECAUSE THE PAGE IS PAGINATED. qn.9 D3 requires that what a surface shows and
+	// what it claims as a total reconcile — and a client holding one page of 1,264 domain
+	// rows cannot compute the total itself. Without this the reconciliation is unprovable at
+	// exactly the scale that makes it matter.
+	Totals OverviewTotals `json:"totals"`
+}
+
+// OverviewPage is the envelope's `page`, whose shape is frozen as {items, next_cursor}.
+type OverviewPage struct {
+	Items      []DomainSummary `json:"items"`
+	NextCursor string          `json:"next_cursor,omitempty"`
+}
+
+// DomainSummary is one domain's file count and size in this version.
+//
+// THESE ARE DOMAINS, NOT APPS, AND THE DIFFERENCE IS NOT COSMETIC. qn.9 D3 measured four app
+// counts on one real backup — 21 user-installed, 1,203 bundles with a container, 1,205 app
+// domains holding files, 1,264 domains in total. This carries the LAST of those, because it
+// is what the manifest can answer without a password. Naming the user-installed subset needs
+// Info.plist, which arrives with the pre-unlock tier.
+type DomainSummary struct {
+	Domain string `json:"domain"`
+	Files  int64  `json:"files"`
+	Bytes  int64  `json:"bytes"`
+}
+
+// OverviewTotals are the version-wide figures.
+type OverviewTotals struct {
+	Files int64 `json:"files"`
+	Bytes int64 `json:"bytes"`
+
+	// DomainCount is the number of domains in the version, which is NOT len(page.items)
+	// unless
+	// the caller has walked every page. A client showing "N of M" needs both.
+	//
+	// NAMED `domain_count`, NOT `domains`, BECAUSE THE ENVELOPE ALREADY HAS A `domains`. One
+	// response carrying two fields of that name — a count here, the capability report at top
+	// level — is two different things wearing one word, which is the exact confusion
+	// quince#1459 was filed about. Caught by a test whose substring check matched the wrong
+	// one.
+	DomainCount int `json:"domain_count"`
+}
+
+// DomainCapability is one row of the capability report.
+type DomainCapability struct {
+	Domain string `json:"domain"`
+
+	// State is one of: supported, unsupported_schema, absent, unreadable. FOUR, because an
+	// unrecognised schema and bytes that are not a database have different remedies — the
+	// first invites a schema-support issue and needs the fingerprint below, the second means
+	// the backup is damaged (qn.9 D6).
+	State string `json:"state"`
+
+	Schema string `json:"schema,omitempty"`
+
+	// Missing names record fields this backup's schema cannot provide — "no silent caps" as
+	// a data structure rather than as a discipline.
+	Missing []string `json:"missing,omitempty"`
+
+	// Fingerprint is the observed structure, present only on unsupported_schema. Report it
+	// when filing a schema-support issue: without it "unsupported" is a dead end for whoever
+	// has to add support, and it is what distinguishes that state from unreadable.
+	Fingerprint string `json:"fingerprint,omitempty"`
+}

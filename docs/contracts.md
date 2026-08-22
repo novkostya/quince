@@ -2247,6 +2247,7 @@ POST   /api/sessions/{id}/lock         → 204
 GET    /api/sessions/{id}/browse?domain&prefix&cursor&limit
                                        → {entries: FileEntry[], next_cursor?, effective_limit?}
 GET    /api/sessions/{id}/file/{file_id}                → streamed decrypted content
+GET    /api/sessions/{id}/overview?cursor&limit         → domain totals + capability report
 ```
 
 **Implemented at qn.8. The status mapping — and the table is TOTAL over the codes this surface can
@@ -2294,6 +2295,56 @@ detectable rather than silently truncated: if the backup holds fewer bytes than 
 body ends early against a declared length and the client reports a broken transfer, which is true.
 It also sets `Cache-Control: no-store` — an intermediary holding a decrypted file is exactly the
 persistence design §7's lazy model exists to prevent.
+
+
+**`GET /api/sessions/{id}/overview?cursor&limit` — ADDED AT qn.9, and it AMENDS THE ENVELOPE ONCE.**
+
+```jsonc
+{"capabilities": ["domain_totals", "capability_report"],
+ "adapter_version": "overview.v1",
+ "warnings": [],
+ "unsupported_reason": null,
+ "page": {"items": [{"domain": "...", "files": 0, "bytes": 0}], "next_cursor": "..."},
+ "totals": {"files": 0, "bytes": 0, "domain_count": 0},        // ADDITIVE
+ "domains": [{"domain": "...", "state": "...", "schema": "...",
+              "missing": [...], "fingerprint": "..."}]}        // ADDITIVE
+```
+
+**The envelope's five original fields keep their shapes and meanings exactly**, which is what makes
+this additive rather than a spend of the freeze (architect ruling, quince#1459). A client that
+ignores the two new keys behaves identically, and a domain endpoint that never sets them cannot be
+observed to have changed. **Redefining `capabilities` from a string list to an object array would
+NOT be additive** and is out of bounds for this route or any other.
+
+**`capabilities` is what THIS adapter can do. `domains` is the per-domain capability report about
+OTHER domains.** Two different things that the word *capability* invites conflating, which is what
+quince#1459 was filed about.
+
+**`domains` is ABSENT, never `null`.** An endpoint with a report always sends at least one row; one
+without sends no key. A client tests for the key and never has to tell a `null` from an empty list —
+decided here rather than left to a marshaller, because quince#744 is this project's open record of
+what one field meaning three things costs.
+
+**`domains[].state` is one of `supported` · `unsupported_schema` · `absent` · `unreadable`.** Four,
+because an unrecognised schema and bytes that are not a database have different remedies: the first
+invites a schema-support issue and is why `fingerprint` is carried, the second means the backup is
+damaged. `fingerprint` is present only on `unsupported_schema`; `schema` and `missing` only on
+`supported`.
+
+**`totals` describes the VERSION, not the page.** The page is paginated, so a client holding one page
+cannot sum its way to the whole — and without the totals the reconciliation between what a surface
+shows and what it claims is unprovable at exactly the scale that makes it matter.
+
+**`totals.domain_count` rather than `domains`**, because this response already has a `domains`, and
+one payload carrying that word for both a count and the report is the confusion above in miniature.
+
+**`page.items` are DOMAINS, not apps.** Naming the user-installed subset needs `Info.plist`, which
+arrives with the pre-unlock tier — one real backup measured 21 user-installed apps against 1,264
+domains, so the two are not interchangeable and the wire says which it carries.
+
+**`domain` and `prefix` are not read on this route.** An aggregate over a filtered subset would
+report totals that do not describe the version, so the filter is refused by omission rather than
+honoured misleadingly. `limit` clamps and discloses exactly as on `browse`.
 
 Domain endpoints (messages, photos, overview) are specified in their rungs (`qn.9+`) and
 appended here when built; they are session-scoped lazy reads (`/api/sessions/{id}/...`)

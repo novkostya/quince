@@ -15,10 +15,13 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/novkostya/quince/core/internal/id"
 	"github.com/novkostya/quince/core/internal/vault"
+	"github.com/novkostya/quince/core/internal/vault/capability"
+	"github.com/novkostya/quince/core/internal/vault/parserfs"
 	"github.com/novkostya/quince/core/internal/wire"
 )
 
@@ -37,6 +40,11 @@ type Service struct {
 	// open builds a Vault for a version. A field so a test can substitute one without a
 	// backup on disk, and so the encrypted/unencrypted selection has ONE home (see openFor).
 	open func(v wire.Version, scratchDir string) (vault.Vault, error)
+
+	// capCache holds each session's capability report. Keyed by session id and dropped by
+	// the closer AttachDerived registers, so it cannot outlive the session it describes.
+	capMu    sync.Mutex
+	capCache map[string][]wire.DomainCapability
 }
 
 // New builds the service. scratchRoot is wiped — see vault.NewRegistry.
@@ -45,7 +53,8 @@ func New(versions Versions, scratchRoot string, ttl time.Duration, log *slog.Log
 	if err != nil {
 		return nil, err
 	}
-	return &Service{versions: versions, registry: reg, log: log, open: openFor}, nil
+	return &Service{versions: versions, registry: reg, log: log, open: openFor,
+		capCache: map[string][]wire.DomainCapability{}}, nil
 }
 
 // Registry exposes the registry so the daemon can sweep expired sessions and tear them all
@@ -204,4 +213,144 @@ func (s *Service) SessionVersion(sessionID string) (string, bool) {
 		return "", false
 	}
 	return sess.VersionID, true
+}
+
+// overviewCapabilities is what THIS adapter can do — the envelope's frozen `capabilities`,
+// which is NOT the per-domain report. `domain_totals` is the aggregate; `capability_report`
+// is the fact that the `domains` key is populated at all.
+var overviewCapabilities = []string{"domain_totals", "capability_report"}
+
+// overviewAdapterVersion identifies this surface's shape, per the envelope.
+const overviewAdapterVersion = "overview.v1"
+
+// Overview serves GET /api/sessions/{id}/overview.
+//
+// ONE PASS FOR THE TOTALS, and that is the whole reason the seam has Aggregate: assembling
+// these by walking the paginated browse costs 9.4 s to 2 m 05 s on a real backup against
+// 1.1 s for a single pass (qn.9 D4). Nothing here pages the manifest.
+//
+// THE CAPABILITY REPORT IS BUILT AT MOST ONCE PER SESSION and is attached to the session so
+// the registry's single teardown drops it — the ruling is that it must not survive a lock,
+// and attaching it makes that true by construction rather than by remembering to invalidate.
+func (s *Service) Overview(sessionID string, q wire.BrowseQuery) (wire.Overview, string, string) {
+	var out wire.Overview
+	err := s.registry.With(sessionID, func(v vault.Vault) error {
+		totals, err := v.Aggregate(context.Background())
+		if err != nil {
+			return err
+		}
+		out = toWireOverview(totals, q)
+		return nil
+	})
+	if err != nil {
+		return wire.Overview{}, codeFor(err), err.Error()
+	}
+
+	// The report is assembled OUTSIDE the With above, deliberately: it materializes domain
+	// databases through the same session, and nesting a second With would deadlock on the
+	// entry's busy lock rather than serialize.
+	if rep := s.capabilityReport(sessionID); rep != nil {
+		out.Domains = rep
+	}
+	return out, "", ""
+}
+
+// capabilityReport returns the session's report, building and attaching it on first call.
+//
+// A NIL RETURN IS NOT AN ERROR AND NOT AN EMPTY REPORT. It means quince could not build one
+// for this session — the session ended underneath us, or its scratch is gone — and the wire
+// field is then ABSENT rather than an empty array, which is what quince#1459's ruling asked
+// be decided here rather than left to the marshaller.
+func (s *Service) capabilityReport(sessionID string) []wire.DomainCapability {
+	s.capMu.Lock()
+	defer s.capMu.Unlock()
+	if cached, ok := s.capCache[sessionID]; ok {
+		return cached
+	}
+
+	var rows []wire.DomainCapability
+	err := s.registry.With(sessionID, func(v vault.Vault) error {
+		fsys, err := parserfs.New(v, s.registry.ScratchFor(sessionID))
+		if err != nil {
+			return err
+		}
+		cache := capability.NewCache(fsys)
+		for _, d := range cache.Report().Domains {
+			rows = append(rows, wire.DomainCapability{
+				Domain:      d.Domain,
+				State:       string(d.State),
+				Schema:      d.Schema,
+				Missing:     d.Missing,
+				Fingerprint: d.Fingerprint,
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil
+	}
+
+	// ATTACH BEFORE CACHING. If the session has already ended, AttachDerived reports false
+	// and the report is dropped rather than memoised — otherwise a lock would leave a report
+	// about decrypted content reachable in this map.
+	if !s.registry.AttachDerived(sessionID, closerFunc(func() error {
+		s.capMu.Lock()
+		delete(s.capCache, sessionID)
+		s.capMu.Unlock()
+		return nil
+	})) {
+		return nil
+	}
+	s.capCache[sessionID] = rows
+	return rows
+}
+
+type closerFunc func() error
+
+func (f closerFunc) Close() error { return f() }
+
+// toWireOverview shapes the envelope. The page carries DOMAIN rows: naming the
+// user-installed subset needs Info.plist, which arrives with the pre-unlock tier.
+func toWireOverview(t vault.Totals, q wire.BrowseQuery) wire.Overview {
+	limit, clamped := vault.ClampLimit(q.Limit)
+	_ = clamped
+
+	start := 0
+	if q.Cursor != "" {
+		// The cursor is the domain to resume AFTER, which needs no server-side state: the
+		// aggregate is already ordered by domain, so a position in it is a name.
+		for i, d := range t.Domains {
+			if d.Domain == q.Cursor {
+				start = i + 1
+				break
+			}
+		}
+	}
+	end := start + limit
+	if end > len(t.Domains) {
+		end = len(t.Domains)
+	}
+
+	page := wire.OverviewPage{Items: make([]wire.DomainSummary, 0, end-start)}
+	for _, d := range t.Domains[start:end] {
+		page.Items = append(page.Items, wire.DomainSummary{Domain: d.Domain, Files: d.Files, Bytes: d.Bytes})
+	}
+	if end < len(t.Domains) {
+		page.NextCursor = t.Domains[end-1].Domain
+	}
+
+	return wire.Overview{
+		Capabilities:   overviewCapabilities,
+		AdapterVersion: overviewAdapterVersion,
+		// Never null on the wire: a client iterating warnings should not have to distinguish
+		// "none" from "field absent".
+		Warnings:          []string{},
+		UnsupportedReason: nil,
+		Page:              page,
+		Totals: wire.OverviewTotals{
+			Files:       t.TotalFiles,
+			Bytes:       t.TotalBytes,
+			DomainCount: len(t.Domains),
+		},
+	}
 }

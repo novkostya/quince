@@ -115,6 +115,10 @@ var resourceDevice = map[string]deviceResolver{
 	"POST /api/sessions/{id}/lock":          fromSession,
 	"GET /api/sessions/{id}/browse":         fromSession,
 	"GET /api/sessions/{id}/file/{file_id}": fromSession,
+	// qn.9. Same hop as its two neighbours: the session id resolves to a version, and the version
+	// to a device. Named here rather than left to unresolvableToday, because it IS resolvable —
+	// the route carries exactly the id `fromSession` already takes.
+	"GET /api/sessions/{id}/overview": fromSession,
 }
 
 // unresolvableToday are `scopedOwnDevice` routes with NO way to find their device yet, and they
