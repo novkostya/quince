@@ -76,22 +76,9 @@ func New(v vault.Vault, scratchDir string) (*FS, error) {
 // implement it is served BEST-EFFORT — the domain would under-report through its capability
 // report rather than fail, which is the silent-degradation shape quince refuses.
 var (
-	_ backup.FS = (*FS)(nil)
-	_ backup.FS = (*FS)(nil)
+	_ backup.FS        = (*FS)(nil)
+	_ backup.ReadDirFS = (*FS)(nil)
 )
-
-// ReadDirFS IS NOT ASSERTED HERE, AND THAT IS A RELEASE FACT RATHER THAN A DESIGN CHOICE.
-//
-// `backup.ReadDirFS` exists on ios-backup-parser's main and NOT in v0.1.0, which is its only
-// tag and therefore the only thing core/go.mod can require. The optional interface cannot be
-// named until a release carries it (quince#1432).
-//
-// ReadDir below is implemented ANYWAY, and costs nothing to keep: Go interfaces are
-// structural, so *FS will satisfy backup.ReadDirFS the moment the dependency is upgraded,
-// with no further change here. What is missing until then is the COMPILE-TIME PROOF, so
-// this comment is the only thing standing between a signature drift and a silent
-// best-effort degradation in `reminders` — restore the assertion in the same change that
-// bumps the parser.
 
 // Exists reports whether the backup holds domain/relativePath.
 func (f *FS) Exists(domain, relativePath string) (bool, error) {
