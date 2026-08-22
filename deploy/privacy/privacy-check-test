@@ -36,9 +36,10 @@ fail=0
 at() { d=$1; shift; (cd "$d" && exec "$@"); }
 
 # A SYNTHETIC floor, exported so every case uses it instead of the repo's real one — these fixtures
-# carry 1–2 patterns and the real floor is 9, so without this the suite would be asserting the size
-# of the Operator's list. Exporting also overrides any ambient PRIVACY_FLOOR_FILE, so the suite
-# cannot read the box: the lesson preflight-test learned the hard way, applied before it bites here.
+# carry 1–2 patterns and the real floor tracks the real list, so without this the suite would be
+# asserting the size of the Operator's list. Exporting also overrides any ambient
+# PRIVACY_FLOOR_FILE, so the suite cannot read the box: the lesson preflight-test learned the hard
+# way, applied before it bites here.
 FLOOR_OK="$TMP/floor-1"
 printf '# synthetic floor\n1\n' >"$FLOOR_OK"
 export PRIVACY_FLOOR_FILE="$FLOOR_OK"
