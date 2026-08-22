@@ -52,6 +52,7 @@
       "Bash(make forge-watch-test)",
       "Bash(make forge-watch-exits-test)",
       "Bash(make forge-watch-stop-test)",
+      "Bash(make forge-watch-tick-guard-test)",
       "Bash(make forge-watch-roundtrip-test)",
       "Bash(make forge-watch-ownership-test)",
       "Bash(make forge-watch-seats-test)",

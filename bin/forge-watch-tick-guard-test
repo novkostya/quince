@@ -1,0 +1,126 @@
+#!/bin/sh
+# forge-watch-tick-guard-test — a hand-run `tick` refuses beside a LIVE watcher (quince#1460).
+#
+# `watch` has refused a second watcher since quince#50, atomically and by name. `tick` refused
+# nothing, so the same race stayed reachable through the one door left open — and its failure is
+# WORSE than the missed events quince#50 describes: two writers interleave into the state file, the
+# next read fails, and the watch RESEEDS. It then reports `first-observation` about a repo it had
+# been watching for hours, which reads like an ordinary cold start and destroys the accrued
+# observation permanently. Measured on r67: line 1 a complete object, line 2 the tail fragment of
+# another write.
+#
+# THE HARD PART IS THE EXEMPTION, and it is what this suite exists to pin. `watch` drives its own
+# loop through this same verb with `--watcher-pid`, so a bare liveness check here would make every
+# watch refuse its own second tick — turning a fix for a rare corruption into a total outage of the
+# thing being fixed. The guard therefore tests `--watcher-pid` presence, not liveness alone, and the
+# second case below is the one that would catch a regression to the naive form.
+#
+# Synthetic throughout: a temp state dir, this process's own pid as the "live" watcher, and a pid
+# that cannot exist as the dead one. Nothing reads the real watch set or the box.
+set -eu
+
+HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+FW="$HERE/forge-watch"
+[ -x "$FW" ] || {
+	printf 'forge-watch-tick-guard-test: %s is not executable\n' "$FW" >&2
+	exit 2
+}
+# Refuse rather than skip: the state files ARE json and the guard reads the pid with jq, so without
+# it this suite cannot judge anything.
+command -v jq >/dev/null 2>&1 || {
+	printf 'forge-watch-tick-guard-test: DID NOT RUN — jq is absent and the state files are JSON. Refusing rather than skipping.\n' >&2
+	exit 2
+}
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT INT TERM
+pass=0
+fail=0
+
+ok() {
+	pass=$((pass + 1))
+	printf '  ok   %s\n' "$1"
+}
+no() {
+	fail=$((fail + 1))
+	printf '  FAIL %s\n' "$1"
+	[ $# -gt 1 ] && printf '       %s\n' "$2"
+}
+
+# A state file whose watch record names $1 as the watcher pid.
+write_state() {
+	printf '{"observed":true,"prs":[],"issues":[],"watch":{"pid":%s,"interval":60,"last_tick":"2026-08-22T01:00:00Z"}}\n' "$1" > "$TMP/s.json"
+}
+
+# A pid that is certainly alive: this process. Probed rather than assumed.
+LIVE=$$
+kill -0 "$LIVE" 2>/dev/null || {
+	printf 'forge-watch-tick-guard-test: DID NOT RUN — cannot probe our own pid.\n' >&2
+	exit 2
+}
+
+# ── 1. A hand-run tick beside a LIVE watcher REFUSES, exit 1, and says why. ──────────────────────
+write_state "$LIVE"
+out=$("$FW" tick --state "$TMP/s.json" --repo zz/one --gh /bin/false 2>&1) && rc=0 || rc=$?
+if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'LIVE'; then
+	ok "a hand-run tick beside a live watcher refuses, exit 1"
+else
+	no "expected exit 1 and a refusal naming LIVE" "rc=$rc
+$out"
+fi
+
+# The message must name the REMEDY, not just the refusal — a session that meets this needs to know
+# `status` comes first. The troubleshooting rule applied to the tool's own output.
+if printf '%s' "$out" | grep -q 'status'; then
+	ok "the refusal names the remedy (read status first) rather than only the fault"
+else
+	no "the refusal should tell the reader to check status" "$out"
+fi
+
+# And it must name the CONSEQUENCE, because "refusing a tick" reads as pedantry without it.
+if printf '%s' "$out" | grep -qi 'reseed'; then
+	ok "the refusal names what it is preventing — the silent reseed"
+else
+	no "the refusal should say why it matters (the reseed)" "$out"
+fi
+
+# ── 2. THE EXEMPTION. The watcher's own tick is NOT refused. ─────────────────────────────────────
+# This is the case that fails if the guard is ever simplified to a bare liveness check, and its
+# failure would be a total outage rather than a subtle regression: every watch would refuse its own
+# second tick.
+write_state "$LIVE"
+# The exit code is not the signal here — `/bin/false` as gh makes the tick fail for its own
+# reasons. What must be true is that it was not REFUSED, which is a claim about the message.
+out2=$("$FW" tick --state "$TMP/s.json" --repo zz/one --gh /bin/false --watcher-pid "$LIVE" 2>&1) || true
+if printf '%s' "$out2" | grep -q 'refusing a hand-run tick'; then
+	no "the watcher's OWN tick was refused — this breaks every watch, not just hand-run ticks" "$out2"
+else
+	ok "the watcher's own tick (--watcher-pid) is exempt"
+fi
+
+# ── 3. A hand-run tick beside a DEAD watcher still proceeds. ─────────────────────────────────────
+# The documented sequences both tick when nothing is live — /kickoff §6 before arming, /architect §6
+# after the watcher has exited — so refusing here would break the recipe the fix is meant to protect.
+write_state 999999
+kill -0 999999 2>/dev/null && {
+	printf 'forge-watch-tick-guard-test: DID NOT RUN — pid 999999 exists on this host, so the dead case cannot be built.\n' >&2
+	exit 2
+}
+out3=$("$FW" tick --state "$TMP/s.json" --repo zz/one --gh /bin/false 2>&1) || true
+if printf '%s' "$out3" | grep -q 'refusing a hand-run tick'; then
+	no "a tick beside a DEAD watcher was refused — this breaks the documented sequence" "$out3"
+else
+	ok "a hand-run tick beside a dead watcher proceeds"
+fi
+
+# ── 4. No watch record at all: proceeds. A cold start ticks before it ever arms. ─────────────────
+printf '{"observed":true,"prs":[],"issues":[]}\n' > "$TMP/s.json"
+out4=$("$FW" tick --state "$TMP/s.json" --repo zz/one --gh /bin/false 2>&1) || true
+if printf '%s' "$out4" | grep -q 'refusing a hand-run tick'; then
+	no "a tick with no watch record was refused" "$out4"
+else
+	ok "a tick with no watch record proceeds"
+fi
+
+printf '\nforge-watch-tick-guard-test: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]
