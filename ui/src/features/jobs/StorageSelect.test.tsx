@@ -378,3 +378,80 @@ describe("an empty selection is not a selection", () => {
     expect(opt.disabled).toBe(true);
   });
 });
+
+// qn.13 slice 8f-2 — THE PICKER FOR A DEVICE-SCOPED HOLDER.
+//
+// Since quince#1477 they receive `{id, name, reachable}` and nothing else (spec D3, second
+// exception). Two consequences the admin path never exercises: there is no `backend` to print, and
+// there is no `default` for `chosenStorage` to fall back to.
+//
+// THE SECOND ONE WAS A DEFECT AND WAS MEASURED RATHER THAN ANTICIPATED. With no default, `value` is
+// `""` and the browser selects the first option regardless — so the select DISPLAYED a storage the
+// request would not have named, and the backup would have gone to the admin's default instead. That
+// is the screen and the request disagreeing, which is the hazard the fallback effect above exists
+// for, arriving from the other direction.
+//
+// SYNTHETIC IDS. Nothing here is a real storage.
+
+// The projected shape, cast because it is deliberately NOT a full `Storage` — that is the claim.
+const projected = [
+  { id: "st-1", name: "attic disk", reachable: true },
+  { id: "st-2", name: "desk disk", reachable: false },
+] as unknown as Storage[];
+
+describe("the picker a scoped holder sees", () => {
+  it("owns its empty value rather than displaying a storage it will not submit", () => {
+    render(
+      <StorageSelect storages={sub({ status: "loaded", storages: projected })} value="" onChange={vi.fn()} />,
+    );
+
+    const sel = screen.getByTestId("storage-select") as HTMLSelectElement;
+    expect(sel.value).toBe("");
+    expect(sel.options[sel.selectedIndex].text).toMatch(/chosen by the admin/i);
+  });
+
+  it("prints no backend, because it was not sent one", () => {
+    render(
+      <StorageSelect storages={sub({ status: "loaded", storages: projected })} value="" onChange={vi.fn()} />,
+    );
+
+    // The name is there and reads cleanly — no "(undefined)" where the admin sees "(zfs)".
+    expect(screen.getByRole("option", { name: "attic disk" })).toBeInTheDocument();
+    expect(screen.queryByText(/undefined/)).not.toBeInTheDocument();
+  });
+
+  it("still marks an unreachable storage, disabled rather than hidden", () => {
+    render(
+      <StorageSelect storages={sub({ status: "loaded", storages: projected })} value="" onChange={vi.fn()} />,
+    );
+
+    const opt = screen.getByRole("option", { name: /desk disk — not connected/ }) as HTMLOptionElement;
+    expect(opt.disabled).toBe(true);
+  });
+
+  it("submits the id the holder picked", () => {
+    const onChange = vi.fn();
+    render(
+      <StorageSelect storages={sub({ status: "loaded", storages: projected })} value="" onChange={onChange} />,
+    );
+
+    fireEvent.change(screen.getByTestId("storage-select"), { target: { value: "st-1" } });
+
+    expect(onChange).toHaveBeenCalledWith("st-1");
+  });
+});
+
+// THE CONTROL. The admin's list HAS a default, so `chosenStorage` resolves and the extra option must
+// NOT appear — otherwise every admin gains a meaningless "chosen by the admin" row, and the scoped
+// assertions above would pass for a picker that always shows it.
+describe("the admin's picker — the control", () => {
+  it("resolves its default and offers no placeholder", () => {
+    render(
+      <StorageSelect storages={sub({ status: "loaded", storages: [storage({}), shuttle] })} value="" onChange={vi.fn()} />,
+    );
+
+    const sel = screen.getByTestId("storage-select") as HTMLSelectElement;
+    expect(sel.value).toBe("01JA");
+    expect(screen.queryByText(/chosen by the admin/i)).not.toBeInTheDocument();
+  });
+});

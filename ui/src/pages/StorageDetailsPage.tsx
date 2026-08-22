@@ -114,7 +114,7 @@ export function StorageDetailsPage() {
   // USED, not free — the bar fills as the disk fills (PBS and Windows Explorer both do this).
   // Rendering the free fraction showed an EMPTY storage as a 100%-full bar on staging.
   const pct =
-    free !== null && total !== null && total > 0 ? (Math.max(0, total - free) / total) * 100 : null;
+    free != null && total != null && total > 0 ? (Math.max(0, total - free) / total) * 100 : null;
 
   return (
     <section>
@@ -188,7 +188,7 @@ export function StorageDetailsPage() {
 
       <SectionHeading className="mt-8">Space</SectionHeading>
       <div className="mt-3">
-        {pct === null || free === null || total === null ? (
+        {pct == null || free == null || total == null ? (
           <div className="text-sm text-muted">
             {storage.reachable ? "free space unavailable" : "no measurement while disconnected"}
           </div>
