@@ -575,7 +575,7 @@ Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewa
 | **7** | `parserfs` — `backup.FS` over a vault session (D7) | **merged** — quince#1456. `ReadDirFS` implemented, not assertable until a parser tag |
 | **8** | the capability report, four states, lazy + session-cached (D6) | **merged** — quince#1458 |
 | **9** | `GET /api/sessions/{id}/overview`, contracts §1/§4 (D4, D11) | **merged** — quince#1461 |
-| **10** | the surface (D3, D9, D10), then G7 to the Operator | **PRE-UNLOCK HALF merged** — quince#1471. The unlock enrichment (totals, per-app sizes, D3's remainder row, the four capability states) is NOT open, and G7 is owed to the Operator |
+| **10** | the surface (D3, D9, D10), then G7 to the Operator | **merged** — quince#1471 (the version's page), quince#1476 (per-app sizes + D3's remainder row), quince#1478 (the four capability states). **Every slice of this rung is now built; G7 is the only thing outstanding and it is the Operator's** |
 
 **THIS TABLE IS A SECOND PART DESCRIBING THE WHOLE, so it is stale by default after every merge** —
 quince#409's finding, which cost four of five rows in the PR that fixed the heading above them. The
