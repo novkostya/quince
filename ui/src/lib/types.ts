@@ -376,9 +376,12 @@ export interface ConfigFieldError {
 export interface Storage {
   id: string;
   name: string;
-  path: string;
-  backend: "zfs" | "reflink" | "hardlink" | "copy" | "unknown";
-  default: boolean;
+  path?: string;
+  // OPTIONAL SINCE qn.13 SLICE 8f: a device-scoped principal is sent {id, name, reachable} only
+  // (spec D3, second exception), so this key is absent for them. Every surface that reads it is
+  // admin-only, and `StorageSelect` — the one shared consumer — guards on it.
+  backend?: "zfs" | "reflink" | "hardlink" | "copy" | "unknown";
+  default?: boolean;
   reachable: boolean;
   // The code is what to branch on; the reason is what to show. The daemon's sentence carries what
   // the client cannot know — which path, which marker.
