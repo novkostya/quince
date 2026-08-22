@@ -47,14 +47,21 @@
 # "the list is protected".
 #
 # A count cannot close substitution; only known-positive probes can, by proving the matcher still
-# MATCHES rather than merely compiling. `privacy-check` already supports a canary for that and it
-# is unpopulated everywhere. It is not a free fix: the probes must match the private patterns, so
-# they are sensitive themselves and would live in the private layer — writable by the same identity,
-# the same problem one level down. Recorded on quince#44's residual-risk register, not solved here.
+# MATCHES rather than merely compiling. `privacy-check` supports a canary for that and it IS
+# populated on the boxes: every run reports `canary ok — the matcher matches known-positive input
+# (10 probe(s))`. So the matcher is proven rather than merely compiled, and a rewrite that broke
+# matching outright would be caught.
+#
+# THAT NARROWS SUBSTITUTION; IT DOES NOT CLOSE IT, and the reason is unchanged by the canary
+# existing. The probes must match the private patterns, so they are sensitive themselves and live
+# in the private layer — writable by the same identity that can rewrite the list, the same problem
+# one level down. A substitution that rewrites the probes in step still goes green. The canary
+# makes that a two-file act instead of a one-file act, which is a real cost to an attacker and not
+# a control. Recorded on quince#44's residual-risk register, not solved here.
 #
 # RAISE THIS when the list grows, in the same PR that grows it if the two are ever in one place.
 # A floor left below the real count still blocks the shrink it was set for; it simply protects
 # less than it could.
 #
 # This number is not sensitive. It says how many patterns exist, never what they are.
-9
+16
