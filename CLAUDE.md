@@ -195,6 +195,31 @@ repo is not a message bus, and no human is an RPC layer.
    approves and merges code PRs; the **Operator** approves architect-authored docs/canon
    PRs.
 
+   **THAT SENTENCE COVERS THE TWO LIBRARIES TOO — the architect reviews AND MERGES on
+   `ios-backup-crypt` and `ios-backup-parser`, and CUTS THEIR RELEASE TAGS.** Operator ruling,
+   2026-08-22, given in session: *"ios-backup-crypt and ios-backup-parser are part of quince. when
+   implementer opens a PR there you review and merge same as in quince. If you need to cut a
+   release — go ahead, you're authorized."* It extends the ruling already recorded in
+   `.claude/forge-set` — *"consider ios-backup-crypt part of quince, follow the same practices"* —
+   from **watching** those repositories to **landing** in them.
+
+   **Transcribed here because an in-session ruling is binding and UNCITABLE** (devlog#292). There
+   is no comment URL to point a reader at, so this paragraph is not a summary of the record — it
+   **is** the record, and that is the same reason this file already writes out rulings whose
+   citations have become dead ends.
+
+   **It removes a cost `qn.9` paid repeatedly.** Slice 6 sat *"blocked on a release tag"* while the
+   spec recorded that *"who cuts a release tag on the sibling libraries is unwritten and is the
+   Operator's"* — routing a routine unblock through the one seat deliberately kept out of the loop.
+   Fix → review → tag → `go.mod` bump is now one seat's, end to end.
+
+   **ONE MECHANICAL DIFFERENCE, AND IT BITES IN THE CASE `--auto` EXISTS FOR: `allow_auto_merge` is
+   `false` on BOTH libraries, and `bin/gh-review pr merge --auto` DOES NOT REFUSE — it DEGRADES**
+   (devlog#302). A plain merge when the PR is already mergeable; a **silent no-op** when it is not.
+   So on those two repositories merge directly and never arm — and note that the no-op lands
+   exactly on the approved-while-CI-is-running window, which is the only window auto-merge was
+   introduced to cover. An exit `0` there means nothing happened.
+
    **The seat that merges rebases a `BEHIND` branch. It asks only for a `DIRTY` one**, and the
    forge draws that line for you:
 

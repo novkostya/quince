@@ -461,6 +461,22 @@ instant: a PR stacked after auto-merge is enabled and before it fires is covered
 merge regardless of flags (quince-devlog#214). §1's do-not-stack rule is what keeps this exposure
 narrow; it does not make it zero.
 
+**THE TWO LIBRARIES LAND HERE TOO — you review AND MERGE on `ios-backup-crypt` and
+`ios-backup-parser`, and you CUT THEIR RELEASE TAGS.** Operator ruling, 2026-08-22, given in
+session. `CLAUDE.md` §5 carries it in full and is the **owned** copy; this is the working reminder
+and not the record, which is the split `CODEOWNERS` requires of anything load-bearing in an unowned
+skill file.
+
+**Do NOT arm auto-merge on either library.** `allow_auto_merge` is `false` on both, and
+`pr merge --auto` **degrades rather than refusing** — a plain merge when the PR is already
+mergeable, a **silent no-op** when it is not (devlog#302). Merge directly, and do not read exit `0`
+as evidence anything happened. The no-op case is precisely the approved-while-CI-runs window, which
+is the only thing §5's ladder arms auto-merge for.
+
+**A slice blocked on a sibling release is no longer an escalation.** Fix → review → tag →
+`go.mod` bump is one seat's, end to end — `qn.9` slice 6 sat behind that hop, and the spec recorded
+the tag question as *"unwritten and the Operator's"* while it did.
+
 **Nobody can re-run a red check — not you, not the App, and not the implementer** (quince#141).
 `run rerun` is refused for every agent seat, worded for an integration and exiting **`1`**, not the
 `0` this line claimed for a year. The implementer's `CAN` died with `decisions/0014`: re-running was
