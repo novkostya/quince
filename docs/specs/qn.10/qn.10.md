@@ -266,6 +266,24 @@ just asked for Messages and is waiting for something they requested, rather than
 unlock for a reason the screen cannot explain. The upstream accessor stays worth doing as a later
 optimisation and is **not** this rung's dependency.
 
+**THE TRIGGER IS FINER THAN "A MESSAGES SURFACE", AND SLICE 2B MEASURED WHY.** `Chats()` is
+answerable **live** — 23 ms for 390 conversations on the real backup, with no projection — so the
+chats list, which is the *first* Messages screen a user sees, costs nothing and does not build.
+The scan is triggered by opening an actual conversation. **This is D2's own rule (*nothing needs
+it until something reads it*) applied one level finer**, and it means the deferral survives a user
+who browses Messages and never opens a thread.
+
+Measured through the reader on the real backup: `Available` 808 ms and `Chats` 23 ms with **the
+projection absent after both**, then 15.5 s on the first `Thread`. `Available` is not free —
+it materializes the 446 MiB database — but `qn.9`'s capability prober already pays that at
+unlock, so this adds nothing to an unlock that was happening anyway.
+
+**AT 18 s, STORY 10'S PROGRESS REPORTING IS LOAD-BEARING RATHER THAN A COURTESY** — architect,
+quince#1496: it *"becomes the thing that decides whether this feels broken"*, and **its absence at
+the surface slices is reviewable as a defect, not an omission.** The reader emits progress every
+10,000 messages, which is about four times a second at the measured rate. `Progress.Total` is
+deliberately absent: the parser does not count rows up front, so a percentage would be invented.
+
 ### D3 — A thread pages by `(date, ROWID)` cursor, in the frozen envelope
 
 `page.next_cursor` per contracts §1, opaque, ordered by `(date, ROWID)` — the parser's own
@@ -309,6 +327,17 @@ backup* rather than offering a link that 404s.
 `backup.Capability.Missing` names the units this schema cannot provide. Each maps to the
 envelope: absent `chats` → no chats list and an `unsupported_reason`; absent `handles` → no
 participants, said so; absent `attachments` → no attachment rows, said so.
+
+**"ABSENT CHATS" IS ITS OWN CAUSE AND MUST NOT BORROW THE UNSUPPORTED ONE.** The reader carries
+two distinct errors: `ErrUnsupported` — *this backup has no readable Messages database* — and
+`ErrChatsUnavailable` — *the database is readable and its schema has no conversations*. Messages
+still stream in the second case; only the grouping is gone.
+
+**Slice 2b found this by writing the test wrong.** The test asserted one error for both, the code
+returned two, and **the code was right**: collapsing them is what *troubleshooting is actionable*
+names as a defect *even when every word is true*, because the two have different screens and
+different remedies. The test now asserts they are distinguishable, which is the assertion worth
+having.
 
 **`BodyUndecoded` is the sharp one.** `Text == ""` with `BodyUndecoded` set means the body is
 **unknown**, not empty, and the thread renders it as unknown. Rendering it as an empty bubble
@@ -461,8 +490,8 @@ Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewa
 | | claim | state |
 | --- | --- | --- |
 | **1** | this spec | **merged** — quince#1491 |
-| **2a** | `msgfixture` — the fixture builder every later slice reads from, with G5 asserted | **open** |
-| **2b** | the domain reader + the session projection and its one scan (D2) | not open |
+| **2a** | `msgfixture` — the fixture builder every later slice reads from, with G5 asserted | **merged** — quince#1496 |
+| **2b** | the domain reader + the session projection and its one scan (D2) | **open** |
 | **3** | `GET /api/sessions/{id}/messages/chats` (D3, contracts §1) | not open |
 | **4** | `GET …/chats/{chat}/messages`, cursored (D3) | not open |
 | **5** | attachments: the join to `qn.8`'s download route (D6) | not open |
