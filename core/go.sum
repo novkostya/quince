@@ -33,8 +33,8 @@ github.com/ncruces/go-strftime v1.0.0 h1:HMFp8mLCTPp341M/ZnA4qaf7ZlsbTc+miZjCLOF
 github.com/ncruces/go-strftime v1.0.0/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
 github.com/novkostya/ios-backup-crypt v0.5.0 h1:OfrXBjhGuxjUTe18JUk3p0s9YG6AryrO3qBl/a/370E=
 github.com/novkostya/ios-backup-crypt v0.5.0/go.mod h1:fxrek2i3H4z+Oo0soqopKQ2R+qBS8d1BdpeQZ2YDGHg=
-github.com/novkostya/ios-backup-crypt/fixture v0.1.1 h1:lA69jZ4hkg+PUXPOrXyHDJDag55+IH33PcPak65+u8Y=
-github.com/novkostya/ios-backup-crypt/fixture v0.1.1/go.mod h1:7RrIpJk7z/f9PSgJWUxzHnOPXbdWkwDnMJNNT60OM+M=
+github.com/novkostya/ios-backup-crypt/fixture v0.2.0 h1:V8RZWWjDl620XwPnw/bsC0mkUbipAHH014CXh+mxiVc=
+github.com/novkostya/ios-backup-crypt/fixture v0.2.0/go.mod h1:fCK7QfyxXjHQBHqAi+iudRd0jzBfX1BVPN0VH+lAUPY=
 github.com/novkostya/ios-backup-parser v0.2.0 h1:GV/EktOY90QS6rLu+Yqyjd7DdGrRsCnPKyn8LtNunUA=
 github.com/novkostya/ios-backup-parser v0.2.0/go.mod h1:C7Fe1rvotkFYHtf6lU8fw1tvpCJ6BO6ExCWl1bN6Ui0=
 github.com/oklog/ulid/v2 v2.1.1 h1:suPZ4ARWLOJLegGFiZZ1dFAkqzhMjL3J1TzI+5wHz8s=
