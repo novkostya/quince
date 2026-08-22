@@ -58,9 +58,15 @@ Two devices, called **A** (iPad) and **B** (iPhone) throughout.
 | `Info.plist` | 904,456 B | **9,515,132 B** | XML | **10.5 / 99.3 ms** |
 
 **2. `Status.plist` carries six keys**: `BackupState`, `Date`, `IsFullBackup`, `SnapshotState`,
-`UUID`, `Version`. **`IsFullBackup` is a product fact quince cannot show today** and costs
-microseconds. **Open question: quince#1466** — the lab proved that field lies, and quince
-already carries the honest answer as `Version.Kind`.
+`UUID`, `Version`. The whole file is 189 B, binary, and parses in **11–39 µs**.
+
+**`IsFullBackup` IS NOT A FACT QUINCE MAY SHOW, and the key is listed above only because this
+section records what the format carries.** An earlier revision of this line called it *"a product
+fact quince cannot show today"*, which was false in the direction that mattered: quince **can** show
+full-vs-incremental, **does**, and does it from a source that does not lie. **The lab proved this
+field lies — a first, genuinely full backup writes `IsFullBackup:false`** (finding #9(a)), which is
+why `core/internal/storage` refuses it at seven sites and derives `kind` from the seed sentinel
+instead. Ruled at quince#1466; see D2(b) and story 1.
 
 **3. `Manifest.plist` — the file the decrypt path ALREADY parses — carries far more than the four
 keys the library reads.** Top level: `Applications` (dict of **1203** / **1955**), `BackupKeyBag`,
@@ -201,11 +207,43 @@ VERSION would be right on most stands and wrong on this one, which is the stand 
 | step | source | cost | what it adds |
 | --- | --- | --- | --- |
 | **a** | `Manifest.plist` `Lockdown` | **zero extra I/O** | `DeviceClass`, `ProductType`, `BuildVersion`, `SerialNumber`, `UniqueDeviceID` |
-| **b** | `Status.plist` | **µs** | `BackupState`, `SnapshotState`, `Date`, `UUID`, `Version` — **not** `IsFullBackup`; open question: quince#1466 |
+| **b** | `Status.plist` | **µs** | `BackupState`, `SnapshotState`, `Date`, `UUID`, `Version` — **never** `IsFullBackup` |
 | **c** | `Info.plist` | **10–99 ms** | `Installed Applications`, `Last Backup Date`, and B's `IMEI` / `ICCID` / `Phone Number` |
 
 **(a) is the whole of the cheap win and it is a two-field struct change.** `Info` already exists,
 `Manifest.plist` is already parsed, and five fields are being discarded at the point of parse.
+
+**(b) LOSES ITS HEADLINE FIELD AND KEEPS ITS PLACE, and the reason is worth one line so nobody
+re-opens it: `BackupState` and `SnapshotState` are held nowhere else in quince.** That is what earns
+step (b) a read once `IsFullBackup` is gone from it. Whether `Date` / `UUID` / `Version` duplicate
+what the version record already carries is a separate question and not this ruling's business.
+
+**RULED — architect, quince#1466, 2026-08-22. The full/incremental fact comes from the VERSION
+REGISTRY and `Status.plist.IsFullBackup` is never read.** Transcribed here rather than linked,
+because an issue is where a question is decided and git is where the decision survives:
+
+> The pre-unlock tier does not read `IsFullBackup` … it is not a cheaper source of a fact quince
+> holds, it is a wrong one. The failure mode decides it — a first, genuinely full backup writes
+> `IsFullBackup:false`, so the surface would read *"Incremental"* on precisely the backup a user is
+> most likely to be checking, with every rendered word taken faithfully from the file.
+
+**There is no wire change and no new read.** `kind` is a frozen contract field quince already serves —
+`contracts.md` spells its three values and `GET /api/versions?udid` returns them — so the correction
+is *delete a field from this spec and render what the version record already carries*.
+
+**AN ADOPTED VERSION RENDERS `unknown` AS ITSELF, AND `IsFullBackup` MAY NOT BE CONSULTED TO RESCUE
+IT.** Ruled explicitly, because the adopted case is the one place the argument for the field looks
+strongest: no seed sentinel, no DB record, `job_id: null`, and a plist key sitting right there that
+appears to answer the question.
+
+> It does not answer it. **`unknown` means quince does not know; `IsFullBackup` does not know
+> either, and it is wrong in the specific direction that matters most.** Substituting it converts
+> *"we do not know"* into *"we are wrong"*.
+
+That is D5 and story 7's discipline meeting its hardest case and holding.
+
+**Not ruled, and a new filing if slice 6 or later finds one:** whether any *other* `Status.plist` key
+has an equivalent problem. Five committed comments name this field and only this field.
 
 **(c) is the only one that needs a budget.** 99 ms on a phone, scaling with the app count, and it is
 the read that carries the app list — so it is on the path of the thing users came for. It is read
@@ -431,10 +469,13 @@ renders many.
 
 ## Stories
 
-1. I open a version I have not unlocked and see the device it came from, when the backup was taken,
-   whether it was full or incremental (from the version registry, **not** `Status.plist` —
-   open question: quince#1466), whether it is encrypted, and which apps I had installed —
-   **without typing a password**.
+1. I open a version I have not unlocked and see the device it came from, when the backup was
+   taken, whether it is encrypted, which apps I had installed, and whether it was full or
+   incremental — **without typing a password**.
+
+   The full/incremental fact comes **from the version registry, never from
+   `Status.plist.IsFullBackup`, which lies** (D2, quince#1466). An adopted version reads
+   `unknown`, and that is the honest answer rather than a gap.
 2. I unlock it and the same screen gains a file count, a total size, and a size and file count per
    app, without the app list disappearing and coming back.
 3. The per-app sizes are visibly *pending* while they compute, and never render as zero.
