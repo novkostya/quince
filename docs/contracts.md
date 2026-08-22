@@ -3141,6 +3141,32 @@ in-process one: **7.9 MiB peak RSS streaming a 128 MiB file** (stack D4).
 **`handle` and `rel_path` are therefore RPC-local and appear on no interface**, which is what lets
 the same conformance suite gate both implementations without either being bent toward the other.
 
+**`aggregate` — ADDED AT qn.9, and it is the one read on this seam that is NOT paginated.**
+
+```
+aggregate {} → {domains: [{domain, files, bytes}], total_files, total_bytes}
+```
+
+**Pagination is the BROWSER's contract, not an aggregate's.** Building a whole-version total by
+walking `list` re-pays a per-page cost for every page: measured on a real backup at **9.4 s to
+2 m 05 s** against **1.1 s** for a single pass, for the same answer. The two in-tree implementations
+are slow there for two *different* reasons — a missing composite index on one, an O(offset) re-walk
+on the other (quince#1444) — which is the argument for a method that avoids the shape rather than a
+fix in each.
+
+**It takes no cursor, promises no order of traversal, and its `domains` are sorted by domain.** An
+implementation may answer however is cheapest; the conformance suite gates the **answer**, not the
+route, and it does so by comparing against a full paginated walk.
+
+**`total_files` and `total_bytes` are CARRIED, not left to the caller to sum.** A surface showing
+some domains and a total must be able to prove the two agree — recomputing the sum at the surface
+would make a dropped domain invisible, which *no silent caps or fallbacks* forbids. The suite
+asserts the per-domain rows sum to the totals.
+
+**Every row counts, including directories and symlinks.** `total_files` is a row count over the same
+table `initialize`'s `file_count` counts, so a filtered aggregate would put two numbers on one screen
+that disagree for a reason nothing states.
+
 Domain methods (`overview.*`, `messages.*`; `photos.*` if ever revived) are appended
 here with their rungs (`qn.9+`); all reads are lazy (domain DBs decrypted to scratch on
 first use) and paginated. Errors: JSON-RPC error with `data.code ∈ {bad_password, corrupt_manifest, io,

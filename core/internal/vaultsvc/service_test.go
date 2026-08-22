@@ -46,8 +46,9 @@ func (f *fakeVault) Open(context.Context, string) (io.ReadCloser, error) {
 	}
 	return io.NopCloser(strings.NewReader("alpha")), nil
 }
-func (f *fakeVault) VerifyCanary(context.Context) error { return nil }
-func (f *fakeVault) Close() error                       { return nil }
+func (f *fakeVault) VerifyCanary(context.Context) error              { return nil }
+func (f *fakeVault) Aggregate(context.Context) (vault.Totals, error) { return vault.Totals{}, nil }
+func (f *fakeVault) Close() error                                    { return nil }
 
 // shortReader delivers some bytes and then ends in ErrIncompleteFile — the shape a file
 // captured mid-write produces.
