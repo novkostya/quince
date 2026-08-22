@@ -1154,6 +1154,29 @@ bump_prevented() { # <all> <repo> <state>
 	bump_counter prevented "$@"
 }
 
+# A COUNTER READ THAT CANNOT POISON THE ARITHMETIC (quince#1460).
+#
+# `$((acc + $(jq … || printf 0)))` looks safe and is not. On a state file whose FIRST line parses
+# and whose second does not — the shape a concurrent writer leaves — `jq` prints the value from line
+# one, THEN fails, so `|| printf 0` fires and appends its zero to output that already exists. The
+# substitution captures `3\n0`, and the arithmetic dies:
+#
+#   /bin/sh: line 1167: arithmetic syntax error in expression (error token is "0")
+#
+# So the guard is not merely absent, it is the thing that builds the poison: without the fallback
+# the value would have been a usable `3`. The issue predicted an EMPTY substitution and `[ -n "$x" ]`
+# as the remedy; measured, the substitution is non-empty garbage and that remedy does not reach it.
+#
+# VALIDATE THE SHAPE, do not trust the exit code and do not trust non-emptiness. Anything that is not
+# a run of digits is not a counter, whatever produced it.
+counter_read() { # <file> <key> — a non-negative integer, always, on stdout
+	_cr=$(jq -r "(.$2 // 0) | tostring" "$1" 2>/dev/null) || _cr=''
+	case "$_cr" in
+	'' | *[!0-9]*) _cr=0 ;;
+	esac
+	printf '%s' "$_cr"
+}
+
 # Summed across the watched repos, because an `--all` watch is ONE loop over several state files and
 # a per-repo figure would understate the cycle count by however many repos are declared.
 loop_totals() { # <all> <repo> <state>
@@ -1164,11 +1187,11 @@ loop_totals() { # <all> <repo> <state>
 	_lt_f7=0
 	while IFS= read -r _lt_f; do
 		[ -f "$_lt_f" ] || continue
-		_lt_a=$((_lt_a + $(jq -r '.arms // 0' "$_lt_f" 2>/dev/null || printf 0)))
-		_lt_w=$((_lt_w + $(jq -r '.wakes // 0' "$_lt_f" 2>/dev/null || printf 0)))
-		_lt_p=$((_lt_p + $(jq -r '.prevented // 0' "$_lt_f" 2>/dev/null || printf 0)))
-		_lt_i=$((_lt_i + $(jq -r '.idle // 0' "$_lt_f" 2>/dev/null || printf 0)))
-		_lt_f7=$((_lt_f7 + $(jq -r '.failing // 0' "$_lt_f" 2>/dev/null || printf 0)))
+		_lt_a=$((_lt_a + $(counter_read "$_lt_f" arms)))
+		_lt_w=$((_lt_w + $(counter_read "$_lt_f" wakes)))
+		_lt_p=$((_lt_p + $(counter_read "$_lt_f" prevented)))
+		_lt_i=$((_lt_i + $(counter_read "$_lt_f" idle)))
+		_lt_f7=$((_lt_f7 + $(counter_read "$_lt_f" failing)))
 	done <<EOF
 $(loop_state_files "$1" "$2" "$3")
 EOF

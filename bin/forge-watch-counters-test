@@ -319,5 +319,69 @@ else
 	grep '^loop:' "$WORK/st" | sed 's/^/    | /'
 fi
 
+
+# (7) A CORRUPT STATE FILE MUST NOT POISON THE ARITHMETIC (quince#1460).
+#
+# A concurrent writer leaves a state file whose FIRST line parses and whose second does not. `jq`
+# then prints the value from line one and THEN fails — so the old `|| printf 0` fired and appended
+# its zero to output that already existed, the substitution captured `3\n0`, and the shell aborted:
+#
+#   forge-watch: line 1167: arithmetic syntax error
+#
+# The fallback was not missing; it was BUILDING the poison. Without it the read would have been a
+# usable `3`. quince#1460 predicted an EMPTY substitution and `[ -n "$x" ]` as the remedy — measured,
+# the substitution is non-empty garbage, so that remedy does not reach it. This case pins the real
+# shape rather than the predicted one.
+#
+# THESE TWO CASES DO NOT DISCRIMINATE TODAY, AND SAYING SO IS THE POINT OF KEEPING THEM.
+# They pass against the unfixed tool as well — measured. On the `status` path `watch_report` reads
+# the state file FIRST, fails, and prints `could not read watch state`, so `loop_totals` is reached
+# with nothing to poison. The abort quince#1460 recorded came from the `watch` loop's exit paths,
+# which need a live arm to reach and are not exercised here.
+#
+# So they are REGRESSION GUARDS, not proof of the fix: they pin that `status` keeps surviving a
+# damaged state file and keeps naming it, and they would catch a change that moved the counter read
+# ahead of the state read. The poisoning itself is measured at the shell level in the PR, not here.
+cp "$STATE" "$WORK/state-backup.json"
+printf '%s\n%s\n' \
+	'{"observed":true,"arms":3,"wakes":5,"prs":[],"issues":[]}' \
+	'last_tick":"2026-08-22T01:27:19Z"}' >"$STATE"
+
+# THE CONTROL FIRST: this fixture really is the poisonous shape, so a pass below is not a pass over a
+# file that was fine all along.
+_raw=$(jq -r '.arms // 0' "$STATE" 2>/dev/null || printf 0)
+case "$_raw" in
+*[!0-9]*) ok "control: the corrupt fixture really does yield a non-numeric read" ;;
+*) bad "control failed: the fixture read cleanly as '$_raw', so case 7 proves nothing" ;;
+esac
+
+./bin/forge-watch status --repo "$REPO" >"$WORK/stcorrupt" 2>&1 || true
+if grep -qi 'arithmetic syntax error' "$WORK/stcorrupt"; then
+	bad "status still aborts on a half-parsable state file — quince#1460's cascade"
+	grep -i 'arithmetic' "$WORK/stcorrupt" | sed 's/^/    | /'
+else
+	ok "status survives a half-parsable state file rather than dying in the counter arithmetic"
+fi
+
+# AND IT MUST SAY THE FILE WAS UNREADABLE. The loop line is correctly absent here — every counter
+# read 0, and `loop_totals` returns early on zero arms, which predates this change and is right: a
+# figure it could not read is not a figure to print. What must NOT happen is silence about why.
+if grep -q 'could not read watch state' "$WORK/stcorrupt"; then
+	ok "…and names the unreadable state file rather than going quiet about it"
+else
+	bad "nothing said the state file could not be read"
+	sed 's/^/    | /' "$WORK/stcorrupt"
+fi
+# A file that is not JSON AT ALL is the neighbouring case and must behave the same way.
+printf 'not json at all\n' >"$STATE"
+./bin/forge-watch status --repo "$REPO" >"$WORK/stgarbage" 2>&1 || true
+if grep -qi 'arithmetic syntax error' "$WORK/stgarbage"; then
+	bad "status aborts on a wholly unparsable state file"
+else
+	ok "a wholly unparsable state file does not abort the status line either"
+fi
+
+cp "$WORK/state-backup.json" "$STATE"
+
 printf '\nforge-watch-counters-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
