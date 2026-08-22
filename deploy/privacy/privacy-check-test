@@ -65,15 +65,21 @@ expect() { # <name> <want-exit> <want-substring> -- <command...>
 }
 
 # --- fixture builders -----------------------------------------------------------------------
-# The synthetic patterns are deliberately absurd strings, so a fixture can never accidentally
-# match real content, and the case-sensitive one mirrors the SHAPE of the device-name heuristic
-# from quince#41 req 3 without being it.
+# The synthetic patterns are deliberately absurd strings, so a fixture can never accidentally match
+# real content, and the case-sensitive one mirrors the SHAPE of the device-name heuristic from
+# quince#41 req 3 without being it.
+#
+# THAT IS A REQUIREMENT ON THE PATTERN, NOT A DESCRIPTION OF IT — one of these was an RFC 5737
+# TEST-NET-3 range (quince#1389), which is the correct choice for a fixture ADDRESS and therefore
+# the one string guaranteed to collide with the fixtures of every other suite in this repository.
+# `zzsecretaddrzz` keeps the regex shape the case needs — an escaped dot, a class, a quantifier —
+# and cannot appear in real content. Anything added here must clear the same bar.
 make_patterns() { # <dir>
 	mkdir -p "$1"
 	cat >"$1/privacy-patterns.txt" <<'EOF'
 # synthetic — case-insensitive list
 zzsecrethostzz
-203\.0\.113\.[0-9]{1,3}
+zzsecretaddrzz\.[0-9]{1,3}
 EOF
 }
 make_cs_patterns() { # <dir>
@@ -163,8 +169,18 @@ expect "…and says the file was EMPTY, naming the path the caller passed" 2 "is
 # Without this the refusal could be satisfied by rejecting every --text, and the suite would not
 # notice that the flag had stopped working entirely.
 printf 'an ordinary body with nothing private in it\n' >"$TMP/full-body.md"
+# SCOPED TO A FIXTURE REPO, not to the checkout (quince#1389). This is the only exit-0 case in this
+# section — every other one refuses before it sweeps anything — so it is the only one whose result
+# could depend on state outside the suite. With no --ref, `privacy-check` falls back to the STAGED
+# DIFF OF THE CURRENT REPOSITORY, so the developer's own index decided whether this case passed:
+# staging any line that matched a synthetic pattern turned `make gates` red inside the privacy
+# gate's own self-test, reporting it as `PRIVACY VIOLATION … public history is forever` about a file
+# that was not wrong. The honest reactions to that sentence — rewrite the fixture, widen the real
+# pattern list, stop trusting the sweep — are all worse than the bug.
+textrepo="$TMP/text-scope"
+make_repo "$textrepo" "ordinary content"
 expect "a NON-empty --text is swept, and the swept line names it" 0 "text" -- \
-	"$CHECK" --patterns "$good" --text "$TMP/full-body.md"
+	at "$textrepo" "$CHECK" --patterns "$good" --ref main...HEAD --text "$TMP/full-body.md"
 
 # =============================================================================================
 # 2. THE GATE CAN RUN AND SOMETHING MATCHES  →  exit 1
@@ -208,7 +224,7 @@ expect "it names the sources that were NOT swept" 2 "NOT swept: branch-diff" -- 
 
 # Commit messages are public history under the same rule as the diff, and no gate covered them.
 msgrepo="$TMP/msg"
-make_repo "$msgrepo" "nothing private here" "wire up 203.0.113.42 for the demo"
+make_repo "$msgrepo" "nothing private here" "wire up zzsecretaddrzz.42 for the demo"
 expect "commit message violation is caught" 1 "commit-message:" -- \
 	at "$msgrepo" "$CHECK" --patterns "$good" --ref main...HEAD
 
@@ -303,7 +319,7 @@ expect "PR text violation is caught" 1 "text:" -- \
 # The staged-diff mode still works — the commit-time gate is the one that must not regress.
 staged="$TMP/staged"
 make_repo "$staged" "ordinary"
-printf 'contact 203.0.113.9\n' >"$staged/leak.md"
+printf 'contact zzsecretaddrzz.9\n' >"$staged/leak.md"
 git -C "$staged" add leak.md
 expect "staged diff mode still catches a violation" 1 "staged-diff:" -- \
 	at "$staged" "$CHECK" --patterns "$good"
