@@ -249,9 +249,9 @@ chmod +x "$PROBE_BIN/ok" "$PROBE_BIN/authfail" "$PROBE_BIN/dns" "$PROBE_BIN/nopr
 	"$PROBE_BIN/timedout" "$PROBE_BIN/leaky" "$PROBE_BIN/noisy"
 
 # preflight delegates its verdict to privacy-check, which since quince#44 enforces a pattern FLOOR
-# from the public repo. These layers carry one synthetic pattern and the repo floor is 9, so without
-# a synthetic floor every passing case here would be asserting the size of the Operator’s list —
-# the ninth variable, and the same read-the-box trap one delegation deeper.
+# from the public repo. These layers carry one synthetic pattern and the repo floor tracks the real
+# list, so without a synthetic floor every passing case here would be asserting the size of the
+# Operator’s list — the ninth variable, and the same read-the-box trap one delegation deeper.
 FLOOR_SYNTH="$TMP/floor-1"
 printf "1\n" >"$FLOOR_SYNTH"
 
