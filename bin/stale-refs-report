@@ -127,10 +127,26 @@ SHORT=${REPO##*/}
 #
 # BOTH `#N` AND `<repo>#N` ARE READ, because this project writes both and a cross-repo reference to
 # ANOTHER repo must not be counted. `<repo>#N` is kept only when `<repo>` is this one.
-jq -r --arg short "$SHORT" '
+#
+# ONLY THE FORMS GITHUB ACTUALLY CLOSES ON ARE STRIPPED — `#N` and `<owner>/<repo>#N` — and the
+# repo-SHORTHAND form `<repo>#N` is deliberately NOT one of them (quince#1301). GitHub binds a
+# closing keyword to a bare number or to a fully qualified reference; `Fixes quince#1290` binds to
+# nothing and closes nothing. Measured: quince#1293 merged saying `Fixes quince#1290` and left it
+# open, and quince#1360 reproduced it against `closingIssuesReferences` — the field GitHub itself
+# populates from a body's closing keywords — which came back EMPTY for the shorthand form.
+#
+# This tool USED TO STRIP THE SHORTHAND, which made it blind to the exact defect it exists to find:
+# an issue whose fix has merged and which nobody will close. That is worse than the `Refs` case it
+# was built for — `Refs` is an author who chose not to close, where a shorthand closing keyword is
+# an author who BELIEVED they were closing it, so nobody is watching on either side.
+#
+# `bin/closing-refs-check` is the other half and catches the same string at authoring time. The two
+# tools disagreed on one line each, and this is the line that was wrong: its own suite pins that
+# `a repo-shorthand closing line is a finding — it binds to nothing`.
+jq -r --arg short "$SHORT" --arg full "$REPO" '
 	.[] | . as $pr
 	| (($pr.title // "") + "\n" + ($pr.body // ""))
-	| gsub("(?i)\\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\\s+(" + $short + ")?#[0-9]+"; " ")
+	| gsub("(?i)\\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\\s+(" + $full + ")?#[0-9]+"; " ")
 	| [scan("(?:(?:^|[^A-Za-z0-9_/-])(?:" + $short + ")?#([0-9]+))")]
 	| flatten | unique | .[]
 	| "\(.)\t\($pr.number)\t\($pr.mergedAt)"
