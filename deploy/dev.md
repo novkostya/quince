@@ -81,10 +81,23 @@ BusyBox 1.37.0 (alpine:3.24)     0     control 1
 GNU grep 3.11 (debian:trixie)    0     control 1
 ```
 
+**POSITION DECIDES IT, AND THAT IS WHAT MAKES THE CLASS SWEEPABLE.** The trap needs the `^` to be
+genuinely mid-pattern. In LEADING position — `grep -oE '(^|[^A-Za-z0-9_/-])#[0-9]+'` — all three
+implementations anchor it and agree, because there is nothing before it for a zero-width assertion
+to succeed against. Measured on `quince#123`, which every one of the three correctly declines to
+match. So `bin/pr-title-refs`, `bin/suite-coverage` and the `curl -k` ban in the Makefile all carry
+`(^|…)` and are all fine.
+
+**Grep for `(^|` and then read where it sits**; only the ones with pattern before them can bite.
+The sweep found two in the tree: `bin/closing-refs-check`, which was already correct and whose
+comment records the table, and `bin/forge-watch-exits-test`, which was not — under ugrep a doc
+naming `exit 16` satisfied the check for exit `6`, so an assertion about documentation coverage was
+weaker when run by hand on a box than in the gate that runs it. Fixed in quince#1338's item 3.
+
 **The failure direction is the expensive one.** A guard written with the alternation goes quiet when
 you test it by hand, which reads as "the guard is too broad, I have fixed it" — and it is the guard
 that has stopped working, in the environment where you can see it and not in the two where it runs.
-`bin/closing-refs-check` carries the live instance and its comment records the same table.
+`bin/closing-refs-check` carries one live instance and its comment records the same table.
 
 **So prove a pattern where it will run**, which for a shell gate means `gates-sh` (BusyBox, in
 `alpine:3.24`) or CI (GNU). A one-off container is enough:

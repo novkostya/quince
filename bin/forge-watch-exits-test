@@ -178,7 +178,29 @@ for _doc in $DOCS; do
 		# A code split across a line wrap from its exit-vocabulary matches none of these, and that is
 		# deliberate: it is the one shape where a reader skimming for "which exits are listed" can
 		# miss one, which is how this bug happened.
-		if ! grep -qiE "(exit|code)s?.{0,48}(^|[^0-9])${_code}([^0-9]|$)" "$_doc" &&
+		#
+		# `[^0-9]` AND NOT `(^|[^0-9])`, WHICH IS A PORTABILITY TRAP THIS PROJECT HAS ALREADY PAID
+		# FOR ONCE (quince#1338). The `^` alternative is unreachable here by construction —
+		# `(exit|code)s?` has consumed at least four characters before this point, so the code can
+		# never sit at the start of the line — so it bought nothing and cost the divergence below.
+		#
+		# `grep` on a session box is `ugrep`, which treats a MID-PATTERN `^` as a zero-width
+		# assertion that succeeds anywhere. The alternation then matches the empty string and the
+		# digit boundary is gone, so a code matches INSIDE a larger number. Measured, all three
+		# implementations, on the line `exit 16` while looking for code `6`:
+		#
+		#   ugrep 7.5.0 (a session box)      MATCH   ← the boundary is defeated
+		#   BusyBox 1.37.0 (gates-sh)        no match
+		#   GNU grep (CI)                    no match
+		#
+		# So the assertion was weaker when run BY HAND on a box than in the gate: a doc naming exit
+		# 16 and not exit 6 passed as though it named 6. The gate itself was always correct, which
+		# is what made this invisible — `deploy/dev.md` has the full statement.
+		#
+		# The equivalent trap at the START of a pattern is harmless: `(^|…)` in leading position
+		# anchors normally in all three, which is why `bin/pr-title-refs` and `bin/suite-coverage`
+		# are fine and were checked rather than assumed.
+		if ! grep -qiE "(exit|code)s?.{0,48}[^0-9]${_code}([^0-9]|$)" "$_doc" &&
 			! grep -qiE "(exit|code)s?.*\*\*${_code}\*\*" "$_doc" &&
 			! grep -qE "^[[:space:]]*\|[[:space:]]*\*\*${_code}\*\*[[:space:]]*\|" "$_doc"; then
 			_missing="$_missing $_code"
