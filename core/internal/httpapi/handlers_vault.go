@@ -292,3 +292,27 @@ func isAttrChar(b byte) bool {
 	}
 	return strings.IndexByte("!#$&+-.^_`|~", b) >= 0
 }
+
+// handleSessionOverview serves GET /api/sessions/{id}/overview?cursor&limit.
+//
+// It reuses browseQuery for the paging arguments so a clamp is disclosed identically on both
+// surfaces; domain and prefix are not read, because an aggregate over a filtered subset would
+// report totals that do not describe the version.
+func (d Deps) handleSessionOverview() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		query := browseQuery("", "", q.Get("cursor"), q.Get("limit"))
+
+		out, code, msg := d.VaultBrowse.Overview(r.PathValue("id"), query)
+		if code != "" {
+			writeError(w, d.Log, statusForVaultCode(code), code, msg)
+			return
+		}
+		// Items is never null on the wire, for the same reason Entries is not on browse: a
+		// client iterating a page should not have to distinguish "none" from "field absent".
+		if out.Page.Items == nil {
+			out.Page.Items = []wire.DomainSummary{}
+		}
+		writeJSON(w, d.Log, http.StatusOK, out)
+	}
+}

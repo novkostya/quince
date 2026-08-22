@@ -54,6 +54,17 @@ type registryEntry struct {
 	overlong map[string]bool
 	scratch  string
 
+	// derived holds anything BUILT FROM this session's decrypted content that must not
+	// outlive it — today the qn.9 capability report.
+	//
+	// IT IS AN io.Closer RATHER THAN A CONCRETE TYPE BECAUSE OF AN IMPORT CYCLE, and the
+	// cycle is a fact about the design rather than an accident: the capability report is
+	// built over parserfs, parserfs is built over this package, so this package cannot
+	// name either. A closer is the narrowest seam that lets the SINGLE teardown below
+	// stay single — which is the property that matters, because three exits with three
+	// teardowns is how one of them ends up not wiping.
+	derived []io.Closer
+
 	// busy guards the Vault, which is not required to be concurrency-safe. TryLock rather
 	// than Lock — see ErrSessionBusy.
 	busy sync.Mutex
@@ -288,6 +299,13 @@ func (r *Registry) teardown(e *registryEntry) error {
 	e.busy.Lock()
 	defer e.busy.Unlock()
 
+	// DERIVED STATE FIRST, because it may hold files materialized out of the vault and
+	// closing the vault under it would be the torn read this function exists to avoid.
+	for _, d := range e.derived {
+		_ = d.Close()
+	}
+	e.derived = nil
+
 	err := e.vault.Close()
 	r.wipe(e.scratch)
 
@@ -521,4 +539,20 @@ func (r *Registry) markOverlong(sessionID, fileID string) {
 		e.overlong = make(map[string]bool)
 	}
 	e.overlong[fileID] = true
+}
+
+// AttachDerived registers something built from this session's decrypted content, to be
+// closed when the session ends by ANY route — explicit lock, TTL sweep, or shutdown.
+//
+// It returns false when the session does not exist, so a caller cannot silently attach to
+// nothing and believe its cleanup is wired.
+func (r *Registry) AttachDerived(sessionID string, c io.Closer) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e, ok := r.sessions[sessionID]
+	if !ok {
+		return false
+	}
+	e.derived = append(e.derived, c)
+	return true
 }

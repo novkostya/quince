@@ -474,6 +474,10 @@ type VaultBrowse interface {
 	// either, and a narrower method cannot grow a second caller by accident.
 	SessionVersion(sessionID string) (versionID string, ok bool)
 
+	// Overview returns the version's domain totals and capability report — contracts §1's
+	// domain envelope plus qn.9's two additive fields.
+	Overview(sessionID string, q wire.BrowseQuery) (o wire.Overview, code, message string)
+
 	// OpenFile returns the decrypted content of one file. The caller MUST close the reader.
 	//
 	// It returns the entry as well as the reader so the handler can set Content-Length from
@@ -498,6 +502,10 @@ func (UnavailableVaultBrowse) Lock(string) (string, string) {
 
 func (UnavailableVaultBrowse) Browse(string, wire.BrowseQuery) (wire.BrowsePage, string, string) {
 	return wire.BrowsePage{}, wire.VaultCodeUnavailable, vaultUnavailable
+}
+
+func (UnavailableVaultBrowse) Overview(string, wire.BrowseQuery) (wire.Overview, string, string) {
+	return wire.Overview{}, wire.VaultCodeUnavailable, vaultUnavailable
 }
 
 func (UnavailableVaultBrowse) OpenFile(string, string) (io.ReadCloser, wire.FileEntry, string, string) {

@@ -150,6 +150,12 @@ var routeScope = map[string]scopeClass{
 	"GET /api/sessions/{id}/browse":         scopedOwnDevice,
 	"GET /api/sessions/{id}/file/{file_id}": scopedOwnDevice,
 
+	// qn.9. Overview describes ONE version, which belongs to one device, so it is that device's on
+	// exactly the reasoning above — and it reaches the version through the same session id, so the
+	// guard resolves it by the same SessionVersion hop. Caught by the assertion, again: this is the
+	// FIFTH route it has named, and the first four are the paragraph above.
+	"GET /api/sessions/{id}/overview": scopedOwnDevice,
+
 	// THE CATCH-ALL. It answers 404 for anything under /api/ that matched nothing, so it carries no
 	// data and must not refuse a scoped principal — a 403 here would tell them a route EXISTS that
 	// they cannot reach, which is a different fact from "no such route".
