@@ -342,6 +342,23 @@ broken**, and the one that matters here: `watch` refuses to arm beside a live wa
 record, so a tick that erased it turned step 3 into a *second* watcher on one state file — quince#50's
 race, reached through the guard rather than around it.
 
+**BOTH DIRECTIONS ARE ABOUT THE LIVENESS VERDICT, AND NEITHER IS ABOUT CONCURRENT WRITES.** The
+paragraph above is true and it is **narrower than it reads**: what a reader carries away is *"a
+hand-run tick is safe"*, and quince#1460 is a hand-run tick that was not. It is safe **THERE** —
+because of where step 2 sits in the sequence, with nothing live to race — rather than safe whenever.
+
+**A tick beside a LIVE watcher is two writers on one state file.** Measured: the state ended as line 1
+a complete object and line 2 the tail fragment of another write, after which `jq` fails, the `.new`
+write never lands, and the next arm **RESEEDS** — reporting `first-observation` about a repo it had
+been watching for hours. That is the accrued observation this section's own *"do NOT reseed"* exists
+to protect, destroyed by accident rather than by ignoring the rule, and it announces itself as an
+ordinary cold start.
+
+**`tick` now REFUSES beside a live watcher** (exit 1), the way `watch` always has — so the ordering is
+enforced rather than merely documented. **Read `status` first and tick only on `dead` or `absent`.**
+The watcher's own ticks are exempt by `--watcher-pid`, which is why `watch`'s internal loop is
+unaffected.
+
 **And DECLARE WHAT YOU ARE BLOCKED ON, in the same command.** Your PR set is self-describing; your
 *blocked* set is not, and the channel that carries authority here is an **issue** — an Operator ruling
 is a comment on one. A watch that sees only PRs cannot see a ruling land (quince#80):

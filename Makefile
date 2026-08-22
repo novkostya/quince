@@ -395,7 +395,7 @@ SH_LIBS         := deploy/devct/lib.sh
 # holdout was `home-resolution-test`, which needed `gh` on PATH and is fixed in quince#162, which is
 # why there is no exclusion list here at all.
 SH_SUITES       := suite-coverage-test privacy-check-test forge-watch-test preflight-test provision-guard-test \
-                   forge-watch-exits-test forge-watch-stop-test forge-watch-fixtures-doc-test \
+                   forge-watch-exits-test forge-watch-stop-test forge-watch-tick-guard-test forge-watch-fixtures-doc-test \
                    quince-runner-status-test pr-title-refs-test forge-watch-roundtrip-test \
                    forge-watch-ownership-test forge-watch-composition-test scratch-reap-test \
                    home-resolution-test wrapper-boundary-test gate-scope-test wrapper-body-test \
@@ -458,7 +458,7 @@ SH_ENTRYPOINTS  := deploy/devct/devct deploy/devct/devct-template bin/gh-bot \
                    deploy/runner/pre-push-shim deploy/runner/pre-push-shim-test \
                    deploy/runner/preflight deploy/runner/provision bin/forge-watch \
                    deploy/privacy/privacy-check deploy/privacy/privacy-check-test \
-                   bin/forge-watch-exits-test bin/forge-watch-stop-test bin/forge-watch-fixtures-doc-test \
+                   bin/forge-watch-exits-test bin/forge-watch-stop-test bin/forge-watch-tick-guard-test bin/forge-watch-fixtures-doc-test \
                    deploy/runner/quince-runner-status-test \
                    bin/gh-review bin/gh-review-commit-id-test bin/home-resolution-test bin/forge-watch-roundtrip-test \
                    bin/forge-watch-ownership-test bin/forge-watch-composition-test \
@@ -614,6 +614,10 @@ forge-watch-exits-test: ## Every exit forge-watch can return is named in the ski
 .PHONY: forge-watch-stop-test
 forge-watch-stop-test: ## `stop` / `stop --all` against live pids — what replay cannot cover (quince#118)
 	@bin/forge-watch-stop-test
+
+.PHONY: forge-watch-tick-guard-test
+forge-watch-tick-guard-test: ## A hand-run tick refuses beside a live watcher, and the watcher's own does not (quince#1460)
+	@bin/forge-watch-tick-guard-test
 
 .PHONY: forge-watch-fixtures-doc-test
 forge-watch-fixtures-doc-test: ## The fixtures' README indexes every fixture, both directions (quince#107)

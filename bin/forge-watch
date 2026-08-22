@@ -4482,6 +4482,32 @@ tick)
 	*[!0-9]*) die "--watcher-pid must be a pid: $_wpid" ;;
 	esac
 	case "$_iv" in *[!0-9]*) die "--interval must be seconds: $_iv" ;; esac
+	# A HAND-RUN TICK REFUSES BESIDE A LIVE WATCHER — quince#1460.
+	#
+	# `watch` has refused this since quince#50; `tick` refused nothing, so the same race was
+	# reachable through the one door left open. Its failure is WORSE than the missed events
+	# quince#50 describes: two writers interleave into the state file, the next read fails, and
+	# the watch RESEEDS — reporting first-observation about a repo it had been watching for
+	# hours. Measured: line 1 a complete object, line 2 the tail fragment of another write.
+	#
+	# THE WATCHER'S OWN TICKS MUST NOT BE REFUSED, which is why this tests _wpid rather than
+	# liveness alone: `watch` drives its loop through this same verb with --watcher-pid, so a
+	# bare liveness check here would make every watch refuse its own second tick. A hand-run
+	# tick has no such flag, and that is exactly the population this guards.
+	#
+	# The DOCUMENTED sequences stay legal because both tick when nothing is live: /kickoff §6
+	# ticks before arming, and /architect §6 ticks after the watcher has exited. That ordering
+	# was the only guard until now, and it was written down in a paragraph about the liveness
+	# verdict rather than about concurrent writes.
+	if [ -z "$_wpid" ] && [ -f "$_s" ]; then
+		_tp=$(jq -r '.watch.pid // empty' "$_s" 2>/dev/null || true)
+		if [ -n "$_tp" ] && [ "$(pid_alive "$_tp")" = yes ]; then
+			die "a watch is LIVE for $_repo (pid $_tp) — refusing a hand-run tick beside it.
+    Two writers on one state file interleave, and the next arm then RESEEDS rather than
+    refusing, which discards everything it had observed (quince#1460). Read
+    \`forge-watch status --repo $_repo\` first: tick only when it says dead or absent."
+		fi
+	fi
 	require_gh "$_ghcmd"
 	declare_issues "$_imode" "$_ispecs" "$_repo" "$_s"
 	tick "$_s" "$_repo" "$_ghcmd" "$_wpid" "$_iv"
