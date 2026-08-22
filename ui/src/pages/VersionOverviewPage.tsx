@@ -13,6 +13,7 @@ import { useVersionsStore } from "@/stores/versions";
 import { UnlockDialog } from "@/features/vault/UnlockDialog";
 import { VersionSummary } from "@/features/overview/VersionSummary";
 import { UnlockedContents, versionAppIDs } from "@/features/overview/UnlockedContents";
+import { DomainReport } from "@/features/overview/DomainReport";
 
 // VersionOverviewPage is what a version IS — qn.9 slice 10, the rung's primary surface.
 //
@@ -171,6 +172,7 @@ export function VersionOverviewPage() {
               bundleIDs={versionAppIDs(overview.data)}
               loading={contents.isPending || contents.isFetchingNextPage || contents.hasNextPage}
             />
+            <DomainReport domains={merged?.domains} />
             <Card>
               <div className="flex items-center justify-between gap-4">
                 <p className="text-xs text-muted">
