@@ -67,7 +67,25 @@ describe("partitionByApp", () => {
 
   // A SHARED GROUP CONTAINER IS NOBODY'S. Attributing it to one app would be a guess shown as
   // a measurement; splitting it would double-count and break G3.
-  it("puts a shared app-group container in the remainder", () => {
+  //
+  // THE GROUP ID HERE STARTS WITH AN INSTALLED BUNDLE ID, AND THAT IS THE WHOLE TEST. An
+  // earlier version used `group.example.shared`, which matches no installed id — so the row
+  // reached the remainder through the NO-OWNER path and the `AppDomainGroup-` exclusion was
+  // never exercised. Adding the group prefix as a third recognised one left the entire suite
+  // green (quince#1476 review). App groups are routinely named after the bundle they serve,
+  // so a colliding id is the realistic shape as well as the discriminating one.
+  it("puts a shared app-group container in the remainder even when its id starts with an app's", () => {
+    const p = partitionByApp([NOTES, READER], [
+      d(`AppDomainGroup-${NOTES}.shared`, 3, 300),
+    ]);
+    expect(p.remainder).toMatchObject({ bytes: 300, domains: 1 });
+    expect(p.apps.find((a) => a.bundleID === NOTES)).toMatchObject({ bytes: 0, domains: 0 });
+  });
+
+  // AND THE NON-COLLIDING SHAPE, which is the common real-world row. It reaches the remainder
+  // by a DIFFERENT route — no owner — and keeping both is what distinguishes the two
+  // mechanisms rather than testing one of them twice.
+  it("puts a group container with an unrelated id in the remainder too", () => {
     const p = partitionByApp([NOTES, READER], [
       d("AppDomainGroup-group.example.shared", 3, 300),
     ]);
