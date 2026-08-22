@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { RelativeTime } from "@/components/RelativeTime";
 import { messageFor } from "@/lib/api";
 import { ReauthChallenge } from "@/features/auth/ReauthChallenge";
-import { usePasskeyList, scopedTo } from "@/features/settings/Passkeys";
+import { usePasskeyList, isScoped, scopedTo } from "@/features/settings/Passkeys";
 import { usePasskeyRemoval } from "@/features/settings/usePasskeyRemoval";
 import type { Device } from "@/lib/types";
 
@@ -35,7 +35,22 @@ export function DeviceCredentials({ device }: { device: Device }) {
   // inside the device page beside the job history and the version list, so a throw here takes a
   // page the admin needs for entirely unrelated reasons.
   const all = Array.isArray(list.data?.passkeys) ? list.data.passkeys : [];
-  const rows = all.filter((p) => scopedTo(p) === device.udid);
+  // BOTH HALVES, AND THE FIRST ONE IS NOT REDUNDANT (quince#1452 review).
+  //
+  // `scopedTo` returns `""` for an admin credential, so `scopedTo(p) === device.udid` alone is
+  // correct exactly as long as `device.udid` is never `""` — and when it is, EVERY admin credential
+  // matches and the page grows a Remove button for the admin's own passkey. That is the wrong
+  // SUCCESS this component's whole test set exists to prevent, reached by an empty string.
+  //
+  // THE INVARIANT IS REAL AND IT IS ENFORCED SOMEWHERE ELSE. A device page is routed by udid and a
+  // device without one is not a device, so this is unreachable today. It is also enforced by the
+  // router rather than by anything in this file, which is the kind of dependency that survives until
+  // somebody renders this component from somewhere new.
+  //
+  // `isScoped` RETURNS A REAL BOOLEAN off the field's presence rather than off a sentinel, so the
+  // two cases cannot collapse whatever the right-hand side holds. One extra call, and the
+  // correctness stops depending on a fact established in another file.
+  const rows = all.filter((p) => isScoped(p) && scopedTo(p) === device.udid);
 
   const { remove, challenge, setChallenge, ceremonyErr } = usePasskeyRemoval({
     onRemoved: () => void list.refetch(),
