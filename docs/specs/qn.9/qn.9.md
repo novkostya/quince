@@ -123,9 +123,9 @@ two so the surface is not designed around the wrong number. It also retires a pl
 of the encrypted row: the 2 m 05 s is **not** an encryption cost and **not** a cold-cache cost —
 decrypt happens once, at `Unlock`, for 1.72 s.
 
-**9. A domain has THREE states, not two.** The parser's `Open` returns `*UnsupportedSchemaError`
+**9. A domain has FOUR states, not two — and this fact said THREE until quince#1458.** The parser's `Open` returns `*UnsupportedSchemaError`
 (present, schema unrecognised) **or** an error wrapping `fs.ErrNotExist` (the database is not in this
-backup at all). Read from each domain package and `errors.go`. **On `main`. See fact 9b for how many the TAG has.**
+backup at all), **or any other failure to open, which is a fourth: present and not readable at all.** The fourth was found while implementing D6, not at scoping. Read from each domain package and `errors.go`. **On `main`. See fact 9b for how many the TAG has.**
 
 **10. The parser exposes no domain registry.** No `Domains()`, no slice, no map — the packages
 are reachable only by importing each. `grep` over the repository.
@@ -287,7 +287,7 @@ ambiguity was theoretical. After D1 there is a real screen where **every neighbo
 and this one is not**, so an unguarded `0` renders as *"0 files"* beside a correct device name and a
 correct date. That is the exact defect the rung was warned about.
 
-### D6 — The capability report lives in overview, is LAZY, session-cached, and has THREE states
+### D6 — The capability report lives in overview, is LAZY, session-cached, and has FOUR states
 
 **RULED — architect, quince#1432:** in overview, because *"building it here means `qn.10` and
 everything after inherit the surface instead of each adding one"*; **lazy**, because naming what a
@@ -295,18 +295,39 @@ backup cannot serve means opening one database per domain and *"eagerly paying i
 would put a fixed cost on a screen whose common case is 'which apps are in here'"*; and **cached for
 the session, not for the version** — *"so nothing carries a report across a lock"*.
 
-**The ruling assumed two outcomes per domain and there are three** (fact 9), which this spec settles
-rung-locally within it:
+**THE COUNT HAS GONE TWO → THREE → FOUR, and this table is the CURRENT state rather than the
+original ruling with amendments bolted on.** The ruling assumed two outcomes; the spec found a third
+at scoping (fact 9); the fourth was found while implementing, by a test that passed without
+exercising the branch it was named for. Each widening was ruled — the last on quince#1458, where the
+architect held that *"widening to four is not a liberty you took; it is the rule applied."*
 
 | state | how it arrives | what the user is told |
 | --- | --- | --- |
 | **supported** | `Open` succeeds | the domain, its schema alias, and `Missing[]` |
-| **unsupported** | `*UnsupportedSchemaError` | quince cannot read *this* schema — with the observed fingerprint, which is what a schema-support issue needs |
+| **unsupported_schema** | `*UnsupportedSchemaError` | quince cannot read *this* schema — **with the observed fingerprint**, which is what a schema-support issue needs |
 | **absent** | error wrapping `fs.ErrNotExist` | the database is not in this backup |
+| **unreadable** | any other failure to open | the database is here and is not readable at all |
 
-**Collapsing absent into unsupported would be the collapsed diagnostic again.** *"You have no Safari
-data in this backup"* and *"quince cannot read your Safari database"* have different remedies, and
-one of them is not a defect at all.
+**`unsupported_schema` and `unreadable` are separate because the REMEDIES differ.** An unrecognised
+schema invites a schema-support issue and carries the evidence one needs; bytes that are not a
+database mean the backup is damaged and no parser work will help. One label for both would send
+somebody to file an issue against a corrupt file — the collapsed diagnostic, *"a defect even when
+every word of it is true"*, in the surface whose whole purpose is not collapsing states.
+
+**Discrimination is by TYPED ERROR, not by message text** — `errors.As` against
+`*backup.UnsupportedSchemaError` — so it survives upstream rewording. And *"quince cannot tell"* is
+not available here: it can, and the rule says that escape hatch is legitimate only when it genuinely
+cannot.
+
+**Collapsing absent into either would be the same defect.** *"You have no Notes data in this backup"*
+and *"quince cannot read your Notes database"* have different remedies, and one of them is not a
+defect at all.
+
+**A DOMAIN QUINCE CANNOT REACH IS ABSENT *FROM* THE REPORT, NOT REPORTED ABSENT.** `absent` means
+*not in this backup* — a fact about the user's data. *"quince has no support compiled in"* is a fact
+about quince, and reporting the second as the first would tell somebody they have no Safari data
+when nobody looked. So the report carries only the domains the dependency can actually serve, and
+that is a fifth thing a reader might expect a state for and must not get one.
 
 **The domain list is enumerated in quince** (fact 10), so a new library domain is a quince change
 and not only a release. The scoping issue's *"a library release plus a rung, with no contract
@@ -315,11 +336,9 @@ one place with a comment saying so.
 
 **It starts at FIVE** — `calendar`, `calls`, `contacts`, `messages`, `notes` — because that is what
 `v0.1.0` carries (fact 9b). `reminders` and `safari` join it when a parser release does, in the same
-change that bumps `core/go.mod` and restores quince#1456's `ReadDirFS` assertion. **The `absent` row
-above is illustrated with Safari deliberately**: until that bump, Safari is not a domain quince can
-report on at all, which is a THIRD thing to say about a domain and is exactly the collapse D6 forbids
-— so the enumeration carries only what the dependency can serve, and a domain quince cannot reach is
-absent from the report rather than reported absent.
+change that bumps `core/go.mod` and restores quince#1456's `ReadDirFS` assertion. Until then Safari
+is a domain quince cannot reach, which is why the paragraph above matters: it is absent from the
+report rather than reported absent.
 
 ### D7 — quince implements `backup.FS` over the vault session
 
@@ -419,8 +438,10 @@ renders many.
 3. The per-app sizes are visibly *pending* while they compute, and never render as zero.
 4. Sizes shown per app plus the aggregated remainder equal the backup's total. Nothing is silently
    dropped.
-5. I can see which domains this backup can serve, which quince cannot read, and which are simply not
-   present — as three different answers.
+5. For each domain I see which of FOUR things is true: this backup can serve it; quince does
+   not recognise this database's schema; the database is not in this backup at all; or the
+   database is here and unreadable. They are different answers because they have different
+   remedies, and only two of them are anybody's fault.
 6. I lock, and nothing derived from the version's content survives — including the capability report.
 7. A locked version reports its file count as **unknown**, never as `0`.
 8. I can still reach the file browser and download any single file.
@@ -436,7 +457,7 @@ Beyond `make gates`:
 - **G2** — story 7: `Known == false` before unlock, `true` after; a test asserts no path renders an
   unknown count as a number.
 - **G3** — story 4: per-app + remainder == total, asserted over a fixture with domains in every class.
-- **G4** — story 5: three distinguishable outcomes, one fixture per state, including a domain built
+- **G4** — story 5: four distinguishable outcomes, one fixture per state, including a domain built
   with a deliberately unrecognisable schema and one simply absent.
 - **G5** — **D4's claim, asserted STRUCTURALLY**: the aggregate visits each row **once** and never
   walks the paginated path. Counted, not timed. **A wall-clock budget was specified here and
@@ -484,10 +505,10 @@ Beyond `make gates`:
 | **Privacy is a commit-time gate** | D8: every fixture identifier invented, stated at the point the fields are listed. This document carries no identifier, path or bundle id — the measurements ran on the stand and only counts and timings came back. `make privacy-check` before every push. |
 | **State honesty** | D5 (`Known`), story 7, story 3 (pending is not zero), G7 (the hardware gate is owed, not ticked). D6 reports *absent* and *unsupported* as different things. |
 | **No silent caps or fallbacks** | D3's remainder row and G3's reconciliation; D6's `Missing[]`; the frozen envelope's `warnings`. A clamped page already discloses via `effective_limit` and overview does not paginate. |
-| **Troubleshooting is ACTIONABLE** | D3 (naming which app count), D6 (three states, with the fingerprint an issue would need). Both are cases where every word of the collapsed version would be true. |
+| **Troubleshooting is ACTIONABLE** | D3 (naming which app count), D6 (four states, with the fingerprint an issue would need — and `unsupported_schema` split from `unreadable` because the remedies differ). Both are cases where every word of the collapsed version would be true. |
 | **Docs are part of the diff** | D4 and D11 write contracts §1 and §4 in the PR that implements them. Coverage summary plus a declared known-untested list per PR. **D8 was that list's first entry and is now closed** — `ios-backup-crypt#15`/`#16` landed, so nothing in this rung is declared untested on fixture grounds. |
 | **Interface facts looked up live** | Facts 1–13, all measured 2026-08-22, each saying how. Fact 7's versions from the tags endpoint. |
-| **Don't improvise architecture** | The three ruled questions are transcribed at D1, D5, D6. Rung-local calls — `Known bool` over an error, "apps" meaning the 21, three capability states, D10's default view — are recorded here, in the spec, which is the cheapest durable home. **D4 touches a contract surface**, so it is written into contracts in the same PR rather than decided in code. |
+| **Don't improvise architecture** | The three ruled questions are transcribed at D1, D5, D6. Rung-local calls — `Known bool` over an error, "apps" meaning the 21, four capability states, D10's default view — are recorded here, in the spec, which is the cheapest durable home. **D4 touches a contract surface**, so it is written into contracts in the same PR rather than decided in code. |
 | **Secrets discipline** | The backup password reaches `Unlock` and nothing else; overview never logs it and the pre-unlock route never receives one. Fixture password stays `test`. |
 | **Every hardware bug becomes a replay fixture** | quince#1444 came out of this rung's measurement and carries that requirement; G5's fixture is the shape that expresses it. |
 | **Config tidiness** | No new config key. D6's cache is the `qn.8` session's lifetime; D4 gates a shape (one pass), not a duration; G5b's bound is a gate constant, not a setting. |
@@ -506,10 +527,10 @@ Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewa
 | **2** | `ios-backup-crypt`: `Lockdown`'s five extra fields + `FileCountKnown` (D2a, D5) | **merged** — `ios-backup-crypt#13` |
 | **3** | `ios-backup-crypt`: `Status.plist` + `Info.plist` readers (D2b, D2c) | **merged** — `ios-backup-crypt#16` |
 | **4** | `ios-backup-crypt/fixture`: generate both plists (D8) | **merged** — `ios-backup-crypt#15`, and taken BEFORE 3 so 3 landed with no declared gap |
-| **5** | the aggregate on the seam, both implementations, conformance + G5 (D4) | in review |
+| **5** | the aggregate on the seam, both implementations, conformance + G5 (D4) | **merged** — quince#1454 |
 | **6** | `GET /api/versions/{id}/overview`, the pre-unlock tier, contracts §1 (D11) | **blocked on a release tag** — quince#1432 |
-| **7** | `parserfs` — `backup.FS` + `ReadDirFS` over a session (D7) | not open; needs `ios-backup-parser` at its existing `v0.1.0` |
-| **8** | the capability report, three states, lazy + session-cached (D6) | not open |
+| **7** | `parserfs` — `backup.FS` over a vault session (D7) | **merged** — quince#1456. `ReadDirFS` implemented, not assertable until a parser tag |
+| **8** | the capability report, four states, lazy + session-cached (D6) | in review — quince#1458 |
 | **9** | `GET /api/sessions/{id}/overview`, contracts §1/§4 (D4, D11) | not open |
 | **10** | the surface (D3, D9, D10), then G7 to the Operator | not open; partly blocked with 6 |
 
