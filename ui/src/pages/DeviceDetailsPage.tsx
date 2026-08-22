@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useShallow } from "zustand/react/shallow";
 import { ArrowLeft } from "lucide-react";
 import { BackLink } from "@/components/BackLink";
+import { isScopedSession, useAuthStatus } from "@/lib/auth";
 import type { Device } from "@/lib/types";
 import { api } from "@/lib/api";
 import { newestRunningJob, useJobsStore } from "@/stores/jobs";
@@ -90,13 +91,23 @@ export function DeviceDetailsPage() {
   // A pair intent deep-linked from the dashboard card (router state) auto-opens the pair dialog on
   // arrival — qn.4b fix for (bq), keeping qn.3's narrated-flow-on-details decision.
   const location = useLocation();
+  // WHOSE PAGE THIS IS (qn.13 slice 8e). While the status is loading `isScopedSession`
+  // answers false — the admin reading — so the page renders whole rather than flickering
+  // controls away and back on every reload. The API refuses a scoped holder regardless.
+  const scoped = isScopedSession(useAuthStatus().data);
   const pairIntent = Boolean((location.state as { pair?: boolean } | null)?.pair);
 
   return (
     <section>
-      <BackLink to="/" className="inline-flex items-center gap-1 text-sm text-muted hover:text-fg">
-        <ArrowLeft size={16} /> Home
-      </BackLink>
+      {/* THE WAY BACK IS ONLY A WAY BACK FOR THE ADMIN (qn.13 slice 8e; Operator, from the hardware
+          walk 2026-08-22). A scoped holder's Home IS this page — `ScopedHome` routes `/` here — so
+          the link points at where they already are, and following it is a redirect back to itself.
+          The admin arrives from the devices list and needs it. */}
+      {scoped ? null : (
+        <BackLink to="/" className="inline-flex items-center gap-1 text-sm text-muted hover:text-fg">
+          <ArrowLeft size={16} /> Home
+        </BackLink>
+      )}
 
       {!device ? (
         <div className="mt-6 text-sm text-muted">
@@ -233,20 +244,34 @@ export function DeviceDetailsPage() {
             </div>
           </div>
 
-          <div className="mt-8">
-            {/* THE ENROLMENT SECTION SITS ON THE DEVICE PAGE because that is what it is scoped to
-                — D9's "the admin revokes one scoped credential from the device page it was issued
-                from". It is admin-only at the API; a scoped holder never reaches this page's own
-                admin surface, and the routes refuse them regardless. */}
-            <SectionHeading>Share this device</SectionHeading>
-            <div className="mt-3">
-              <DeviceEnrolment device={device} />
-              {/* WHO ALREADY HOLDS ONE, under the control that hands them out — D9. `DeviceEnrolment`
-                  lists authority handed out and not yet used; this lists authority in use. Either
-                  half alone is a confident, incomplete answer to *what have I issued*. */}
-              <DeviceCredentials device={device} />
+          {/* SHARING IS THE ADMIN'S, AND THE SHELL HAS TO SAY SO (qn.13 slice 8e). Found by the
+              Operator on hardware 2026-08-22: this section rendered to a scoped holder, offering a
+              household member the means to invite ANOTHER one.
+
+              NOTHING LEAKED — all three enrolment routes are `adminOnly` (`scope_routes.go:101-103`)
+              and D3 puts issuing credentials on the admin's side of the line, so the API refused.
+              What was wrong is D8's other half: *the shell hides what a principal cannot use*, and a
+              button that always fails is the shape that rule exists to remove.
+
+              THE COMMENT THAT USED TO SIT HERE WAS TRUE WHEN IT WAS WRITTEN, and that is the lesson
+              rather than the excuse. It read: *"a scoped holder never reaches this page's own admin
+              surface"* — correct at slice 9, because a scoped holder had no route to a device page.
+              Slice 8d-2 made this page their HOME and falsified it without touching this file. A
+              premise about who can reach a screen is invalidated by routing changes elsewhere, so it
+              is now asserted rather than assumed. */}
+          {scoped ? null : (
+            <div className="mt-8">
+              <SectionHeading>Share this device</SectionHeading>
+              <div className="mt-3">
+                <DeviceEnrolment device={device} />
+                {/* WHO ALREADY HOLDS ONE, under the control that hands them out — D9.
+                    `DeviceEnrolment` lists authority handed out and not yet used; this lists
+                    authority in use. Either half alone is a confident, incomplete answer to
+                    *what have I issued*. */}
+                <DeviceCredentials device={device} />
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="mt-8">
             <SectionHeading>Versions</SectionHeading>
