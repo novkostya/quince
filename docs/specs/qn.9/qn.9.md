@@ -125,10 +125,28 @@ decrypt happens once, at `Unlock`, for 1.72 s.
 
 **9. A domain has THREE states, not two.** The parser's `Open` returns `*UnsupportedSchemaError`
 (present, schema unrecognised) **or** an error wrapping `fs.ErrNotExist` (the database is not in this
-backup at all). Read from each of the seven domain packages and `errors.go`.
+backup at all). Read from each domain package and `errors.go`. **On `main`. See fact 9b for how many the TAG has.**
 
-**10. The parser exposes no domain registry.** No `Domains()`, no slice, no map — the seven packages
+**10. The parser exposes no domain registry.** No `Domains()`, no slice, no map — the packages
 are reachable only by importing each. `grep` over the repository.
+
+**9b. THE DOMAIN COUNT IS `main`'S, NOT THE TAG'S — FIVE, NOT SEVEN.** `v0.1.0` is the parser's
+ONLY tag and therefore the only thing `core/go.mod` can require. It carries **`calendar`, `calls`,
+`contacts`, `messages`, `notes`**. **`reminders` and `safari` are on `main` and in no release**, and
+so is `backup.ReadDirFS`, which `reminders` needs (quince#1456). `git ls-tree v0.1.0` against
+`git ls-tree origin/main`, 2026-08-22.
+
+**THIS IS THE FOURTH TIME IN ONE SESSION THAT A LIBRARY'S `main` WAS READ AND A CONSUMER'S TAG
+ASSUMED**, and it is the only one that reached a merged document: the scoping issue said seven,
+this spec repeated it in four places, and both were describing a tree no `go.mod` here can
+reference. The others were an unbuildable `require` (`ios-backup-crypt#13`), a release nothing
+could consume (quince#1432), and a compile error the toolchain caught (quince#1456).
+
+**The guard, because *interface facts are looked up live* did not prevent any of the four:**
+*live* has to mean **the version the module will actually resolve**, not whatever `main` holds.
+`git ls-tree <tag>` and `git grep <symbol> <tag>` are the reads; a clone checked out at `main`
+answers a different question in the same words. **Only the compiler catches this**, and only
+where a symbol is named — a COUNT, like this one, compiles perfectly and is simply wrong.
 
 **11. The fixture generator wrote `Manifest.plist` and `Manifest.db` and nothing else — AT
 SCOPING TIME. THIS RUNG CHANGED IT.** Read from `fixture/fixture.go` and
@@ -136,6 +154,7 @@ SCOPING TIME. THIS RUNG CHANGED IT.** Read from `fixture/fixture.go` and
 `novkostya/ios-backup-crypt#15`, which generates both other plists. **Kept in the past tense as
 provenance**, because it is the measurement D8 was written from and a reader arriving at D8
 needs to see the premise as well as its resolution. Do not read it as a present state.
+
 
 **12. `iosbackup.Open` refuses an unencrypted backup** with `ErrNotEncrypted`, so the library's
 single-pass `List` — the cheap aggregate of fact 8 — is reachable only on encrypted versions.
@@ -272,7 +291,7 @@ correct date. That is the exact defect the rung was warned about.
 
 **RULED — architect, quince#1432:** in overview, because *"building it here means `qn.10` and
 everything after inherit the surface instead of each adding one"*; **lazy**, because naming what a
-backup cannot serve means opening seven databases and *"eagerly paying it on every overview render
+backup cannot serve means opening one database per domain and *"eagerly paying it on every overview render
 would put a fixed cost on a screen whose common case is 'which apps are in here'"*; and **cached for
 the session, not for the version** — *"so nothing carries a report across a lock"*.
 
@@ -289,10 +308,18 @@ rung-locally within it:
 data in this backup"* and *"quince cannot read your Safari database"* have different remedies, and
 one of them is not a defect at all.
 
-**The seven domains are enumerated in quince** (fact 10), so a new library domain is a quince change
+**The domain list is enumerated in quince** (fact 10), so a new library domain is a quince change
 and not only a release. The scoping issue's *"a library release plus a rung, with no contract
 amendment"* is right about the **contract** and wrong about the **code**; the enumeration lives in
 one place with a comment saying so.
+
+**It starts at FIVE** — `calendar`, `calls`, `contacts`, `messages`, `notes` — because that is what
+`v0.1.0` carries (fact 9b). `reminders` and `safari` join it when a parser release does, in the same
+change that bumps `core/go.mod` and restores quince#1456's `ReadDirFS` assertion. **The `absent` row
+above is illustrated with Safari deliberately**: until that bump, Safari is not a domain quince can
+report on at all, which is a THIRD thing to say about a domain and is exactly the collapse D6 forbids
+— so the enumeration carries only what the dependency can serve, and a domain quince cannot reach is
+absent from the report rather than reported absent.
 
 ### D7 — quince implements `backup.FS` over the vault session
 
