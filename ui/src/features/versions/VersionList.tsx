@@ -123,14 +123,20 @@ function VersionRow({ version, showDevice }: { version: Version; showDevice?: bo
 
           A LINK, NOT A BUTTON, and not the word "Unlock". `VersionList.test.tsx` asserts that word
           appears nowhere on a row and has since quince#442: it made no sense on an unencrypted
-          version, which has nothing to unlock and is still browsable (spec D7). The accessible name
-          is the same sentence the dialog leads with, so the control and the screen it opens agree.
+          version, which has nothing to unlock and is still browsable (spec D7).
 
-          The password is asked for on the destination, not here. That keeps one credential surface
-          rather than two, and it means a row click is a navigation the browser can undo. */}
+          IT GOES TO THE OVERVIEW, NOT THE BROWSER, since qn.9 slice 10 — the version's own page,
+          which says what the backup IS. The file tree is one click on from there (D9), which is
+          what "overview becomes primary" means in the one place a user actually chooses.
+
+          NO PASSWORD IS ASKED FOR ANYWHERE ON THAT PATH NOW. This comment used to end "the password
+          is asked for on the destination, not here", which was true while the destination was the
+          browser; the overview reads three unencrypted plists and needs none. The point it was
+          making survives and is now stronger: a row click is a navigation the browser can undo, and
+          it no longer costs a credential prompt to look. */}
       <Link
-        to={`/versions/${version.id}/browse`}
-        aria-label="Browse this backup"
+        to={`/versions/${version.id}`}
+        aria-label="What is in this backup"
         className="shrink-0 rounded-lg p-1 text-subtle transition-colors hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
         <ChevronRight size={18} aria-hidden />

@@ -855,3 +855,80 @@ export interface BrowsePage {
   // can tell a clamp from a short last page — "no silent caps" as a wire field.
   effective_limit?: number;
 }
+
+// VersionOverview is GET /api/versions/{id}/overview — qn.9's PRE-UNLOCK tier.
+//
+// EVERY FIELD HERE IS READABLE WITHOUT THE BACKUP PASSWORD, which is the whole of the tier:
+// three plists in an iOS backup are unencrypted, so a version can describe itself before it
+// is opened. D1 bounds this by the FORMAT rather than by a policy.
+export interface VersionOverview {
+  version_id: string;
+  udid: string;
+  encrypted: boolean;
+  created_at: string;
+  // full | incremental | unknown, from the version registry — NEVER from Status.plist's
+  // IsFullBackup, which the lab proved lies (quince#1466). `unknown` is a real answer for an
+  // adopted version and is rendered as itself, never guessed at.
+  kind: "full" | "incremental" | "unknown";
+  device: VersionOverviewDevice;
+  backup: VersionOverviewBackup;
+  apps: VersionOverviewApps;
+  // ALWAYS null on this route, and the key is always sent. The Files table lives inside the
+  // encrypted Manifest.db, so no passwordless read can count it — null means UNKNOWN, and a
+  // surface must render it as such rather than as a number (story 7).
+  file_count: number | null;
+}
+
+// VersionOverviewDevice is the device AS IT WAS WHEN THIS BACKUP RAN, which is not
+// necessarily what it is called now — that is why it is worth showing per version.
+export interface VersionOverviewDevice {
+  // false when the backup carries no Manifest.plist. Every other field is then empty and
+  // means nothing — distinct from a plist that was read and had empty fields.
+  present: boolean;
+  name: string;
+  ios_version: string;
+  class: string;
+  // A MODEL IDENTIFIER, not a marketing name, and quince ships no mapping table for one.
+  // Render it as it is: an unmaintained lookup would go stale quietly (D2).
+  product_type: string;
+  build_version: string;
+  // In scope under D1 and NOT in the default view (D10) — never the answer to "what is in
+  // this backup", and a screenshot is the likeliest way any of it leaves the machine.
+  serial_number: string;
+  unique_device_id: string;
+}
+
+// VersionOverviewBackup is Status.plist — what the backup SESSION recorded about itself.
+// There is no is_full_backup here on purpose; see VersionOverview.kind.
+export interface VersionOverviewBackup {
+  present: boolean;
+  state: string;
+  snapshot_state: string;
+  date: string;
+  uuid: string;
+  // The BACKUP FORMAT version, e.g. "3.3" — never the iOS version. Both are called
+  // "Version" in the format and confusing them is a one-word bug.
+  format_version: string;
+}
+
+export interface VersionOverviewApps {
+  // false when the backup carries no Info.plist — in which case there is no app list at all,
+  // which must render differently from a backup with zero apps.
+  present: boolean;
+  // The USER-INSTALLED bundle list. NEVER null; an empty list arrives as []. This is one of
+  // FOUR app counts a backup yields and the only one a person could check against their own
+  // home screen (D3) — a label must never call any of the other three "apps".
+  bundle_ids: string[];
+  display_name: string;
+  itunes_version: string;
+  last_backup_date: string;
+  cellular: VersionOverviewCellular;
+}
+
+// Present on a phone, empty on a tablet. Behind an explicit disclosure, never in the default
+// view (D10).
+export interface VersionOverviewCellular {
+  imei: string;
+  iccid: string;
+  phone_number: string;
+}
