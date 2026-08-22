@@ -1,6 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { House, Settings as SettingsIcon, type LucideIcon } from "lucide-react";
 import { useConnectionStore } from "@/stores/connection";
+import { isScopedSession, useAuthStatus } from "@/lib/auth";
 import { ConnBadge } from "./ConnBadge";
 import { SignOutButton } from "./SignOutButton";
 
@@ -26,7 +27,14 @@ const under = (pathname: string, base: string): boolean =>
 // Neither is about compositing, and this one is not fixable by any amount of positioning work.
 //
 // The fix is also simply more correct: a detail screen you opened from Home is still Home.
-const NAV: { to: string; label: string; icon: LucideIcon; owns: (pathname: string) => boolean }[] = [
+//
+// `adminOnly` MARKS THE ITEMS A DEVICE-SCOPED HOLDER DOES NOT GET (qn.13 slice 8d, D8). It is the
+// nav half of *Settings is hidden, not merely empty*; `RequireAdmin` is the route half, and
+// neither is the enforcement — the API refuses a scoped principal regardless.
+//
+// HOME IS NOT MARKED, because a scoped holder HAS a Home: `ScopedHome` sends them to their own
+// device page, so the item stays and points somewhere true for both principals.
+const NAV: { to: string; label: string; icon: LucideIcon; adminOnly?: boolean; owns: (pathname: string) => boolean }[] = [
   {
     to: "/",
     label: "Home",
@@ -35,7 +43,7 @@ const NAV: { to: string; label: string; icon: LucideIcon; owns: (pathname: strin
     // the light while you are in one. `/devices` also still resolves as a redirect (quince#443).
     owns: (p) => p === "/" || under(p, "/devices") || under(p, "/storage"),
   },
-  { to: "/settings", label: "Settings", icon: SettingsIcon, owns: (p) => under(p, "/settings") },
+  { to: "/settings", label: "Settings", icon: SettingsIcon, adminOnly: true, owns: (p) => under(p, "/settings") },
 ];
 
 // Responsive nav: a horizontal top bar on phones, the vertical left sidebar on desktop (qn.6a mobile
@@ -165,6 +173,11 @@ const NAV: { to: string; label: string; icon: LucideIcon; owns: (pathname: strin
 export function Sidebar() {
   const version = useConnectionStore((s) => s.serverVersion);
   const { pathname } = useLocation();
+  // WHOSE NAV THIS IS (qn.13 slice 8d, D8). While the status is loading `scopeOfSession` answers
+  // "" — the admin reading — so the bar renders whole rather than flickering an item away and
+  // back on every reload. Over-showing for one paint costs a refusal the user can see; the
+  // route guard is what makes the item unusable rather than merely absent.
+  const scoped = isScopedSession(useAuthStatus().data);
   return (
     <aside
       className="fixed inset-x-0 top-0 z-30 flex h-[var(--bar-h)] shrink-0 flex-row items-center justify-between gap-1 border-b border-line bg-card px-3 pt-[var(--safe-top)] sm:sticky sm:inset-x-auto sm:top-0 sm:z-auto sm:h-dvh sm:w-[var(--sidebar-w)] sm:flex-col sm:items-stretch sm:justify-normal sm:gap-0 sm:self-start sm:border-b-0 sm:border-r sm:px-0 sm:pb-[var(--safe-bottom)]"
@@ -195,7 +208,7 @@ export function Sidebar() {
           is min-content, and an item that refuses to shrink below its min-content is exactly how a
           bar pushes the page sideways instead of wrapping. */}
       <nav className="flex min-w-0 flex-row gap-1 sm:flex-col sm:px-3">
-        {NAV.map(({ to, label, icon: Icon, owns }) => {
+        {NAV.filter((item) => !item.adminOnly || !scoped).map(({ to, label, icon: Icon, owns }) => {
           const current = owns(pathname);
           return (
             // `Link` RATHER THAN `NavLink`, because `NavLink`'s whole contribution is the `isActive`

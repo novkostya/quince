@@ -1,6 +1,6 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppLayout } from "./AppLayout";
-import { LoginGate, RequireAuth, RequireStorage, SetupGate } from "./guards";
+import { LoginGate, RequireAdmin, RequireAuth, RequireStorage, ScopedHome, SetupGate } from "./guards";
 import { SetupPasswordPage } from "@/pages/SetupPasswordPage";
 import { OnboardingHTTPSPage } from "@/pages/OnboardingHTTPSPage";
 import { OnboardingCertificatePage } from "@/pages/OnboardingCertificatePage";
@@ -113,7 +113,9 @@ export const router = createBrowserRouter([
       // inverted from what it was: `/` used to redirect to `/devices`, and now `/devices` redirects
       // to `/`. Breaking a bookmark to make a rename tidy is a cost with no benefit, and the
       // redirect is one line where a broken link is a support question.
-      { index: true, element: <DashboardPage /> },
+      // HOME IS WHOEVER IS ASKING (qn.13 slice 8d, D8). A scoped holder's Home IS their device
+      // page; the admin's is the dashboard. `ScopedHome` is the one component that knows which.
+      { index: true, element: <ScopedHome><DashboardPage /></ScopedHome> },
       { path: "devices", element: <Navigate to="/" replace /> },
       { path: "devices/:udid", element: <DeviceDetailsPage /> },
       // ADDING A STORAGE IS A DESTINATION, not an interruption (quince#846) — the same conclusion
@@ -147,17 +149,20 @@ export const router = createBrowserRouter([
       // rendered on the storage page too (mixed across devices), and a link whose shape depends on
       // which page you clicked from is two links to one thing.
       { path: "versions/:id/browse", element: <VaultBrowsePage /> },
-      { path: "settings", element: <SettingsPage /> },
+      // SETTINGS IS ADMIN-ONLY AND ITS ROUTES DO NOT RESOLVE for a scoped holder — D8's
+      // *hidden, not merely empty*. Hiding the nav item alone leaves the URL working, and a
+      // bookmark is how a household member reaches a screen that then errors at them.
+      { path: "settings", element: <RequireAdmin><SettingsPage /></RequireAdmin> },
       // The auth surface is its OWN PAGE, linked from Settings — quince#841 ruling A. A child of
       // the authed shell, unlike its onboarding sibling, which is a top-level route: one has a
       // session and one does not, which is the whole of qn.6m D2.
-      { path: "settings/auth", element: <SettingsAuthPage /> },
+      { path: "settings/auth", element: <RequireAdmin><SettingsAuthPage /></RequireAdmin> },
       // The notifications install step (qn.12, spec D1). INSIDE the authed shell, unlike the
       // `/onboarding/*` routes at the top of this file: nothing here is a prerequisite of logging
       // in, so it needs none of their exemptions and must not acquire one. What it reports is a
       // property of the visitor's own browser, and an unauthenticated caller has no business
       // learning what this install can do.
-      { path: "settings/notifications", element: <NotificationsInstallPage /> },
+      { path: "settings/notifications", element: <RequireAdmin><NotificationsInstallPage /></RequireAdmin> },
     ],
   },
   { path: "*", element: <Navigate to="/" replace /> },
