@@ -33,9 +33,17 @@ vault session, with nothing indexed that outlives the lock.
 
 ## Interface facts — measured 2026-08-22/23, not recalled
 
-Measurements are of two kinds and they are **not** interchangeable: sizes read off the
-Operator's real backups on the staging stand, and timings taken against a **synthetic**
-database in the pinned `golang:1.26.5-alpine3.24`. Every figure says which it is.
+Measurements are of three kinds and they are **not** interchangeable: sizes read off the
+Operator's real backups on the staging stand; timings against a **synthetic** database; and
+facts 4–7, which are **quince's own code path against the real backups**, read-only, in the
+pinned `golang:1.26.5-alpine3.24`. Every figure says which it is.
+
+**The personal data never left that box, AND NONE OF IT MAY ENTER THIS DOCUMENT.** What is
+reproduced here is counts, byte sizes, timings and schema object names — the last are facts about
+Apple's format, not about a device. **No message text, handle, phone number, group name,
+attachment path, device identifier or bundle id appears below, and none may be added.** Devices
+are called **A**, **B** and **C** throughout, and this rung is the one document in the repository
+where that rule is worth the most, because its subject matter *is* personal content.
 
 ### 1. `sms.db` is large, and one real device is very large
 
@@ -182,7 +190,7 @@ Recorded as a decision because a reader arriving from that issue will otherwise 
 seam twice, and because the issue's §8 split — *"prove the plumbing on a cheap domain first"* —
 had exactly one purpose, which is now served.
 
-### D2 — ONE scan at unlock builds a session projection. Every UI read hits the projection
+### D2 — ONE scan per session builds a projection, taken on FIRST MESSAGES USE, never at unlock
 
 Fact 2 says the parser cannot page a thread; fact 4 says one full scan of the Operator's real
 254,949-message database is **8.437 s**. Three routes were considered and the measurement chose
@@ -195,29 +203,49 @@ between them:
   parsers of one format in the project.
 - **A per-chat cursored accessor upstream in `ios-backup-parser`.** Good, and **not
   sufficient alone**: search (D4) requires reading every message's text once regardless, so a
-  full scan happens at unlock either way.
+  full scan happens once per session either way.
 
-**The ruling: quince performs ONE `Messages()` scan per session, at unlock, and writes a
-session-scoped projection into the session's own scratch** — a small SQLite database holding
-the fields the surfaces need (message id, guid, chat ids, date, direction, handle, text,
-attachment refs, association and edit markers). Chats come from `Chats()`, which is **10 ms on
-the real backup** and cheap enough to read live.
+**The ruling: quince performs ONE `Messages()` scan per session and writes a session-scoped
+projection into the session's own scratch** — a small SQLite database holding the fields the
+surfaces need (message id, guid, chat ids, date, direction, handle, text, attachment refs,
+association and edit markers). Chats come from `Chats()`, which is **10 ms on the real backup**
+and cheap enough to read live.
 
-**The measured cost of that ruling is one unlock-time bill of about 9.4 s** — 928 ms to
+**WHEN the scan happens is a separate decision from HOW the data is read, and it is ruled
+separately: the scan is LAZY, taken on the first read of a `messages` surface.** Not at unlock.
+
+**Because `qn.8`'s file browser is shipped and in use, and an unlock is not a request for
+messages.** A scan at unlock would put ~9.4 s on **every** unlock — including one whose only
+purpose is to download a single file, a surface that costs a user nothing today. That is a
+user-visible regression on shipped behaviour, and it buys nothing: **the projection is read by
+Messages surfaces and by nothing else.** *(Ruling requested and given at spec review,
+quince#1491 — the finding was that D2 named the scan three times and never weighed its timing.)*
+
+**Nothing is lost by deferring, and this is the part worth checking rather than assuming.**
+*Does this backup have messages at all* — story 7 — is answered by `qn.9`'s capability prober,
+which already opens the domain at unlock and does **not** scan; fact 4 measures `messages.Open`
+at **11 ms** against the 8.437 s scan. So the chats list, the capability report and the *no
+messages in this backup* answer are all reachable without it.
+
+**The measured cost, once, when the user asks for Messages: about 9.4 s** — 928 ms to
 materialize plus 8.437 s to scan — **paid once per session instead of once per page.** Fact 4 is
-what makes this a cheap decision rather than a reluctant one; an earlier revision of this spec
-argued the same ruling from an estimate of 13–40 s that turned out to be wrong in the direction
-that flattered it.
+what makes this a cheap decision rather than a reluctant one; an earlier revision argued the same
+ruling from an estimate of 13–40 s that turned out to be wrong in the direction that flattered it.
 
 **This is not a persistent index and does not become one.** It lives in the session scratch
 `qn.8` already wipes on lock, TTL and shutdown; nothing version-keyed, nothing on the app DB,
 nothing surviving the lock. That is the same rule the roadmap states for FTS5 —
-*"session-scratch FTS5 search"* — arriving one layer earlier.
+*"session-scratch FTS5 search"* — arriving one layer earlier. **Ruled at spec review not to be a
+storage-semantics change** (quince#1491): it is derived, session-scoped and self-destroying, and
+the versioned lifecycle it must not touch — `latest/`, `working/`, `versions/`, `@quince-*` — it
+does not touch.
 
 **The scan is surfaced, never hidden.** ~9 s is long enough to need a progress report and a
 named failure state, per *no silent caps or fallbacks*, and short enough that no background-job
-machinery is warranted. The upstream accessor stays worth doing as a later optimisation and is
-**not** this rung's dependency.
+machinery is warranted. **Deferring makes that report better as well as cheaper**: the user has
+just asked for Messages and is waiting for something they requested, rather than waiting at
+unlock for a reason the screen cannot explain. The upstream accessor stays worth doing as a later
+optimisation and is **not** this rung's dependency.
 
 ### D3 — A thread pages by `(date, ROWID)` cursor, in the frozen envelope
 
@@ -312,7 +340,9 @@ not decode the payload.
    at all (device C) is a different sentence again.
 8. A message whose body cannot be decoded is shown as unknown, never as empty.
 9. Locking the session removes the projection, the FTS index and every materialized file.
-10. The unlock scan reports progress and, if it fails, says what failed and what to do.
+10. Opening Messages on a large backup reports progress while the one-time scan runs, and if it
+    fails says what failed and what to do. **Unlocking a backup and using only the file browser
+    never pays that cost** (D2).
 
 ## Gates
 
@@ -364,8 +394,8 @@ themselves invented. **No byte of any fixture comes from a real device.**
   reported as quince's limit, not as the user having no data; D5 turns a stale cache into a
   named warning instead of a quiet shortfall.
 - **No silent caps or fallbacks** — the `limit` clamp discloses (D3); a failed FTS5 build
-  removes the `search` capability and says why (D4); the unlock scan is visible work with a
-  named failure (D2, story 10).
+  removes the `search` capability and says why (D4); the projection scan is visible work with a
+  named failure (D2, story 10), and it is not charged to an unlock that never asks for messages.
 - **Troubleshooting is actionable** — *no `sms.db` in this backup*, *schema not recognised*,
   *session locked* and *scan failed* are four states with four remedies, never one sentence.
   Device C makes the first a real case.
