@@ -8,6 +8,7 @@ require (
 	github.com/go-webauthn/webauthn v0.17.4
 	github.com/novkostya/ios-backup-crypt v0.4.0
 	github.com/novkostya/ios-backup-crypt/fixture v0.1.1
+	github.com/novkostya/ios-backup-parser v0.1.0
 	github.com/oklog/ulid/v2 v2.1.1
 	golang.org/x/crypto v0.54.0
 	golang.org/x/sys v0.47.0
