@@ -156,6 +156,13 @@ var routeScope = map[string]scopeClass{
 	// FIFTH route it has named, and the first four are the paragraph above.
 	"GET /api/sessions/{id}/overview": scopedOwnDevice,
 
+	// qn.9 slice 6 — the PRE-UNLOCK tier. It needs no session and no password, and that
+	// changes nothing about WHOSE it is: it describes one version of one device, so a
+	// scoped principal reaches it exactly when that device is theirs. Needing no unlock is
+	// not a reason to need no authorization — it is a route that reads a device name, an
+	// iOS version and an installed-app list, which is precisely what D8 scopes.
+	"GET /api/versions/{id}/overview": scopedOwnDevice,
+
 	// THE CATCH-ALL. It answers 404 for anything under /api/ that matched nothing, so it carries no
 	// data and must not refuse a scoped principal — a 403 here would tell them a route EXISTS that
 	// they cannot reach, which is a different fact from "no such route".

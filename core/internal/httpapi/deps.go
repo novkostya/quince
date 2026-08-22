@@ -474,6 +474,14 @@ type VaultBrowse interface {
 	// either, and a narrower method cannot grow a second caller by accident.
 	SessionVersion(sessionID string) (versionID string, ok bool)
 
+	// VersionOverview returns the PRE-UNLOCK tier for a version — qn.9 D11.
+	//
+	// IT TAKES A VERSION, NOT A SESSION, AND NO PASSWORD. That is the tier: what an iOS
+	// backup discloses without one (D1). It is the only method on this interface that
+	// answers before an unlock, which is why it sits beside Unlock rather than among the
+	// session routes.
+	VersionOverview(versionID string) (o wire.VersionOverview, code, message string)
+
 	// Overview returns the version's domain totals and capability report — contracts §1's
 	// domain envelope plus qn.9's two additive fields.
 	Overview(sessionID string, q wire.BrowseQuery) (o wire.Overview, code, message string)
@@ -502,6 +510,10 @@ func (UnavailableVaultBrowse) Lock(string) (string, string) {
 
 func (UnavailableVaultBrowse) Browse(string, wire.BrowseQuery) (wire.BrowsePage, string, string) {
 	return wire.BrowsePage{}, wire.VaultCodeUnavailable, vaultUnavailable
+}
+
+func (UnavailableVaultBrowse) VersionOverview(string) (wire.VersionOverview, string, string) {
+	return wire.VersionOverview{}, wire.VaultCodeUnavailable, vaultUnavailable
 }
 
 func (UnavailableVaultBrowse) Overview(string, wire.BrowseQuery) (wire.Overview, string, string) {

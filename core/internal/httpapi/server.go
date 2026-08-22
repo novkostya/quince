@@ -354,6 +354,7 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("DELETE /api/versions/{id}", deps.handleVersionDelete())
 	// The unlocked-session surface (contracts §1, qn.8). All four behind authGuard.
 	apiMux.HandleFunc("POST /api/versions/{id}/unlock", deps.handleVersionUnlock())
+	apiMux.HandleFunc("GET /api/versions/{id}/overview", deps.handleVersionOverview())
 	apiMux.HandleFunc("POST /api/sessions/{id}/lock", deps.handleSessionLock())
 	apiMux.HandleFunc("GET /api/sessions/{id}/browse", deps.handleSessionBrowse())
 	apiMux.HandleFunc("GET /api/sessions/{id}/overview", deps.handleSessionOverview())

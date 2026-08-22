@@ -22,6 +22,7 @@ import (
 	"github.com/novkostya/quince/core/internal/vault"
 	"github.com/novkostya/quince/core/internal/vault/capability"
 	"github.com/novkostya/quince/core/internal/vault/parserfs"
+	"github.com/novkostya/quince/core/internal/vault/preunlock"
 	"github.com/novkostya/quince/core/internal/wire"
 )
 
@@ -45,6 +46,23 @@ type Service struct {
 	// the closer AttachDerived registers, so it cannot outlive the session it describes.
 	capMu    sync.Mutex
 	capCache map[string][]wire.DomainCapability
+
+	// preCache memoises the PRE-UNLOCK plist read, keyed by version id (spec D2c:
+	// "read once per version and memoised, not per request"). Info.plist is XML and
+	// costs 10-99 ms scaling with the app count, and it sits on the path of the thing
+	// users came for.
+	//
+	// IT CACHES THE FILE READ AND NOTHING ELSE. The registry facts — kind, created_at,
+	// udid — are composed fresh on every request, so a row that changes is never served
+	// from here. What is cached is immutable by a hard rule: a committed version is
+	// never mutated, so its plists cannot change under the entry.
+	//
+	// NOT SESSION-SCOPED, AND DELIBERATELY. D6 requires the CAPABILITY report to die
+	// with its session because it describes unlocked content. Nothing here needed a
+	// password, so there is no lock for it to outlive — story 6 governs what a lock
+	// tears down, and this tier is never behind one.
+	preMu    sync.Mutex
+	preCache map[string]preunlock.Tier
 }
 
 // New builds the service. scratchRoot is wiped — see vault.NewRegistry.
@@ -54,7 +72,7 @@ func New(versions Versions, scratchRoot string, ttl time.Duration, log *slog.Log
 		return nil, err
 	}
 	return &Service{versions: versions, registry: reg, log: log, open: openFor,
-		capCache: map[string][]wire.DomainCapability{}}, nil
+		capCache: map[string][]wire.DomainCapability{}, preCache: map[string]preunlock.Tier{}}, nil
 }
 
 // Registry exposes the registry so the daemon can sweep expired sessions and tear them all
@@ -353,4 +371,145 @@ func toWireOverview(t vault.Totals, q wire.BrowseQuery) wire.Overview {
 			DomainCount: len(t.Domains),
 		},
 	}
+}
+
+// VersionOverview serves GET /api/versions/{id}/overview — qn.9's pre-unlock tier (D11).
+//
+// NO SESSION, NO PASSWORD, AND IT MUST STAY THAT WAY. The tier is defined by what an iOS
+// backup yields without the backup password (D1), so this method takes a version id and
+// nothing else. A password parameter here would be one nothing could honestly use.
+func (s *Service) VersionOverview(versionID string) (wire.VersionOverview, string, string) {
+	v, ok, err := s.versions.Version(versionID)
+	if err != nil {
+		s.log.Error("vault: reading version", "version", versionID, "error", err)
+		return wire.VersionOverview{}, wire.VaultCodeIO, "could not read the version"
+	}
+	if !ok {
+		return wire.VersionOverview{}, wire.VaultCodeNotFound, "no such version"
+	}
+	// The same cue Unlock uses rather than a second rule: storage empties browse_root for a
+	// version whose content cannot be served, and reading plists out of a fallback path
+	// would describe the previous version or a half-written one.
+	if v.BrowseRoot == "" {
+		return wire.VersionOverview{}, wire.VaultCodeNotFound,
+			"this version has no browsable content on disk (its snapshot is missing)"
+	}
+
+	tier, err := s.preunlockTier(versionID, v.BrowseRoot)
+	if err != nil {
+		s.log.Error("vault: reading the pre-unlock tier", "version", versionID, "error", err)
+		// A plist that exists and will not parse is a broken backup, and corrupt_manifest is
+		// the honest code: the files opened. An ABSENT plist never reaches here — it reports
+		// its own absence, which the wire types carry as Present false.
+		return wire.VersionOverview{}, wire.VaultCodeCorruptManifest,
+			"this version's plists could not be read: " + err.Error()
+	}
+	return toWireVersionOverview(v, tier), "", ""
+}
+
+// preunlockTier reads the three no-password plists, memoised per version (D2c).
+func (s *Service) preunlockTier(versionID, dir string) (preunlock.Tier, error) {
+	s.preMu.Lock()
+	if t, ok := s.preCache[versionID]; ok {
+		s.preMu.Unlock()
+		return t, nil
+	}
+	s.preMu.Unlock()
+
+	// READ OUTSIDE THE LOCK. Info.plist is up to 99 ms of XML parsing, and holding the mutex
+	// across it would serialise every version's overview behind the slowest one. Two callers
+	// racing the same cold version both read and both store the same bytes off an immutable
+	// tree — a duplicated read is the cost, and it is cheaper than the contention.
+	t, err := preunlock.Read(dir)
+	if err != nil {
+		return preunlock.Tier{}, err
+	}
+
+	s.preMu.Lock()
+	defer s.preMu.Unlock()
+	// BOUNDED, because this one is not swept by anything. The capability cache is dropped by
+	// the closer AttachDerived registers; a version's plists have no such event, so without a
+	// cap this map grows with every version ever viewed for the life of the process. Clearing
+	// wholesale rather than evicting one entry keeps it to a bound with no bookkeeping: the
+	// cost of being wrong is a re-read of a file, not a wrong answer.
+	if len(s.preCache) >= preCacheMax {
+		s.preCache = map[string]preunlock.Tier{}
+	}
+	s.preCache[versionID] = t
+	return t, nil
+}
+
+// preCacheMax bounds the pre-unlock memo. A device holds tens of versions and a household
+// holds a few devices, so this is far above any real working set and exists as a ceiling
+// rather than as a tuning knob — which is why it is a constant and not a config key.
+const preCacheMax = 512
+
+func toWireVersionOverview(v wire.Version, t preunlock.Tier) wire.VersionOverview {
+	out := wire.VersionOverview{
+		VersionID: v.ID,
+		UDID:      v.UDID,
+		CreatedAt: v.CreatedAt,
+		// FROM THE REGISTRY, NOT FROM Status.plist.IsFullBackup — which the lab proved lies
+		// (finding #9(a), quince#1466). This is the seed-sentinel answer storage already
+		// derives, and "unknown" is a real state for an adopted version rather than a gap.
+		Kind: v.Kind,
+		// NULL, ALWAYS, on this route. The Files table is inside Manifest.db, so no
+		// passwordless read can count it; an explicit null says UNKNOWN where 0 would be a
+		// lie about a good backup (story 7, G2).
+		FileCount: nil,
+		Device: wire.VersionDevice{
+			Present:        t.ManifestPresent,
+			Name:           t.Lockdown.DeviceName,
+			IOSVersion:     t.Lockdown.ProductVersion,
+			Class:          t.Lockdown.DeviceClass,
+			ProductType:    t.Lockdown.ProductType,
+			BuildVersion:   t.Lockdown.BuildVersion,
+			SerialNumber:   t.Lockdown.SerialNumber,
+			UniqueDeviceID: t.Lockdown.UniqueDeviceID,
+		},
+		Backup: wire.VersionBackup{
+			Present:       t.Status.Present,
+			State:         t.Status.BackupState,
+			SnapshotState: t.Status.SnapshotState,
+			Date:          rfc3339OrEmpty(t.Status.Date),
+			UUID:          t.Status.UUID,
+			FormatVersion: t.Status.Version,
+		},
+		Apps: wire.VersionApps{
+			Present:        t.Extras.Present,
+			BundleIDs:      t.Extras.InstalledApplications,
+			DisplayName:    t.Extras.DisplayName,
+			ITunesVersion:  t.Extras.ITunesVersion,
+			LastBackupDate: rfc3339OrEmpty(t.Extras.LastBackupDate),
+			Cellular: wire.VersionCellular{
+				IMEI:        t.Extras.IMEI,
+				ICCID:       t.Extras.ICCID,
+				PhoneNumber: t.Extras.PhoneNumber,
+			},
+		},
+	}
+	// THIS VERSION's encryption state, off its own Manifest.plist, with the registry row as
+	// the fallback for a backup that has no manifest to read. A device's history can hold an
+	// unencrypted head above encrypted snapshots (spec D1), so neither source may be assumed
+	// to describe the other.
+	out.Encrypted = v.Encrypted
+	if t.ManifestPresent {
+		out.Encrypted = t.Encrypted
+	}
+	if out.Apps.BundleIDs == nil {
+		out.Apps.BundleIDs = []string{}
+	}
+	return out
+}
+
+// rfc3339OrEmpty renders a plist timestamp, or empty for one the format did not carry.
+//
+// ZERO MEANS ABSENT, NOT 1970. The optional-timestamp fields in these plists arrive as the
+// zero Time when the key is missing, and rendering that as an epoch date would put a
+// confident wrong answer on a screen.
+func rfc3339OrEmpty(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }

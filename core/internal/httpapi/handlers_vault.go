@@ -316,3 +316,24 @@ func (d Deps) handleSessionOverview() http.HandlerFunc {
 		writeJSON(w, d.Log, http.StatusOK, out)
 	}
 }
+
+// handleVersionOverview serves GET /api/versions/{id}/overview — qn.9's pre-unlock tier.
+//
+// IT IS THE ONE OVERVIEW ROUTE THAT NEEDS NO SESSION, and it reads no query arguments: there
+// is nothing to page, because the tier is a fixed set of fields off three plists rather than
+// a list of anything. Adding paging arguments here would be answering a question the route
+// cannot be asked.
+//
+// IT ACCEPTS NO PASSWORD, BY CONSTRUCTION. The tier is defined as what an iOS backup yields
+// without one (spec D1), so there is no body to decode and no field for a secret to arrive
+// in — which is a stronger guarantee than declining to read one.
+func (d Deps) handleVersionOverview() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		out, code, msg := d.VaultBrowse.VersionOverview(r.PathValue("id"))
+		if code != "" {
+			writeError(w, d.Log, statusForVaultCode(code), code, msg)
+			return
+		}
+		writeJSON(w, d.Log, http.StatusOK, out)
+	}
+}

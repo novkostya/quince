@@ -2263,6 +2263,7 @@ POST   /api/sessions/{id}/lock         → 204
 GET    /api/sessions/{id}/browse?domain&prefix&cursor&limit
                                        → {entries: FileEntry[], next_cursor?, effective_limit?}
 GET    /api/sessions/{id}/file/{file_id}                → streamed decrypted content
+GET    /api/versions/{id}/overview     → VersionOverview   // qn.9 PRE-UNLOCK: no session, no password
 GET    /api/sessions/{id}/overview?cursor&limit         → domain totals + capability report
 ```
 
@@ -2312,6 +2313,42 @@ body ends early against a declared length and the client reports a broken transf
 It also sets `Cache-Control: no-store` — an intermediary holding a decrypted file is exactly the
 persistence design §7's lazy model exists to prevent.
 
+
+**`GET /api/versions/{id}/overview` — ADDED AT qn.9 slice 6, and it is the ONE vault-surface route
+with NO SESSION.** That is the whole of the pre-unlock tier: three plists in an iOS backup are
+readable without the backup password, so the facts they carry need no unlock to serve. Ruled by the
+Operator, 2026-08-22 — *"what a session sees without presenting the backup password — whatever is
+possible technically"* — which bounds the tier by the FORMAT rather than by a policy, so a field that
+becomes readable without a password later is in scope without a new ruling.
+
+**It answers `VersionOverview`, NOT the frozen domain envelope, and that is a decision.** The envelope
+describes an adapter serving a domain over a session; this route has none, so `capabilities`,
+`adapter_version`, `unsupported_reason` and `page` would be permanently null and a `page` would page
+nothing. Borrowing it would make four fields lie about what this route is.
+
+**It takes no password and has no body.** A parameter for one would be a parameter nothing could
+honestly use, and its absence is a stronger guarantee than declining to read it.
+
+**`file_count` is ALWAYS `null` here, and the key is always sent.** The Files table lives inside
+`Manifest.db`, which is encrypted on an encrypted backup, so this tier structurally cannot count it.
+An explicit null says UNKNOWN; an omitted key says nothing, and a `0` would claim quince counted a
+table it cannot reach — the ambiguity qn.9 D5 had fixed upstream as `FileCountKnown`. The count
+arrives on the session route.
+
+**`kind` is carried from the version registry and is NEVER `Status.plist`'s `IsFullBackup`.** The lab
+proved that field lies — a first, genuinely full backup writes `IsFullBackup:false` (finding #9(a)) —
+and `core/internal/storage` refuses it in five places, deriving kind from the seed sentinel instead.
+The qn.9 spec specified the lying field for this tier; quince#1466 is that correction. `unknown` is a
+real answer here, for an adopted version whose kind nothing recorded.
+
+**Three sources, three independent `present` flags.** `device` is `Manifest.plist`, `backup` is
+`Status.plist`, `apps` is `Info.plist`. A backup may legitimately lack either of the last two, and
+*absent* is a different fact from *read it, and the fields were empty* — so a client renders them
+differently and never has to infer absence from emptiness.
+
+**Authorization is unchanged by needing no unlock.** The route is `scopedOwnDevice` like the rest of
+the vault surface: it reads a device name, an iOS version and an installed-app list, which is
+precisely what a scoped principal may see for their own device and no other.
 
 **`GET /api/sessions/{id}/overview?cursor&limit` — ADDED AT qn.9, and it AMENDS THE ENVELOPE ONCE.**
 
