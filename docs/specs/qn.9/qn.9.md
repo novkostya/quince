@@ -59,7 +59,8 @@ Two devices, called **A** (iPad) and **B** (iPhone) throughout.
 
 **2. `Status.plist` carries six keys**: `BackupState`, `Date`, `IsFullBackup`, `SnapshotState`,
 `UUID`, `Version`. **`IsFullBackup` is a product fact quince cannot show today** and costs
-microseconds.
+microseconds. **Open question: quince#1466** — the lab proved that field lies, and quince
+already carries the honest answer as `Version.Kind`.
 
 **3. `Manifest.plist` — the file the decrypt path ALREADY parses — carries far more than the four
 keys the library reads.** Top level: `Applications` (dict of **1203** / **1955**), `BackupKeyBag`,
@@ -200,7 +201,7 @@ VERSION would be right on most stands and wrong on this one, which is the stand 
 | step | source | cost | what it adds |
 | --- | --- | --- | --- |
 | **a** | `Manifest.plist` `Lockdown` | **zero extra I/O** | `DeviceClass`, `ProductType`, `BuildVersion`, `SerialNumber`, `UniqueDeviceID` |
-| **b** | `Status.plist` | **µs** | `IsFullBackup`, `BackupState`, `SnapshotState`, `Date`, `UUID`, `Version` |
+| **b** | `Status.plist` | **µs** | `BackupState`, `SnapshotState`, `Date`, `UUID`, `Version` — **not** `IsFullBackup`; open question: quince#1466 |
 | **c** | `Info.plist` | **10–99 ms** | `Installed Applications`, `Last Backup Date`, and B's `IMEI` / `ICCID` / `Phone Number` |
 
 **(a) is the whole of the cheap win and it is a two-field struct change.** `Info` already exists,
@@ -431,8 +432,9 @@ renders many.
 ## Stories
 
 1. I open a version I have not unlocked and see the device it came from, when the backup was taken,
-   whether it was full, whether it is encrypted, and which apps I had installed — **without typing a
-   password**.
+   whether it was full or incremental (from the version registry, **not** `Status.plist` —
+   open question: quince#1466), whether it is encrypted, and which apps I had installed —
+   **without typing a password**.
 2. I unlock it and the same screen gains a file count, a total size, and a size and file count per
    app, without the app list disappearing and coming back.
 3. The per-app sizes are visibly *pending* while they compute, and never render as zero.
@@ -528,11 +530,11 @@ Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewa
 | **3** | `ios-backup-crypt`: `Status.plist` + `Info.plist` readers (D2b, D2c) | **merged** — `ios-backup-crypt#16` |
 | **4** | `ios-backup-crypt/fixture`: generate both plists (D8) | **merged** — `ios-backup-crypt#15`, and taken BEFORE 3 so 3 landed with no declared gap |
 | **5** | the aggregate on the seam, both implementations, conformance + G5 (D4) | **merged** — quince#1454 |
-| **6** | `GET /api/versions/{id}/overview`, the pre-unlock tier, contracts §1 (D11) | **blocked on a release tag** — quince#1432 |
+| **6** | `GET /api/versions/{id}/overview`, the pre-unlock tier, contracts §1 (D11) | **in review** — quince#1432 |
 | **7** | `parserfs` — `backup.FS` over a vault session (D7) | **merged** — quince#1456. `ReadDirFS` implemented, not assertable until a parser tag |
-| **8** | the capability report, four states, lazy + session-cached (D6) | in review — quince#1458 |
-| **9** | `GET /api/sessions/{id}/overview`, contracts §1/§4 (D4, D11) | not open |
-| **10** | the surface (D3, D9, D10), then G7 to the Operator | not open; partly blocked with 6 |
+| **8** | the capability report, four states, lazy + session-cached (D6) | **merged** — quince#1458 |
+| **9** | `GET /api/sessions/{id}/overview`, contracts §1/§4 (D4, D11) | **merged** — quince#1461 |
+| **10** | the surface (D3, D9, D10), then G7 to the Operator | not open — slice 6 is its dependency, not the tag |
 
 **THIS TABLE IS A SECOND PART DESCRIBING THE WHOLE, so it is stale by default after every merge** —
 quince#409's finding, which cost four of five rows in the PR that fixed the heading above them. The
@@ -544,6 +546,10 @@ before 3**, reversing this list: the spec originally had 3 land with a declared 
 afterwards, and doing the fixture first meant there was no gap to declare. Nothing depended on the
 original order.
 
-**Slice 6 is the only one blocked**, and not on code: `main` of `ios-backup-crypt` carries slices
-2–4 and no release tag does, so `core/go.mod` cannot reach them. Who cuts a release tag on the
-sibling libraries is unwritten and is the Operator's — quince#1432.
+**Nothing is blocked.** The release-tag question that held slice 6 was ruled — Operator, 2026-08-22,
+*"make releases"* — and `core/go.mod` now pins `ios-backup-crypt v0.5.0`, `fixture v0.2.0` and
+`ios-backup-parser v0.2.0`, so slices 2–4 are reachable. **Slice 6 was NOT built when that tag
+landed**, and for a day the rung's own tracker recorded it as done: the comment reporting the
+unblocking counted it among the merged in the same breath. Named here because the slice table above
+is the artifact that should have caught it, and did not — measure at the destination, not at the
+mechanism that released it.

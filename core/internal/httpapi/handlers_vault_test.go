@@ -17,16 +17,18 @@ import (
 
 // stubVault fixes each route's outcome and records what it was asked.
 type stubVault struct {
-	session  wire.Session
-	page     wire.BrowsePage
-	overview wire.Overview
-	entry    wire.FileEntry
-	content  string
-	code     string
-	message  string
-	lastPass string
-	lastQ    wire.BrowseQuery
-	lastFile string
+	session         wire.Session
+	page            wire.BrowsePage
+	overview        wire.Overview
+	versionOverview wire.VersionOverview
+	entry           wire.FileEntry
+	content         string
+	code            string
+	message         string
+	lastPass        string
+	lastQ           wire.BrowseQuery
+	lastFile        string
+	lastVersion     string
 }
 
 func (s *stubVault) Unlock(versionID, password string) (wire.Session, string, string) {
@@ -43,6 +45,11 @@ func (s *stubVault) Overview(_ string, q wire.BrowseQuery) (wire.Overview, strin
 	s.lastQ = q
 	return s.overview, s.code, s.message
 }
+func (s *stubVault) VersionOverview(versionID string) (wire.VersionOverview, string, string) {
+	s.lastVersion = versionID
+	return s.versionOverview, s.code, s.message
+}
+
 func (s *stubVault) OpenFile(_, fileID string) (io.ReadCloser, wire.FileEntry, string, string) {
 	s.lastFile = fileID
 	if s.code != "" {
@@ -590,5 +597,72 @@ func TestVaultFileResponseCarriesTheDisposition(t *testing.T) {
 
 	if got := resp.Header.Get("Content-Disposition"); !strings.Contains(got, `filename="IMG_0001.HEIC"`) {
 		t.Errorf("Content-Disposition = %q, want the basename", got)
+	}
+}
+
+// The pre-unlock route reaches the seam with the VERSION id and needs no session.
+func TestVersionOverviewRouteServesTheVersionTier(t *testing.T) {
+	sv := &stubVault{versionOverview: wire.VersionOverview{
+		VersionID: "01V",
+		Kind:      "full",
+		Device:    wire.VersionDevice{Present: true, Name: "Study Tablet"},
+		Apps:      wire.VersionApps{Present: true, BundleIDs: []string{"com.example.notes"}},
+	}}
+
+	srv, client := vaultServer(t, sv)
+	res, err := client.Get(srv.URL + "/api/versions/01V/overview")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	if sv.lastVersion != "01V" {
+		t.Errorf("seam was asked for %q, want the path's version id", sv.lastVersion)
+	}
+
+	var got wire.VersionOverview
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Device.Name != "Study Tablet" || !got.Apps.Present {
+		t.Errorf("body = %+v, want the tier the seam returned", got)
+	}
+}
+
+// file_count is an explicit null on the wire, not an omitted key and not a zero (story 7, G2).
+func TestVersionOverviewSendsFileCountAsAnExplicitNull(t *testing.T) {
+	sv := &stubVault{versionOverview: wire.VersionOverview{VersionID: "01V", FileCount: nil}}
+	srv, client := vaultServer(t, sv)
+	res, err := client.Get(srv.URL + "/api/versions/01V/overview")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(string(body), `"file_count":null`) {
+		t.Errorf("body has no explicit null file_count — an absent key says nothing and a 0 "+
+			"would claim quince counted a table it cannot reach.\nbody = %s", body)
+	}
+}
+
+// With no vault wired the route reports 503 honestly rather than an empty overview.
+func TestVersionOverviewIsUnavailableWithNoVaultWired(t *testing.T) {
+	deps := testDeps(t) // VaultBrowse left nil → UnavailableVaultBrowse
+	srv := httptest.NewServer(NewRouter(deps))
+	defer srv.Close()
+	client := authedClient(t, srv)
+
+	res, err := client.Get(srv.URL + "/api/versions/01V/overview")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", res.StatusCode)
 	}
 }

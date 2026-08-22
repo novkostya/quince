@@ -119,6 +119,10 @@ var resourceDevice = map[string]deviceResolver{
 	// to a device. Named here rather than left to unresolvableToday, because it IS resolvable —
 	// the route carries exactly the id `fromSession` already takes.
 	"GET /api/sessions/{id}/overview": fromSession,
+	// qn.9 slice 6. The SHORTER hop of the two: this route carries the version id
+	// directly, so it needs no session lookup at all — `fromVersion`, like the unlock it
+	// sits beside.
+	"GET /api/versions/{id}/overview": fromVersion,
 }
 
 // unresolvableToday are `scopedOwnDevice` routes with NO way to find their device yet, and they

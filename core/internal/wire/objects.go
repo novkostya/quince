@@ -1189,3 +1189,130 @@ type DomainCapability struct {
 	// has to add support, and it is what distinguishes that state from unreadable.
 	Fingerprint string `json:"fingerprint,omitempty"`
 }
+
+// VersionOverview is GET /api/versions/{id}/overview — qn.9's PRE-UNLOCK tier (D11).
+//
+// IT IS NOT THE DOMAIN ENVELOPE, and that is the decision rather than an omission. The
+// envelope's shape exists to describe an adapter serving a domain over a SESSION; this route
+// has no session, which is the entire point of the tier. There is nothing to paginate, no
+// adapter to name and no per-domain report to carry, so borrowing the envelope would mean
+// four fields that are permanently null and a `page` nothing pages.
+//
+// EVERY FIELD HERE IS READABLE WITH NO PASSWORD. That is D1's ruling — Operator, 2026-08-22:
+// "what a session sees without presenting the backup password — whatever is possible
+// technically" — so the boundary is the FORMAT's, and a field that becomes readable without
+// a password later is in scope without a new ruling.
+type VersionOverview struct {
+	VersionID string `json:"version_id"`
+	UDID      string `json:"udid"`
+
+	// Encrypted is THIS VERSION's state, read from its own Manifest.plist, never inherited
+	// from the device. Measured on a real iPad: an unencrypted head above twelve encrypted
+	// snapshots (spec D1), so a client that reads this off the device is right on most
+	// stands and wrong on that one.
+	Encrypted bool   `json:"encrypted"`
+	CreatedAt string `json:"created_at"`
+
+	// Kind is full | incremental | unknown, carried from the version registry.
+	//
+	// IT IS NOT READ FROM Status.plist.IsFullBackup, WHICH LIES. The lab proved a first,
+	// genuinely full backup writes IsFullBackup:false (finding #9(a)); core/internal/storage
+	// refuses that field in five places and derives kind from the seed sentinel instead.
+	// The spec specified the lying field for this tier and quince#1466 is that correction —
+	// so this is the honest answer quince already held, not a second opinion.
+	Kind string `json:"kind"`
+
+	Device VersionDevice `json:"device"`
+	Backup VersionBackup `json:"backup"`
+
+	// Apps is the USER-INSTALLED bundle list from Info.plist — 21 on one measured tablet,
+	// where the same backup yields 1,203 bundles with a container and 1,264 domains. qn.9 D3
+	// rules that "apps" means this one, because it is what a person means by the word and
+	// the only one they could check against their own home screen. A client MUST NOT label
+	// any of the other three counts "apps".
+	Apps VersionApps `json:"apps"`
+
+	// FileCount is ALWAYS null on this route, and it is carried anyway.
+	//
+	// The Files table lives in Manifest.db, which is encrypted on an encrypted backup, so
+	// this tier structurally cannot know the count — and the library reports "locked" and
+	// "genuinely empty" with the same zero, which is what qn.9 D5 had fixed upstream as
+	// FileCountKnown. Sending an explicit null says UNKNOWN where an absent key would say
+	// nothing and a 0 would be a lie about a perfectly good backup (story 7, G2). The count
+	// arrives on the post-unlock route.
+	FileCount *int64 `json:"file_count"`
+}
+
+// VersionDevice is the device as it was WHEN THIS BACKUP RAN, which is not necessarily what
+// the device is called now — that is the whole reason it is worth showing per version.
+//
+// SOURCED FROM Manifest.plist's Lockdown dict, at no extra I/O.
+type VersionDevice struct {
+	// Present is false when the backup has no Manifest.plist. Every other field is then
+	// empty and means nothing — distinct from a plist that was read and had empty fields.
+	Present bool `json:"present"`
+
+	Name       string `json:"name"`
+	IOSVersion string `json:"ios_version"`
+	Class      string `json:"class"` // "iPhone", "iPad", … the human word
+	// ProductType is a MODEL IDENTIFIER, not a marketing name, and quince ships no mapping
+	// table for one. It is shown as it is: an unmaintained lookup would go stale quietly,
+	// and being honestly raw beats being confidently wrong (spec D2).
+	ProductType  string `json:"product_type"`
+	BuildVersion string `json:"build_version"`
+
+	// SerialNumber and UniqueDeviceID are in scope under D1 and are NOT in the surface's
+	// default view (D10) — they are never the answer to "what is in this backup", and a
+	// screenshot is the likeliest way any of it leaves the Operator's machine.
+	SerialNumber   string `json:"serial_number"`
+	UniqueDeviceID string `json:"unique_device_id"`
+}
+
+// VersionBackup is Status.plist — what the backup SESSION recorded about itself.
+//
+// IsFullBackup IS DELIBERATELY ABSENT. It is the one key in this file quince must not
+// surface; see VersionOverview.Kind and quince#1466.
+type VersionBackup struct {
+	// Present is false when the backup has no Status.plist. A backup legitimately may not,
+	// and that is a different fact from one whose fields are empty.
+	Present bool `json:"present"`
+
+	State         string `json:"state"`          // e.g. "new"
+	SnapshotState string `json:"snapshot_state"` // e.g. "finished"
+	// Date is the backup session's own timestamp, RFC 3339, or empty when absent. It is not
+	// necessarily quince's created_at: this is what the device wrote.
+	Date string `json:"date"`
+	UUID string `json:"uuid"`
+	// FormatVersion is the BACKUP FORMAT version, e.g. "3.3" — never the iOS version. The
+	// two are both called "Version" in the format and confusing them is a one-word bug.
+	FormatVersion string `json:"format_version"`
+}
+
+// VersionApps is Info.plist's user-installed app list, plus the cellular identifiers that
+// arrive in the same file.
+type VersionApps struct {
+	// Present is false when the backup has no Info.plist — in which case there is no app
+	// list at all, which a surface must render differently from a backup with zero apps.
+	Present bool `json:"present"`
+
+	// BundleIDs is NEVER null on the wire; an empty list is sent as []. A client iterating
+	// a list should not have to distinguish "none" from "field absent" — Present already
+	// carries that distinction, and carrying it twice invites the two to disagree.
+	BundleIDs []string `json:"bundle_ids"`
+
+	DisplayName    string `json:"display_name"`
+	ITunesVersion  string `json:"itunes_version"`
+	LastBackupDate string `json:"last_backup_date"` // RFC 3339, or empty when absent
+
+	// Cellular is present on a phone and absent on a tablet. In scope under D1 — it is the
+	// Operator's own data on their own machine, behind their own session — and behind an
+	// explicit disclosure in the surface rather than in the default view (D10).
+	Cellular VersionCellular `json:"cellular"`
+}
+
+// VersionCellular are Info.plist's phone-only identifiers. Empty on any device that has none.
+type VersionCellular struct {
+	IMEI        string `json:"imei"`
+	ICCID       string `json:"iccid"`
+	PhoneNumber string `json:"phone_number"`
+}
