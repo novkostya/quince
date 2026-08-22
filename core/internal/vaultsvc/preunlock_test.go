@@ -303,3 +303,64 @@ func allocLike[T any](_ *T) *T {
 	var v T
 	return &v
 }
+
+// FINDING 3 (quince#1470 review) — when the registry row and the version's own manifest
+// DISAGREE about encryption, the MANIFEST wins.
+//
+// This is the claim the wire comment, the spec and this slice all lean on, and it was
+// unasserted: D1 measured a real tablet with IsEncrypted=false on the head above twelve
+// encrypted snapshots, so a tier that trusts the device row is wrong on the newest version of
+// the stand the rung gate runs on. The neighbouring story-9 test does not cover it — that one
+// asserts the DEVICE FIELDS match across a pair, not that `encrypted` follows the version.
+func TestTheManifestDecidesEncryptionWhenTheRegistryRowDisagrees(t *testing.T) {
+	// An UNENCRYPTED backup behind a registry row that claims encrypted — the head-above-
+	// encrypted-snapshots shape, where a device-level answer would be wrong.
+	dir := t.TempDir()
+	buildBackup(t, dir, false, true, true)
+	s := newService(t, versionAt(dir, true), true, &fakeVault{})
+
+	out, code, msg := s.VersionOverview("01V")
+	if code != "" {
+		t.Fatalf("VersionOverview: %s — %s", code, msg)
+	}
+	if out.Encrypted {
+		t.Error("encrypted = true, but this version's own Manifest.plist says false. A " +
+			"version's encryption state is read from the version, never inherited from the " +
+			"device row — a device holds both at once.")
+	}
+
+	// And the other direction, so this cannot pass by always reporting false.
+	encDir := t.TempDir()
+	buildBackup(t, encDir, true, true, true)
+	s2 := newService(t, versionAt(encDir, false), true, &fakeVault{})
+
+	out2, code, msg := s2.VersionOverview("01V")
+	if code != "" {
+		t.Fatalf("VersionOverview (encrypted fixture): %s — %s", code, msg)
+	}
+	if !out2.Encrypted {
+		t.Error("encrypted = false, but this version's own Manifest.plist says true")
+	}
+}
+
+// FINDING 2 (quince#1470 review) — a present-but-unparseable plist surfaces as
+// `corrupt_manifest`, not as a 200 whose `present: false` claims the backup has no manifest.
+//
+// The split is decided in `preunlock` and asserted there too; this is the seam assertion that
+// the error reaches the caller as the right CODE rather than being flattened.
+func TestACorruptPlistSurfacesAsCorruptManifestRatherThanAsAbsent(t *testing.T) {
+	dir := t.TempDir()
+	buildBackup(t, dir, true, true, true)
+	if err := os.WriteFile(filepath.Join(dir, "Manifest.plist"),
+		[]byte("this is not a plist"), 0o600); err != nil {
+		t.Fatalf("corrupting: %v", err)
+	}
+	s := newService(t, versionAt(dir, true), true, &fakeVault{})
+
+	out, code, _ := s.VersionOverview("01V")
+	if code != wire.VaultCodeCorruptManifest {
+		t.Fatalf("code = %q (device.present=%v), want %q. A broken backup and a backup with "+
+			"no manifest are different facts with different remedies, and quince holds the "+
+			"inputs to tell them apart.", code, out.Device.Present, wire.VaultCodeCorruptManifest)
+	}
+}
