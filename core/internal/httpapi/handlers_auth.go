@@ -5,23 +5,26 @@ import (
 	"net/http"
 
 	"github.com/novkostya/quince/core/internal/auth"
-	"github.com/novkostya/quince/core/internal/wire"
 )
 
 type passwordBody struct {
 	Password string `json:"password"`
 }
 
-// GET /api/auth/status → {state, csrf_token} (rung-ruled contract addition). The CSRF
+// GET /api/auth/status → {state, csrf_token, scope} (rung-ruled contract addition). The CSRF
 // token comes from the cookie the authGuard just ensured (via request context).
+//
+// `scope` SINCE qn.13 SLICE 8d — null for an admin, the device for a scoped holder. This is the
+// read the shell boots from, so it is the one that decides whether a household member is shown the
+// admin's chrome (D8, ruled on quince#1443).
 func (d Deps) handleAuthStatus() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		state, err := d.Auth.Status(sessionCookieValue(r))
+		out, err := d.authStatusFor(sessionCookieValue(r), csrfFromContext(r))
 		if err != nil {
 			writeError(w, d.Log, http.StatusInternalServerError, "internal", "auth status failed")
 			return
 		}
-		writeJSON(w, d.Log, http.StatusOK, wire.AuthStatus{State: state, CSRFToken: csrfFromContext(r)})
+		writeJSON(w, d.Log, http.StatusOK, out)
 	}
 }
 
@@ -149,10 +152,19 @@ func (d Deps) issueSessionResponse(w http.ResponseWriter, r *http.Request, passw
 		}
 		return
 	}
+	// THE SCOPE IS RESOLVED BEFORE THE COOKIES (qn.13 slice 8d) — a failure must be
+	// answerable with a refusal, not with a payload that says ADMIN because it could
+	// not be read. See `mintedStatus`.
+	status, err := d.mintedStatus(auth.PrincipalOf(sess), csrf)
+	if err != nil {
+		d.Log.Error("could not resolve the session scope", "error", err)
+		writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not complete sign-in")
+		return
+	}
 	secure := d.Auth.Secure(r)
 	http.SetCookie(w, auth.SessionCookie(sess, secure))
 	http.SetCookie(w, auth.CSRFCookie(csrf, secure))
-	writeJSON(w, d.Log, http.StatusOK, wire.AuthStatus{State: auth.StateAuthenticated, CSRFToken: csrf})
+	writeJSON(w, d.Log, http.StatusOK, status)
 }
 
 // POST /api/auth/logout → clears the session.

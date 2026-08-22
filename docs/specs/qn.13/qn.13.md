@@ -680,6 +680,7 @@ Each is one PR carrying one reviewable claim, **sequenced from `main`, not stack
 | **8a** | every route carries a scope decision; `adminOnly` refuses (D3, D8) — quince#1384 | no |
 | **8b** | the resource-check: a scoped principal reaches only its OWN device, including `POST /api/jobs`, whose device is in the body rather than the path | no |
 | **8c** | the response filter: `GET /api/jobs` and `GET /api/versions` narrowed to their device; the shell's shape (G3) | no |
+| **8d** | **the shell learns its own principal**: `GET /api/auth/status` gains `scope`, a scoped holder's Home becomes their device page, and Settings leaves the nav (D8, quince#1443) — **added by ruling, 2026-08-22**; `8c` shipped D8's server half and could not reach the shell, because nothing told the client it was scoped | no |
 | **9** | the enrolment ceremony and the QR, against fact 8's precedent, excluding nothing (D4, D4.1, D5, G4) — **AFTER 8a/8b/8c; see the ordering rule below** | no |
 | **10** | the send-path filter and the preference's owner column, backfilled admin-owned (D7, G5) | no |
 | **11** | the admin's view: marked rows, listed secrets, revocation from the device page (D9) | no |

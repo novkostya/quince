@@ -263,6 +263,30 @@ type ConfigError struct {
 type AuthStatus struct {
 	State     string `json:"state"` // needs_setup | needs_login | authenticated
 	CSRFToken string `json:"csrf_token"`
+
+	// Scope is null for an ADMIN principal and names the device for a scoped one (qn.13 slice 8d,
+	// D8; ruled on quince#1443).
+	//
+	// THE SAME TYPE AND THE SAME SPELLING AS `Passkey.Scope`, deliberately and by ruling. One
+	// concept gets one shape across both wire objects; a second convention for the same question
+	// is the drift this project files issues about.
+	//
+	// `state` IS THE DISAMBIGUATOR, NOT THIS FIELD'S PRESENCE. `scope` is meaningful only when
+	// `state == authenticated`; on any other state its value carries no claim. Making ABSENCE mean
+	// both *not authenticated* and *admin* would be quince#744's defect — one value standing for
+	// several states with no way to tell them apart — reproduced in a new field, and it is why
+	// there is no `omitempty` here.
+	//
+	// IT IS NOT AN AUTHORIZATION SURFACE. The shell hides what a principal cannot use; the server
+	// refuses it regardless (D8: *unreachable is a server property, not a routing one*). A client
+	// that forged this field would hide things from its own user and gain nothing.
+	//
+	// AN OLD CLIENT IGNORES IT AND RENDERS ADMIN CHROME TO A SCOPED HOLDER — a cached service
+	// worker will do exactly that, since qn.12 shipped a PWA. Nothing leaks, because every route
+	// behind that chrome refuses, and it is today's behaviour rather than a regression. Stated
+	// because the opposite was claimed while this was being ruled, and a wrong premise left
+	// standing gets cited later (quince#1443).
+	Scope *PasskeyScope `json:"scope"`
 }
 
 // Storage is one declared backup location (contracts §1 GET /api/storages, qn.6c).

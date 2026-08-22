@@ -300,10 +300,19 @@ func (d Deps) handlePasskeyLoginFinish() http.HandlerFunc {
 			}
 			return
 		}
+		// THE SCOPE IS RESOLVED BEFORE THE COOKIES (qn.13 slice 8d) — a failure must be
+		// answerable with a refusal, not with a payload that says ADMIN because it could
+		// not be read. See `mintedStatus`.
+		status, err := d.mintedStatus(auth.PrincipalOf(sess), csrf)
+		if err != nil {
+			d.Log.Error("could not resolve the session scope", "error", err)
+			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not complete sign-in")
+			return
+		}
 		secure := d.Auth.Secure(r)
 		http.SetCookie(w, auth.SessionCookie(sess, secure))
 		http.SetCookie(w, auth.CSRFCookie(csrf, secure))
-		writeJSON(w, d.Log, http.StatusOK, wire.AuthStatus{State: auth.StateAuthenticated, CSRFToken: csrf})
+		writeJSON(w, d.Log, http.StatusOK, status)
 	}
 }
 
@@ -520,9 +529,18 @@ func (d Deps) handleSetupPasskeyFinish() http.HandlerFunc {
 			}
 			return
 		}
+		// THE SCOPE IS RESOLVED BEFORE THE COOKIES (qn.13 slice 8d) — a failure must be
+		// answerable with a refusal, not with a payload that says ADMIN because it could
+		// not be read. See `mintedStatus`.
+		status, err := d.mintedStatus(auth.PrincipalOf(sess), csrf)
+		if err != nil {
+			d.Log.Error("could not resolve the session scope", "error", err)
+			writeError(w, d.Log, http.StatusInternalServerError, "internal", "could not complete sign-in")
+			return
+		}
 		secure := d.Auth.Secure(r)
 		http.SetCookie(w, auth.SessionCookie(sess, secure))
 		http.SetCookie(w, auth.CSRFCookie(csrf, secure))
-		writeJSON(w, d.Log, http.StatusOK, wire.AuthStatus{State: auth.StateAuthenticated, CSRFToken: csrf})
+		writeJSON(w, d.Log, http.StatusOK, status)
 	}
 }

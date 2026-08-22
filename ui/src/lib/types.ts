@@ -153,9 +153,30 @@ export interface Session {
 
 export type AuthState = "needs_setup" | "needs_login" | "authenticated";
 
+/**
+ * PrincipalScope names the device a session is confined to (qn.13 slice 8d, D8).
+ *
+ * The SAME SHAPE as a passkey row's `scope`, by ruling on quince#1443 — one concept, one spelling,
+ * across both wire objects.
+ */
+export interface PrincipalScope {
+  udid: string;
+}
+
 export interface AuthStatus {
   state: AuthState;
   csrf_token: string;
+  /**
+   * null for an ADMIN principal, `{udid}` for a device-scoped one.
+   *
+   * `state` IS THE DISAMBIGUATOR, NOT THIS FIELD'S PRESENCE — `scope` carries a claim only when
+   * `state === "authenticated"`. Read it through `scopeOfSession` rather than directly, so the two
+   * questions stay joined.
+   *
+   * OPTIONAL IN THE TYPE because an older daemon omits the key entirely, and the correct reading of
+   * that is *admin* — which is also what a client that has never heard of scoping already does.
+   */
+  scope?: PrincipalScope | null;
 }
 
 export interface WSEnvelope {

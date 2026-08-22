@@ -14,6 +14,31 @@ export function useAuthStatus() {
   });
 }
 
+
+/**
+ * scopeOfSession returns the device this session is confined to, or "" for an admin.
+ *
+ * THE TWO QUESTIONS ARE JOINED HERE ON PURPOSE (qn.13 slice 8d, ruled on quince#1443). `scope`
+ * carries a claim only when `state === "authenticated"`; on `needs_login` or `needs_setup` there is
+ * no principal to describe, so any value it held would be meaningless. Reading the field directly
+ * lets those come apart, and the shape of that mistake is a shell that confines a visitor who is not
+ * signed in.
+ *
+ * "" MEANS ADMIN, and it also means *we cannot tell* — a payload from an older daemon has no `scope`
+ * key at all. Both land on the admin reading, which is the direction that fails safe here: the
+ * server refuses every admin route to a scoped holder regardless, so over-showing costs a refusal
+ * the user can see, where under-showing would hide a household member's own device from them.
+ */
+export function scopeOfSession(s: AuthStatus | undefined): string {
+  if (!s || s.state !== "authenticated") return "";
+  return typeof s.scope?.udid === "string" ? s.scope.udid : "";
+}
+
+/** isScopedSession reports whether this session is confined to one device. */
+export function isScopedSession(s: AuthStatus | undefined): boolean {
+  return scopeOfSession(s) !== "";
+}
+
 export function login(password: string): Promise<AuthStatus> {
   return api.post<AuthStatus>("/api/auth/login", { password });
 }
