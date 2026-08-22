@@ -154,9 +154,24 @@ case "$out" in
 *"#21"*) bad "a BARE closing keyword was counted — GitHub closes that one itself: $out" ;;
 *) ok "…and a bare #21 in the same body is still stripped, so the fix did not widen to every keyword" ;;
 esac
+# CASE 3 CANNOT FAIL TODAY, AND SAYING SO IS THE POINT OF KEEPING IT (quince#1488 review).
+#
+# `novkostya/quince#22` is absent from the output whatever the STRIP does, because the SCAN cannot
+# see it either: `[^A-Za-z0-9_/-]` before the number excludes `/`, so a fully qualified reference is
+# invisible to this tool. Mutating the strip to a repo that does not exist, or breaking it outright,
+# leaves this case green — measured both ways in review.
+#
+# So it pins the SCAN GAP and not the fully-qualified strip, and it is worded for what it observes
+# rather than for what it would like to prove. There is no coverage of that strip through this
+# interface today, and pretending otherwise is quince-devlog#243's class — green for a reason other
+# than the one stated.
+#
+# IT STARTS DISCRIMINATING THE MOMENT THE SCAN GAP CLOSES, which is why deleting it would be a loss:
+# widen the scan to read `owner/repo#N` and this case immediately becomes a live test of the strip,
+# failing if that strip regressed. The scan gap is quince#1490 and does not ride this diff.
 case "$out" in
-*"#22"*) bad "a FULLY QUALIFIED closing keyword was counted — owner/repo#N does bind: $out" ;;
-*) ok "…and novkostya/quince#22 is stripped too, because that form binds" ;;
+*"#22"*) bad "novkostya/quince#22 reached the output — the scan gap must have closed, so the fully-qualified STRIP is now live and is what to check: $out" ;;
+*) ok "…and novkostya/quince#22 does not appear — the SCAN excludes '/', so this pins that gap, not the strip" ;;
 esac
 
 # ---------------------------------------------------------------------------------------------
