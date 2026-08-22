@@ -338,17 +338,65 @@ belongs in design §2 and this rung stops at that thread, per the gap protocol.
 | # | story | gate |
 | --- | --- | --- |
 | G1 | 1 | table test over the three address forms × three consumers; the two rows in D3's table that fail today are the regression fixtures |
-| G2 | 2 | `manage_muxer: true` in a config → non-zero exit, message names the replacement; `false` and absent both start |
+| G2 | 2 | ~~`manage_muxer: true` in a config → non-zero exit, message names the replacement; `false` and absent both start~~ — **half SUPERSEDED, see below** |
 | G3 | 3 | fake muxer listener: start → `external`; kill → `unreachable` with the dial error; restart → `external` again |
-| G4 | 5 | both keys at one path → exactly one connection observed at a fake muxer |
+| G4 | 5 | ~~both keys at one path → exactly one connection observed at a fake muxer~~ — **SUPERSEDED, see below** |
 | G5 | 6 | rescan against a fake muxer produces a fresh `Reset` + replay and starts no process |
-| G6 | 7 | lockdown dir chmod'd unwritable → pair returns 409 with the reason, wire field set, control disabled in `make dev` |
+| G6 | 7 | ~~lockdown dir chmod'd unwritable → pair returns 409 with the reason, wire field set, control disabled in `make dev`~~ — **SUPERSEDED, see below** |
 | G7 | 8 | `make image`, then assert neither `usbmuxd` nor `netmuxd` is present and the CLIs still resolve their libraries |
 | G8 | 9 | **owed to hardware** — Operator, on the lab rig: a real device over the cable and over Wi-Fi, through an external muxer, quince bridged and unprivileged |
 
 **G8 cannot be run by an agent seat** and is named as owed with its owner, per quince#721's own
 warning that shipping the example without a real run would reproduce quince#651.
 
+### THREE GATES WERE SUPERSEDED BY LATER RUNGS, AND ARE STRUCK RATHER THAN DELETED (quince#1480)
+
+**A gate is a claim that something was checked**, and this rung is recorded CODE COMPLETE with its
+gates as the evidence. A gate that cannot pass leaves a reader either concluding the rung is failing
+or re-deriving the whole thing to discover it was superseded. Struck rather than removed so a
+citation to `G<n>` still resolves to the thing it cited.
+
+**G6 — every clause is false, by RULING rather than by drift** (`qn.6r`). quince mounts no lockdown
+directory at all, so there is nothing to chmod (D1); the pair route's `409` now means *quince cannot
+reach the muxer*, a different condition with a different remedy (D3); `pairing: {writable, reason?}`
+was removed from `GET /api/devices` (D7); and the `PairDialog` branch that rendered the control is
+deleted along with its test. **Replaced by `qn.6r`'s own gates**, which check the post-check that
+cannot lie rather than a pre-check that could.
+
+**G4 — the configuration it tests can no longer be written.** *Both keys* means
+`devices.usbmuxd_socket` and `devices.netmuxd_addr`, and `devices:` is retired (`qn.6q`/quince#1219).
+The nearest expressible equivalent — two `muxers:` entries at one address — is **refused by
+`Validate` as a duplicate**, not deduplicated at connect time, so the gate's expected outcome
+inverted along with its input. The property it protected did not vanish: it moved from *dedupe
+silently at connect* to *refuse at parse*, which `LegacyDevices.addresses()` deduplicating on the
+retirement path exists to preserve.
+
+**G2 — the first clause stands and the SECOND IS FALSE.** `manage_muxer: true` still refuses and
+names the replacement, and the message is better than the gate asked for: it quotes the address you
+actually wrote. But **`false` no longer starts.** `checkRetiredDevices` returns early only on
+`d == nil`, so *any* `devices:` section is refused whatever `manage_muxer` says. That is deliberate —
+a section that parsed and was ignored would take an operator's muxer address with it in silence —
+and it makes the gate's *"`false` and absent both start"* wrong about half its cases.
+
+**Measured rather than read, and the layer is part of the answer.** Neither refusal is a `Parse`
+error, so a check written against `Parse` would have found nothing and concluded both gates still
+held:
+
+```
+config                       Parse   Validate   CheckMuxers
+devices.manage_muxer: false    ok       ok        REFUSED    ← G2 says this starts
+devices.manage_muxer: true     ok       ok        REFUSED
+devices absent                 ok       ok           ok
+two muxers, one address        ok    REFUSED         ok       ← G4 says one connection is observed
+```
+
+`devices:` is refused on the **serve path** (`CheckMuxers`, from `cmd/quince/live.go`) and the
+duplicate address at **validation**. The probe was a scratch test, run and deleted.
+
+**Audited in full rather than spot-fixed.** quince#1480 was filed on G6 alone, found by accident,
+and said so: *"finding one by accident is weak evidence there is only one."* All eight rows were then
+checked against `qn.6q` and `qn.6r`. **G1, G3, G5 and G7 stand as written**, and G8 remains owed to
+hardware with its owner named.
 ---
 
 ## Fixtures
