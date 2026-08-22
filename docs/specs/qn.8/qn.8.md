@@ -7,8 +7,8 @@ survives the lock.
 Rung issue: **quince#270**, whose §9-1 was ruled by the Operator on 2026-08-20: **take option 3 —
 `vault.Vault` as the Go interface now, with an in-process implementation behind it; sidecar-vs-in-core
 deferred to a measurement.** This spec is written under that ruling. It owes two things the ruling
+asked for by name: it **specifies the spike** (D10) and it **proposes the threshold before the number
 exists** (D10.3), **confirmed by the Operator on 2026-08-20** (quince#1344).
-exists** (D10.3), for the Operator to confirm — tracked at quince#1344.
 
 **quince#184 is answered here** (D5, G1). It has been open since the conformance suite was first named
 as a shipping gate, and it is the one blocker this rung inherits rather than creates. D5 records why
