@@ -396,16 +396,16 @@ export interface Storage {
   // `unmapped` should never arrive. It means the daemon reached an internal state with no declared
   // wire code — a quince bug, deliberately obvious rather than a plausible neighbour, so it fails
   // visibly instead of rendering a confident wrong remedy.
-  unreachable_code:
+  unreachable_code?:
     | "path_unreachable"
     | "missing_medium"
     | "backend_mismatch"
     | "corrupt_marker"
     | "unmapped"
     | null;
-  unreachable_reason: string | null;
+  unreachable_reason?: string | null;
   // Present only when the list was fetched with `?udid=`. null means "not asked", NOT "no".
-  will_be_full: boolean | null;
+  will_be_full?: boolean | null;
   // `statfs` on this storage's path — of the FILESYSTEM, never of the storage (qn.6d gap A, ruled
   // 2026-08-03). Two storages that are two directories on one disk report IDENTICAL figures, and
   // nothing distinguishes them: `filesystem_id` and a `filesystem_shared` boolean were both
@@ -413,13 +413,13 @@ export interface Storage {
   // a ruled acceptance, not a bug to fix.
   //
   // null when unreachable, never 0: a zero is a measurement and this is an absence.
-  filesystem_free_bytes: number | null;
-  filesystem_total_bytes: number | null;
+  filesystem_free_bytes?: number | null;
+  filesystem_total_bytes?: number | null;
   // Properties of the STORAGE, so present with or without `?udid=`. From the DB, so populated even
   // when unreachable — and CURRENT, not a last-known reading, so NO timestamp accompanies them
   // (quince#588). The asymmetry a client needs is these two being populated while capacity is null.
-  backup_count: number;
-  device_count: number;
+  backup_count?: number;
+  device_count?: number;
 }
 
 // ServeMode is GET /api/health's `mode` — how this daemon is DEPLOYED, not who you are, which is

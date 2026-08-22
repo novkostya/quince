@@ -45,7 +45,9 @@ import { formatBytes } from "@/lib/format";
 // would read as "no space left" rather than "no measurement". The caller hides the bar instead.
 function space(s: Storage): { pct: number; free: number; total: number } | null {
   const { filesystem_free_bytes: free, filesystem_total_bytes: total } = s;
-  if (free === null || total === null || total <= 0 || free < 0) return null;
+  // `== null` RATHER THAN `=== null`: the fields are ABSENT for a device-scoped principal since
+  // qn.13 slice 8f, so undefined and null are the same "no measurement" here (spec D3).
+  if (free == null || total == null || total <= 0 || free < 0) return null;
   const used = Math.max(0, total - free);
   return { pct: Math.min(100, (used / total) * 100), free, total };
 }

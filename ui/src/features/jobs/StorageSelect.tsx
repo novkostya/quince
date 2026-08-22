@@ -77,6 +77,26 @@ export function StorageSelect({
         aria-label="Backup storage"
         data-testid="storage-select"
       >
+        {/* AN EXPLICIT "no choice yet" OPTION WHEN NOTHING RESOLVES — qn.13 slice 8f-2.
+            MEASURED, not anticipated: with a scoped holder's projected list there is no `default`
+            field, so `chosenStorage` returns undefined, `value` is `""`, and the browser selects
+            the FIRST option anyway. The select then displayed `attic disk` while the parent still
+            held `""` and the request would have carried no `storage_id` at all — landing the backup
+            on the admin's default, which may be a different disk.
+
+            That is the screen and the request disagreeing, which is the exact hazard the effect
+            above was written for, arriving from the other direction. An option that OWNS `""` makes
+            the display tell the truth.
+
+            IT NAMES WHO CHOSE RATHER THAN WHICH DISK. A scoped holder is not sent `default` and
+            must not be able to infer it; "chosen by the admin" says why the name is missing instead
+            of leaving a blank that looks like a bug.
+
+            ADMIN-INVISIBLE IN PRACTICE: exactly one storage is `default` (contracts §1), so
+            `chosen` always resolves for them and this option is never rendered. */}
+        {chosen ? null : (
+          <option value="">the default — chosen by the admin</option>
+        )}
         {storages.map((s) => (
           <option key={s.id} value={s.id} disabled={!s.reachable}>
             {s.name}
