@@ -108,23 +108,31 @@ describe("VersionList", () => {
     expect(screen.getByText("family-iphone")).toBeTruthy();
   });
 
-  // qn.8 slice 7 step 2. The chevron was an explicit non-interactive placeholder for four rungs;
-  // this is the assertion that it went somewhere, and that it went there WITHOUT reintroducing the
-  // word the row is not allowed to say.
-  it("opens the backup: the chevron is a link to the browse page, and still never says Unlock", () => {
+  // qn.8 slice 7 step 2, re-pointed at qn.9 slice 10. The chevron was an explicit
+  // non-interactive placeholder for four rungs; this is the assertion that it went somewhere, and
+  // that it went there WITHOUT reintroducing the word the row is not allowed to say.
+  //
+  // IT NOW LANDS ON THE OVERVIEW, NOT THE BROWSER. Overview is the version's primary surface
+  // (qn.9 D9) and the file tree is one click on from it. Asserting the destination rather than
+  // merely "a link exists" is what makes that a decision the suite holds rather than a detail
+  // anybody can quietly revert.
+  it("opens the backup: the chevron is a link to the overview, and still never says Unlock", () => {
     render(<VersionList versions={[ver()]} />);
-    const link = screen.getByRole("link", { name: /browse this backup/i });
-    expect(link.getAttribute("href")).toBe("/versions/V1/browse");
+    const link = screen.getByRole("link", { name: /what is in this backup/i });
+    expect(link.getAttribute("href")).toBe("/versions/V1");
     expect(screen.queryByText(/unlock/i)).toBeNull();
   });
 
   // BOTH CLASSES, because D7 is the reason the control is a chevron rather than an "Unlock" button:
   // an unencrypted version has nothing to unlock and is browsable all the same. A link offered only
   // to encrypted versions would make the honest half of the vault unreachable from the product.
+  //
+  // It matters more since qn.9, not less: the overview needs no password on EITHER class, so a row
+  // that offered it selectively would be hiding a screen that costs nothing to open.
   it("offers the same entry point on an unencrypted version", () => {
     render(<VersionList versions={[ver({ encrypted: false })]} />);
-    expect(screen.getByRole("link", { name: /browse this backup/i }).getAttribute("href")).toBe(
-      "/versions/V1/browse",
+    expect(screen.getByRole("link", { name: /what is in this backup/i }).getAttribute("href")).toBe(
+      "/versions/V1",
     );
   });
 

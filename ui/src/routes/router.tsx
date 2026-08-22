@@ -15,6 +15,7 @@ import { NotificationsInstallPage } from "@/pages/NotificationsInstallPage";
 import { StorageDetailsPage } from "@/pages/StorageDetailsPage";
 import { AddStoragePage } from "@/pages/AddStoragePage";
 import { VaultBrowsePage } from "@/pages/VaultBrowsePage";
+import { VersionOverviewPage } from "@/pages/VersionOverviewPage";
 import { EnrolPage } from "@/pages/EnrolPage";
 
 export const router = createBrowserRouter([
@@ -148,6 +149,12 @@ export const router = createBrowserRouter([
       // NOT NESTED UNDER `devices/:udid`, though a version belongs to a device. The version list is
       // rendered on the storage page too (mixed across devices), and a link whose shape depends on
       // which page you clicked from is two links to one thing.
+
+      // qn.9 slice 10 — the version's PRIMARY page: what this backup IS, before it is opened.
+      // Sits at the version's own path with the browser one click behind it (D9), which is what
+      // the rung means by overview becoming primary. It needs no session, so unlike its sibling
+      // below it renders on arrival with no password.
+      { path: "versions/:id", element: <VersionOverviewPage /> },
       { path: "versions/:id/browse", element: <VaultBrowsePage /> },
       // SETTINGS IS ADMIN-ONLY AND ITS ROUTES DO NOT RESOLVE for a scoped holder — D8's
       // *hidden, not merely empty*. Hiding the nav item alone leaves the URL working, and a
