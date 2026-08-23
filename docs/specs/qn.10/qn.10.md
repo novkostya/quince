@@ -632,11 +632,12 @@ Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewa
 | **5a** | `parserfs` memoises `lookup`; the scan reaches the vault zero times (D2b) | **merged** — quince#1501 |
 | **5** | attachments: the join to `qn.8`'s download route (D6) | **merged** — quince#1506 |
 | **6** | FTS5 search and its capability gate (D4) | **merged** — quince#1503 |
-| **7a** | the chats list — the first Messages screen, which builds nothing (D9) | **open** |
-| **7b** | the thread view, virtualized, and the scan's progress report (D9, D2) | not open |
-| **7c** | attachments in the thread: inline images, named links, the absent state (D6) | not open |
-| **7d** | the search box, shown only when `capabilities` carries `search` (D4) | not open |
-| **7e** | G6 to the Operator — a dev-deploy build and a click-list | not open |
+| **7a** | the chats list — the first Messages screen, which builds nothing (D9) | **merged** — quince#1507, roles corrected in quince#1508 |
+| **7b** | `MessageRow` — the five states that all look like an empty bubble (D7, D9) | **open** |
+| **7c** | the thread view, virtualized, its page, and the scan's wait state (D2, D9) | not open |
+| **7d** | attachments in the thread: inline images, named links, the absent state (D6) | not open |
+| **7e** | the search box, shown only when `capabilities` carries `search` (D4) | not open |
+| **7f** | G6 to the Operator — a dev-deploy build and a click-list | not open |
 
 **This table is a second part describing the whole, so it is stale by default after every
 merge** — quince#409. Update it in the diff that changes what it describes.

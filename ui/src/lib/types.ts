@@ -1042,3 +1042,53 @@ export interface MessagesChat {
   // unit can be absent, and the capability report is what says which.
   participants?: string[];
 }
+
+// MessagesThread is GET /api/sessions/{id}/messages/chats/{chat}/messages — qn.10 slice 4.
+//
+// UNLIKE THE CHATS LIST, THIS ONE PAGES: a conversation is bounded by how much was said, and
+// the largest on a real backup holds 98,598 messages.
+export interface MessagesThread {
+  capabilities: string[];
+  adapter_version: string;
+  warnings: string[];
+  unsupported_reason: string | null;
+  page: { items: MessagesMessage[]; next_cursor?: string };
+}
+
+// MessagesMessage is one message, newest first.
+export interface MessagesMessage {
+  id: number;
+  guid: string;
+  time: string;
+  from_me: boolean;
+  // EMPTY for a sent message — the counterpart of a sent message lives on the chat, not on
+  // the message.
+  handle?: string;
+  // EMPTY IS AMBIGUOUS ON ITS OWN and `body_unknown` is what resolves it: an attachment-only
+  // message is legitimately empty, while one whose only body source could not be decoded is
+  // UNKNOWN. Rendering the second as an empty bubble invents a fact (qn.10 D7).
+  body?: string;
+  body_unknown?: boolean;
+  attachments?: MessagesAttachment[];
+  is_tapback?: boolean;
+  reacts_to?: string;
+  // DISTINCT STATES: a message that was changed, and one that was unsent. Neither is empty.
+  edited?: boolean;
+  retracted?: boolean;
+  // Names an app message whose real content lives in a payload quince does NOT decode, so a
+  // surface can say "an <app> message" rather than rendering a blank.
+  balloon?: string;
+}
+
+export interface MessagesAttachment {
+  // EMPTY when `present` is false — there is nothing to fetch.
+  domain?: string;
+  relative_path?: string;
+  mime_type?: string;
+  name?: string;
+  bytes?: number;
+  sticker?: boolean;
+  // FALSE means the backup does not hold the file — not downloaded, purged, or iCloud-only.
+  // A surface offers no link for it, and "absent" is never confused with "zero bytes".
+  present: boolean;
+}
