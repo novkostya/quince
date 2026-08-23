@@ -73,11 +73,16 @@ func TestAvailableAndChatsDoNotBuildTheProjection(t *testing.T) {
 	}
 
 	// THE CONTROL: something must build it, or the two assertions above pass vacuously.
-	if _, err := r.Thread(t.Context(), 1, "", 10, nil); err != nil {
-		t.Fatalf("Thread: %v", err)
+	//
+	// SEARCH, NOT Thread. Thread stopped building anything (quince#1531) — reading a
+	// conversation is a ~1 ms page against the database, and the scan moved to the one
+	// action that needs it. A control that no longer triggers the thing it controls for
+	// is worse than no control, because it passes.
+	if _, err := r.Search(t.Context(), "fixture", 10, nil); err != nil {
+		t.Fatalf("Search: %v", err)
 	}
 	if n := projectionFiles(t, scratch); n == 0 {
-		t.Fatal("control failed: Thread built no projection, so the assertions above prove nothing")
+		t.Fatal("control failed: Search built no projection, so the assertions above prove nothing")
 	}
 }
 
@@ -105,7 +110,7 @@ func TestThreadReturnsNewestFirst(t *testing.T) {
 	r := reader(t, msgfixture.Spec{})
 	page, err := r.Thread(t.Context(), 1, "", 50, nil)
 	if err != nil {
-		t.Fatalf("Thread: %v", err)
+		t.Fatalf("Search: %v", err)
 	}
 	if len(page.Messages) == 0 {
 		t.Fatal("no messages")
@@ -162,7 +167,7 @@ func TestLastPageIsTerminal(t *testing.T) {
 	r := reader(t, msgfixture.Spec{})
 	page, err := r.Thread(t.Context(), 1, "", 200, nil)
 	if err != nil {
-		t.Fatalf("Thread: %v", err)
+		t.Fatalf("Search: %v", err)
 	}
 	if page.NextCursor != "" {
 		t.Errorf("NextCursor = %q on a page holding every message", page.NextCursor)
@@ -173,7 +178,7 @@ func TestLimitClampIsDisclosed(t *testing.T) {
 	r := reader(t, msgfixture.Spec{})
 	page, err := r.Thread(t.Context(), 1, "", 100000, nil)
 	if err != nil {
-		t.Fatalf("Thread: %v", err)
+		t.Fatalf("Search: %v", err)
 	}
 	if !page.LimitClamped {
 		t.Error("limit was clamped and the page does not say so — that is a silent cap")
@@ -230,15 +235,28 @@ func allOf(t *testing.T, r *messages.Reader, chatID int64) []messages.Message {
 	t.Helper()
 	page, err := r.Thread(t.Context(), chatID, "", 200, nil)
 	if err != nil {
-		t.Fatalf("Thread: %v", err)
+		t.Fatalf("Search: %v", err)
 	}
 	return page.Messages
 }
 
 // D5's guard, end to end: a stale cache must produce a WARNING naming both numbers, not a
 // quietly shorter list. The healthy fixture is the control.
+// TestStaleAttachmentCacheWarns — ON THE SEARCH PATH, WHICH IS THE ONE THAT STILL BUILDS.
+//
+// THIS TEST MOVED, AND THE MOVE IS A DISCLOSURE LOSS WORTH KNOWING ABOUT (quince#1535). The
+// warning comes from the projection build's reconcile: `cache_has_attachments` says a message
+// has attachments and the join has none, so rows were dropped and the build says so.
+//
+// Thread no longer builds (quince#1531), so **a reader who only opens conversations is no
+// longer told**. The parser gates `fillAttachments` on that same flag and returns an empty set
+// without reporting the discrepancy, so quince cannot detect it on the page path without the
+// parser exposing the flag — which is a library change, not a line here.
+//
+// Kept pointed at Search rather than deleted, because the reconcile is still real and still
+// worth guarding; what is gone is its reach, not the check.
 func TestStaleAttachmentCacheWarns(t *testing.T) {
-	healthy, err := reader(t, msgfixture.Spec{}).Thread(t.Context(), 2, "", 200, nil)
+	healthy, err := reader(t, msgfixture.Spec{}).Search(t.Context(), "fixture", 200, nil)
 	if err != nil {
 		t.Fatalf("healthy: %v", err)
 	}
@@ -246,7 +264,7 @@ func TestStaleAttachmentCacheWarns(t *testing.T) {
 		t.Fatalf("control failed: the healthy fixture warns %v, so a warning proves nothing", healthy.Warnings)
 	}
 
-	stale, err := reader(t, msgfixture.Spec{NoAttachedCache: true}).Thread(t.Context(), 2, "", 200, nil)
+	stale, err := reader(t, msgfixture.Spec{NoAttachedCache: true}).Search(t.Context(), "fixture", 200, nil)
 	if err != nil {
 		t.Fatalf("stale: %v", err)
 	}
@@ -305,14 +323,14 @@ func TestProjectionIsBuiltOnlyOnce(t *testing.T) {
 	builds := 0
 	onProgress := func(messages.Progress) { builds++ }
 
-	if _, err := r.Thread(t.Context(), 1, "", 10, onProgress); err != nil {
+	if _, err := r.Search(t.Context(), "fixture", 10, onProgress); err != nil {
 		t.Fatalf("first: %v", err)
 	}
 	first := builds
 	if first == 0 {
 		t.Fatal("control failed: no progress callback fired, so a second build would be undetectable")
 	}
-	if _, err := r.Thread(t.Context(), 1, "", 10, onProgress); err != nil {
+	if _, err := r.Search(t.Context(), "fixture", 10, onProgress); err != nil {
 		t.Fatalf("second: %v", err)
 	}
 	if builds != first {
@@ -371,7 +389,7 @@ func TestPlainMessagesAreNotEditedOrRetracted(t *testing.T) {
 	r := reader(t, msgfixture.Spec{})
 	page, err := r.Thread(t.Context(), 1, "", 200, nil)
 	if err != nil {
-		t.Fatalf("Thread: %v", err)
+		t.Fatalf("Search: %v", err)
 	}
 	if len(page.Messages) == 0 {
 		t.Fatal("no messages")

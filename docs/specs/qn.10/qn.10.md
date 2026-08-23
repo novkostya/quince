@@ -190,7 +190,7 @@ Recorded as a decision because a reader arriving from that issue will otherwise 
 seam twice, and because the issue's §8 split — *"prove the plumbing on a cheap domain first"* —
 had exactly one purpose, which is now served.
 
-### D2 — ONE scan per session builds a projection, taken on FIRST MESSAGES USE, never at unlock
+### D2 — ONE scan per session builds a projection, taken on FIRST SEARCH, never at unlock
 
 Fact 2 says the parser cannot page a thread; fact 4 says one full scan of the Operator's real
 254,949-message database is **8.437 s**. Three routes were considered and the measurement chose
@@ -283,6 +283,51 @@ quince#1496: it *"becomes the thing that decides whether this feels broken"*, an
 the surface slices is reviewable as a defect, not an omission.** The reader emits progress every
 10,000 messages, which is about four times a second at the measured rate. `Progress.Total` is
 deliberately absent: the parser does not count rows up front, so a percentage would be invented.
+
+**OVERTURNED FOR THE READING PATH — ruled 2026-08-23, quince#1531, and the heading above is now
+half true. THE SCAN MOVES TO FIRST *SEARCH*.**
+
+**The sentence that failed is "the scan is unavoidable".** D2 argued: search must read every
+message's text once, so a full scan happens whichever way threads are paged; once it is
+unavoidable, a projection built from it is free and solves paging too. **"Unavoidable" is only
+true if the user searches.**
+
+**Measured, and it is four orders of magnitude, not a close call.** A thread page against the
+database, on a real 254,949-message backup with a 98,598-message conversation:
+
+| | |
+| --- | --- |
+| newest 50 in the busiest conversation | **0.6 ms** |
+| a page deep in it, by cursor | 0.4 ms |
+| attachments + memberships for those 50 | 0.4 ms |
+| building the projection instead | **~11 s** |
+
+**Apple already ships the index**, so this was never *add an index*: it was *stop paying for a
+scan we do not need in order to read*.
+
+**Measured end to end through `MessagesThread`**, which is the gate this ruling was given:
+
+| | before | after |
+| --- | --- | --- |
+| **first thread open** | **11.3 s** | **0.128 s** |
+| every later page | 1 ms | 72 ms |
+
+**Later pages got SLOWER and that is the right trade.** A projection seek was ~1 ms; a real
+query is ~72 ms. Both are imperceptible, and 72 ms on every page is worth not paying 11 s on the
+first — the wait a user actually notices.
+
+**What is NOT overturned.** The projection and its FTS index are unchanged and still built by one
+scan; only *when* is different. Search still pays for it, narrated by the same
+`messages.indexing` event, which now reports a wait the user asked for by searching rather than
+one ambushing a conversation they clicked.
+
+**ONE READ PATH, ALWAYS.** The thread does not switch to the projection once a search has built
+one. A session whose read path changes underneath the user is where cursor semantics drift; one
+path cannot disagree with itself.
+
+**And it costs a disclosure, filed rather than absorbed** — quince#1535. The stale-attachment
+warning came from the build's reconcile, so a reader who only opens conversations is no longer
+told when `cache_has_attachments` and the join disagree. The check is not gone; its reach is.
 
 ### D2b — The vault is held for `Materialize` ONLY. The scan runs outside the session lock
 
