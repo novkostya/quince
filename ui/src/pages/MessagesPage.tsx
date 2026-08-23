@@ -4,14 +4,16 @@ import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-quer
 import { BackLink } from "@/components/BackLink";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { APIError, api, messageFor } from "@/lib/api";
 import { useDialogRoute } from "@/lib/useDialogRoute";
-import type { MessagesChats, MessagesThread, Session, Version } from "@/lib/types";
+import type { MessagesChats, MessagesSearch, MessagesThread, Session, Version } from "@/lib/types";
 import { useDevicesStore } from "@/stores/devices";
 import { useVersionsStore } from "@/stores/versions";
 import { UnlockDialog } from "@/features/vault/UnlockDialog";
 import { ChatList, nameFor } from "@/features/messages/ChatList";
-import { Thread } from "@/features/messages/Thread";
+import { Thread, indexingLabel } from "@/features/messages/Thread";
+import { SearchResults } from "@/features/messages/SearchResults";
 import { useMessagesIndexingStore } from "@/stores/messagesIndexing";
 
 // MessagesPage is the Messages surface of one backup — qn.10 slice 7c-2a, story 1.
@@ -128,6 +130,42 @@ export function MessagesPage() {
     retry: false,
   });
 
+  // ── Search (7e, story 6) ────────────────────────────────────────────────────────────────
+  //
+  // THE TERM LIVES IN THE URL beside `chat`, for the same reason: Back leaves the results.
+  //
+  // THE BOX IS OFFERED RATHER THAN GATED, and that is a reading of D4 worth stating. D4 says the
+  // box is hidden when `search` is not in `capabilities` — but **no envelope carries that answer
+  // before a search happens**: chats and thread both report `threads` and `attachments` only, and
+  // the index is written during the projection scan, so before any conversation has been opened
+  // there is genuinely nothing to search. Hiding the box until something else has been done would
+  // be a guess about a capability nobody has asked about, and it would make search reachable only
+  // by a route that has nothing to do with searching.
+  //
+  // So: offer it, and let the ANSWER say whether the index exists. The ~18 s scan a first search
+  // triggers is the same one a first conversation triggers, narrated by the same
+  // `messages.indexing` count.
+  const term = params.get("q") ?? "";
+
+  const dropSearch = React.useCallback(
+    (sid: string) => {
+      if (sid !== "") queryClient.removeQueries({ queryKey: ["messages-search", sid] });
+    },
+    [queryClient],
+  );
+
+  const search = useQuery({
+    queryKey: ["messages-search", sessionID, term],
+    enabled: sessionID !== "" && term !== "",
+    queryFn: () => {
+      const p = new URLSearchParams({ q: term });
+      return api.get<MessagesSearch>(`/api/sessions/${sessionID}/messages/search?${p.toString()}`);
+    },
+    refetchOnWindowFocus: false,
+    staleTime: Infinity,
+    retry: false,
+  });
+
   // THE LIVE COUNT FROM `messages.indexing` (quince#1515). Read only while the first page is in
   // flight — the scan happens once per session, so every later conversation resolves immediately
   // and this is never shown again.
@@ -169,15 +207,16 @@ export function MessagesPage() {
   // session that no longer exists. That is story 6, which is why this is not a tidiness concern
   // (quince#1520 review).
   const lockedErr = (e: unknown) => e instanceof APIError && e.code === "locked";
-  const sessionGone = lockedErr(chats.error) || lockedErr(thread.error);
+  const sessionGone = lockedErr(chats.error) || lockedErr(thread.error) || lockedErr(search.error);
   React.useEffect(() => {
     if (sessionGone) {
       setExpired(true);
       dropChats(sessionID);
       dropThread(sessionID);
+      dropSearch(sessionID);
       setSession(null);
     }
-  }, [sessionGone, sessionID, dropChats, dropThread]);
+  }, [sessionGone, sessionID, dropChats, dropThread, dropSearch]);
 
   async function lock() {
     const sid = sessionID;
@@ -187,6 +226,7 @@ export function MessagesPage() {
       setSession(null);
       dropChats(sid);
       dropThread(sid);
+      dropSearch(sid);
     } catch (err) {
       // `lock` is idempotent and an unknown id answers 204, so anything reaching here is a real
       // refusal and keeps the session on screen rather than pretending it closed.
@@ -292,7 +332,55 @@ export function MessagesPage() {
         </Card>
       ) : chats.data ? (
         <>
-          {openChat === null ? (
+          {/* THE BOX SITS ABOVE EVERYTHING and stays put whichever view is below it, so search is
+              reachable from a conversation as well as from the list. A form, so Enter submits and
+              the control is one a keyboard reaches. */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const v = new FormData(e.currentTarget).get("q");
+              const next = typeof v === "string" ? v.trim() : "";
+              // An empty submit clears rather than searching for nothing: the route refuses an
+              // empty term, and "type something to search for" is not a useful thing to be told
+              // by a box you just emptied.
+              setParams(next === "" ? {} : { q: next });
+            }}
+          >
+            <label htmlFor="q" className="sr-only">
+              Search messages
+            </label>
+            <Input id="q" name="q" type="search" defaultValue={term} placeholder="Search messages" />
+          </form>
+
+          {term !== "" ? (
+            <>
+              <div className="flex items-center justify-between gap-4">
+                <h3 className="min-w-0 truncate text-sm font-medium text-fg">
+                  Results for &ldquo;{term}&rdquo;
+                </h3>
+                <Button variant="outline" onClick={() => setParams({})}>
+                  All conversations
+                </Button>
+              </div>
+              {search.isPending ? (
+                // THE SAME ~18 s SCAN, narrated by the same count — a first search pays for the
+                // projection exactly as a first conversation does.
+                <Card>
+                  <p className="text-sm text-fg" role="status" aria-live="polite">
+                    {indexingLabel(indexing)}
+                  </p>
+                </Card>
+              ) : search.isError && !sessionGone ? (
+                <Card>
+                  <p className="text-sm text-danger">
+                    {messageFor(search.error, "That search could not be run.")}
+                  </p>
+                </Card>
+              ) : search.data ? (
+                <SearchResults data={search.data} term={term} />
+              ) : null}
+            </>
+          ) : openChat === null ? (
             <ChatList
               data={chats.data}
               onOpen={(chat) => {

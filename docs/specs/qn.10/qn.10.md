@@ -422,6 +422,29 @@ envelope's `capabilities` **only when it was actually built**; if FTS5 is unavai
 build failed, `search` is absent from `capabilities` and a `warnings` entry says why. The
 surface then hides the search box rather than offering one that returns nothing.
 
+**BUILT IN 7e — AND "THE SURFACE HIDES THE BOX" CANNOT BE IMPLEMENTED AS WRITTEN.** No envelope
+carries the answer before a search happens: `MessagesChats` and `MessagesThread` both report
+`["threads", "attachments"]` and nothing else, and **only the search response reports `search`**.
+Nor is that an oversight to fix by widening them — the FTS table is written during the one
+projection scan, so before any conversation has been opened in a session there is genuinely no
+index to advertise, and a chats envelope claiming either way would be guessing.
+
+**So the box is OFFERED and the ANSWER decides.** A first search pays for the same ~18 s scan a
+first conversation pays for, narrated by the same `messages.indexing` count; then the response's
+`capabilities` says whether the index exists, and `warnings` says why not. **The hiding D4 asks for
+happens on the result screen rather than before the question** — which keeps the promise that
+matters (never report *no results* for an index that was never built) and drops the one that
+cannot be kept (knowing in advance).
+
+**The four outcomes stay apart** (`SearchResults`): `unsupported_reason`, no `search` capability,
+zero hits, and hits. Reporting the second as the third tells somebody they never wrote a word they
+may well have written.
+
+**`searchable` reads the CAPABILITY, never `items.length`** — an index that exists can legitimately
+return nothing. That distinction is pinned by a test asserting the discriminating case, hits present
+with the capability absent; without it the assertion passes under either implementation, which was
+**measured** rather than assumed.
+
 
 **BUILT AS AN EXTERNAL-CONTENT INDEX (`content='msg'`), so the bodies are not duplicated.** FTS5
 stores the terms and points back at `msg.id` for everything else — which matters on a rung whose
@@ -753,8 +776,8 @@ Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewa
 | **7c-1** | `messages.indexing` — the scan's progress over the WebSocket, device-scoped (D2, D3) | **merged** — quince#1515 |
 | **7c-2a** | the Messages route — session, unlock, and the chats list reachable (D2, D9) | **merged** — quince#1517, follow-ups in quince#1519 |
 | **7c-2b** | the thread view, its paging, and the `messages.indexing` wait state (D3, D9) | **merged** — quince#1520 |
-| **7d** | attachments in the thread: inline images, named links, the absent state (D6) | **open** — this PR |
-| **7e** | the search box, shown only when `capabilities` carries `search` (D4) | not open |
+| **7d** | attachments in the thread: inline images, named links, the absent state (D6) | **merged** — quince#1521 |
+| **7e** | the search box, and the four outcomes that all look like "nothing found" (D4) | **open** — this PR |
 | **7f** | G6 to the Operator — a dev-deploy build and a click-list | not open |
 
 **This table is a second part describing the whole, so it is stale by default after every

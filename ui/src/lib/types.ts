@@ -1092,3 +1092,33 @@ export interface MessagesAttachment {
   // A surface offers no link for it, and "absent" is never confused with "zero bytes".
   present: boolean;
 }
+
+// MessagesSearch is GET /api/sessions/{id}/messages/search?q=&limit= — qn.10 slice 6.
+//
+// `search` APPEARS IN `capabilities` ONLY WHEN THE INDEX WAS ACTUALLY BUILT (D4), and it is the
+// ONLY envelope that carries it: the chats and thread envelopes report `threads` and
+// `attachments` and nothing else. So *is search available* cannot be answered before searching —
+// which is a fact about when the index exists rather than an omission. The FTS table is written
+// during the one projection scan, so before any conversation has been opened in a session there
+// is genuinely nothing to search, and after the scan the answer arrives with the first result set.
+//
+// A surface therefore OFFERS the box, and hides it only once an answer says the index is not
+// there — with the `warnings` entry that says why. Hiding it beforehand would be a guess about a
+// capability nobody has asked about yet.
+export interface MessagesSearch {
+  capabilities: string[];
+  adapter_version: string;
+  warnings: string[];
+  unsupported_reason: string | null;
+  page: { items: MessagesSearchHit[]; next_cursor?: string };
+}
+
+// MessagesSearchHit is a message plus the conversations it belongs to.
+//
+// `chat_ids` IS A LIST because a message can be joined to more than one conversation, and it can
+// be ABSENT when the schema carries no conversation tables — the same `ErrChatsUnavailable` state
+// the chats list reports. A surface must not render "in 0 conversations"; it has nowhere to send
+// the reader, and says so instead.
+export interface MessagesSearchHit extends MessagesMessage {
+  chat_ids?: number[];
+}

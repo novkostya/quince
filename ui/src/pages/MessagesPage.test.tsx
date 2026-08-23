@@ -337,4 +337,57 @@ describe("MessagesPage", () => {
     await waitFor(() => expect(heldForSession(qc, "S1")).toBe(0));
     expect(screen.queryByText("Book Club")).toBeNull();
   });
+
+  // ── 7e: search ───────────────────────────────────────────────────────────────────────────
+
+  it("searches from the box and shows what it found, without a second unlock", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({ id: "S1", version_id: "V1", expires_at: "" });
+    vi.spyOn(api, "get").mockImplementation(async (url: string) => {
+      if (url.includes("/messages/search")) {
+        return {
+          capabilities: ["threads", "attachments", "search"],
+          adapter_version: "messages-quince.v1", warnings: [], unsupported_reason: null,
+          page: { items: [{ id: 5, guid: "M5", time: "2026-08-20T10:00:00Z", from_me: false, handle: "A", body: "found this one", body_unknown: false, is_tapback: false, edited: false, retracted: false }] },
+        };
+      }
+      if (url.includes("/messages/chats")) return chats();
+      return { versions: [ver()] };
+    });
+    renderPage();
+    await openAndUnlock();
+    await screen.findByText("Book Club");
+
+    // FormData reads the DOM, so the value has to actually be in the input.
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "found" } });
+    fireEvent.submit(screen.getByRole("searchbox").closest("form") as HTMLFormElement);
+
+    expect(await screen.findByText("found this one")).toBeTruthy();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  // THE SAME GAP quince#1520's REVIEW FOUND, ONE QUERY LATER. Search is the third request that
+  // can carry a 409, and a reader can sit on a result list while the TTL runs out exactly as they
+  // can sit in a thread. Written before review asked for it.
+  it("notices a session that ends during a search, and takes its contents with it", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({ id: "S1", version_id: "V1", expires_at: "" });
+    vi.spyOn(api, "get").mockImplementation(async (url: string) => {
+      if (url.includes("/messages/search")) {
+        throw new APIError(409, "locked", "session not found or expired");
+      }
+      if (url.includes("/messages/chats")) return chats();
+      return { versions: [ver()] };
+    });
+    const { qc } = renderPage();
+    await openAndUnlock();
+    await screen.findByText("Book Club");
+
+    // FormData reads the DOM, so the value has to actually be in the input.
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "anything" } });
+    fireEvent.submit(screen.getByRole("searchbox").closest("form") as HTMLFormElement);
+
+    expect(await screen.findByText(/timed out, or quince restarted/i)).toBeTruthy();
+    expect(screen.queryByText(/session not found or expired/i)).toBeNull();
+    await waitFor(() => expect(heldForSession(qc, "S1")).toBe(0));
+    expect(screen.queryByText("Book Club")).toBeNull();
+  });
 });
