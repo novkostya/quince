@@ -707,21 +707,28 @@ func (s *Service) MessagesThread(sessionID string, chatID int64, cursor string, 
 		out.Warnings = append(out.Warnings, "more messages were requested than quince serves in one page; the page was shortened")
 	}
 	for _, m := range page.Messages {
-		wm := wire.MessagesMessage{
-			ID: m.ID, GUID: m.GUID, Time: m.Time.UTC().Format(time.RFC3339),
-			FromMe: m.FromMe, Handle: m.Handle, Body: m.Body, BodyUnknown: m.BodyUnknown,
-			IsTapback: m.IsTapback, ReactsTo: m.ReactsTo,
-			Edited: m.Edited, Retracted: m.Retracted, Balloon: m.Balloon,
-		}
-		for _, a := range m.Attachments {
-			wm.Attachments = append(wm.Attachments, wire.MessagesAttachment{
-				Domain: a.Domain, RelativePath: a.RelativePath, MIMEType: a.MIMEType,
-				Name: a.Name, Bytes: a.Bytes, Sticker: a.IsSticker, Present: a.Present,
-			})
-		}
-		out.Page.Items = append(out.Page.Items, wm)
+		out.Page.Items = append(out.Page.Items, toWireMessage(m))
 	}
 	return out, "", ""
+}
+
+// toWireMessage shapes one message for the wire. SHARED by the thread and the search routes,
+// so a field that carries a distinction — BodyUnknown, Present — cannot be mapped correctly on
+// one surface and dropped on the other.
+func toWireMessage(m messages.Message) wire.MessagesMessage {
+	wm := wire.MessagesMessage{
+		ID: m.ID, GUID: m.GUID, Time: m.Time.UTC().Format(time.RFC3339),
+		FromMe: m.FromMe, Handle: m.Handle, Body: m.Body, BodyUnknown: m.BodyUnknown,
+		IsTapback: m.IsTapback, ReactsTo: m.ReactsTo,
+		Edited: m.Edited, Retracted: m.Retracted, Balloon: m.Balloon,
+	}
+	for _, a := range m.Attachments {
+		wm.Attachments = append(wm.Attachments, wire.MessagesAttachment{
+			Domain: a.Domain, RelativePath: a.RelativePath, MIMEType: a.MIMEType,
+			Name: a.Name, Bytes: a.Bytes, Sticker: a.IsSticker, Present: a.Present,
+		})
+	}
+	return wm
 }
 
 func unsupportedThread(reason string) wire.MessagesThread {
@@ -731,5 +738,63 @@ func unsupportedThread(reason string) wire.MessagesThread {
 		Warnings:          []string{},
 		UnsupportedReason: &reason,
 		Page:              wire.MessagesThreadPage{Items: []wire.MessagesMessage{}},
+	}
+}
+
+// MessagesSearch serves a search over the session's messages — qn.10 slice 6.
+func (s *Service) MessagesSearch(sessionID, term string, limit int) (wire.MessagesSearch, string, string) {
+	r, code, msg := s.messagesReader(sessionID)
+	if code != "" {
+		return wire.MessagesSearch{}, code, msg
+	}
+
+	res, err := r.Search(context.Background(), term, limit, nil)
+	if err != nil {
+		switch {
+		case errors.Is(err, messages.ErrEmptyQuery):
+			return wire.MessagesSearch{}, "bad_request", "type something to search for"
+		case errors.Is(err, messages.ErrBadQuery):
+			return wire.MessagesSearch{}, "bad_request", "that search term could not be understood; try plain words"
+		case errors.Is(err, messages.ErrUnsupported):
+			return unsupportedSearch("this backup has no Messages database quince can read"), "", ""
+		case errors.Is(err, messages.ErrChatsUnavailable):
+			return unsupportedSearch("this backup stores messages without conversations, so results cannot be placed"), "", ""
+		case errors.Is(err, vault.ErrNoSession):
+			return wire.MessagesSearch{}, "not_found", "session not found or expired"
+		case errors.Is(err, vault.ErrSessionBusy):
+			return wire.MessagesSearch{}, "busy", "this session is serving another request"
+		}
+		return wire.MessagesSearch{}, "io", "could not search this backup's messages"
+	}
+
+	out := wire.MessagesSearch{
+		AdapterVersion: messagesAdapterVersion,
+		Warnings:       append([]string{}, res.Warnings...),
+		Page:           wire.MessagesSearchPage{Items: []wire.MessagesSearchHit{}},
+	}
+	// THE CAPABILITY IS DERIVED FROM WHETHER AN INDEX EXISTS, not asserted. A session
+	// without one advertises no "search", and the surface hides the box.
+	out.Capabilities = []string{"threads", "attachments"}
+	if res.Searchable {
+		out.Capabilities = append(out.Capabilities, "search")
+	}
+	if res.LimitClamped {
+		out.Warnings = append(out.Warnings, "more results were requested than quince returns at once; the list was shortened")
+	}
+	for _, h := range res.Hits {
+		hit := wire.MessagesSearchHit{ChatIDs: h.ChatIDs}
+		hit.MessagesMessage = toWireMessage(h.Message)
+		out.Page.Items = append(out.Page.Items, hit)
+	}
+	return out, "", ""
+}
+
+func unsupportedSearch(reason string) wire.MessagesSearch {
+	return wire.MessagesSearch{
+		Capabilities:      []string{},
+		AdapterVersion:    messagesAdapterVersion,
+		Warnings:          []string{},
+		UnsupportedReason: &reason,
+		Page:              wire.MessagesSearchPage{Items: []wire.MessagesSearchHit{}},
 	}
 }

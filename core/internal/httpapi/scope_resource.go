@@ -123,6 +123,7 @@ var resourceDevice = map[string]deviceResolver{
 	// qn.10 slice 3 — same session→version hop as every other session route.
 	"GET /api/sessions/{id}/messages/chats":                 fromSession,
 	"GET /api/sessions/{id}/messages/chats/{chat}/messages": fromSession,
+	"GET /api/sessions/{id}/messages/search":                fromSession,
 	// qn.9 slice 6. The SHORTER hop of the two: this route carries the version id
 	// directly, so it needs no session lookup at all — `fromVersion`, like the unlock it
 	// sits beside.

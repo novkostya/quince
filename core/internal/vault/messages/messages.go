@@ -48,6 +48,11 @@ type Reader struct {
 	built    bool
 	buildErr error
 
+	// searchable records whether the FTS5 index exists for this session. It is a CAPABILITY
+	// rather than a guarantee: a build without FTS5, or a failed rebuild, leaves the reader
+	// fully usable and search absent. Callers advertise "search" only when this is true.
+	searchable bool
+
 	// warnings accumulate during the build and are reported with every page, per the
 	// frozen domain envelope (contracts §1).
 	warnings []string

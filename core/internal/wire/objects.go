@@ -1491,3 +1491,34 @@ type MessagesAttachment struct {
 	// cannot resolve, and so "absent" is never confused with "zero bytes".
 	Present bool `json:"present"`
 }
+
+// MessagesSearch is a search result set — qn.10 slice 6, in the same frozen envelope.
+//
+// `capabilities` CARRIES "search" ONLY WHEN THIS SESSION HAS AN INDEX. A build of quince
+// without FTS5, or an index that failed to build, leaves every other Messages surface working
+// and search absent — so a client reads the capability and hides the box, rather than
+// offering one that returns nothing. An empty result set is a claim about the user's messages;
+// a missing capability is a fact about quince, and they must not be confused.
+type MessagesSearch struct {
+	Capabilities      []string           `json:"capabilities"`
+	AdapterVersion    string             `json:"adapter_version"`
+	Warnings          []string           `json:"warnings"`
+	UnsupportedReason *string            `json:"unsupported_reason"`
+	Page              MessagesSearchPage `json:"page"`
+}
+
+// MessagesSearchPage holds the hits. next_cursor is always absent: a result set is capped by
+// `limit` and re-run rather than paged, because an index built per session has no stable
+// position to resume from once the session ends.
+type MessagesSearchPage struct {
+	Items      []MessagesSearchHit `json:"items"`
+	NextCursor string              `json:"next_cursor,omitempty"`
+}
+
+// MessagesSearchHit is one matching message, WITH the conversations it belongs to — a hit
+// with no home cannot be opened, and "go to this message" is the only useful thing to do
+// with a search result.
+type MessagesSearchHit struct {
+	MessagesMessage
+	ChatIDs []int64 `json:"chat_ids,omitempty"`
+}

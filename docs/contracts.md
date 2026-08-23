@@ -2517,6 +2517,48 @@ its own.
 **A non-numeric `{chat}` is a 400, not a 404.** Answering 404 would say the conversation does not
 exist when what happened is that none was asked for.
 
+### `GET /api/sessions/{id}/messages/search?q&limit` — qn.10 slice 6
+
+Full-text search over this session's messages, newest first.
+
+```jsonc
+{"capabilities": ["threads", "attachments", "search"],
+ "adapter_version": "messages-quince.v1",
+ "warnings": [],
+ "unsupported_reason": null,
+ "page": {"items": [
+   {"id": 39, "guid": "invented-msg-39", "time": "2026-08-22T23:58:00Z",
+    "from_me": false, "handle": "+15550100001", "body": "look at this",
+    "chat_ids": [2]}
+ ]}}
+```
+
+**`capabilities` CARRIES `"search"` ONLY WHEN THIS SESSION HAS AN INDEX**, and that is the
+field's whole purpose here. A build of quince without FTS5, or an index that failed to build,
+leaves every other Messages surface working — so the capability is **absent**, a `warnings` entry
+says why, and a client **hides the search box**.
+
+**An empty result set and a missing capability are different facts.** *Nothing matched* is a claim
+about the user's messages; *there is no index* is a fact about quince. Advertising search and
+returning nothing would state the first when only the second is true.
+
+**Each hit carries `chat_ids`**, because a search result whose only useful action is *go to this
+message* needs somewhere to go. A message can belong to more than one conversation, so it is a
+list.
+
+**`q` is required; absent or blank is a 400**, not an empty result — a caller who submitted
+nothing is told so. A term FTS5 cannot parse (an unbalanced quote, a stray operator) is **also a
+400**, with *"try plain words"*, rather than an error about the backup.
+
+**The term reaches FTS5 as a bound parameter** and is never interpolated into SQL. It is still
+interpreted by the matcher — FTS5 has prefix, `NEAR` and boolean syntax — so a user's punctuation
+can change what matches, which is why an unparsable term gets its own message.
+
+**`next_cursor` is always absent.** A result set is capped by `limit` and re-run rather than paged:
+the index is built per session, so there is no stable position to resume from once the session ends.
+
+**A clamped `limit` adds a warning**, as everywhere else.
+
 
 ## 2. Objects
 
