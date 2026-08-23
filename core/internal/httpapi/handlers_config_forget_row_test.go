@@ -115,3 +115,60 @@ func TestForgetIsAllowedForAStorageQuinceHasNeverReached(t *testing.T) {
 		t.Fatalf("the row survived: ok=%v err=%v", ok, err)
 	}
 }
+
+// THE GUARD MUST FAIL CLOSED (quince#1534 review). It failed open: a failed read returned "no
+// reason to block", the forget proceeded, and `DeleteStorage` ran unguarded — leaving every
+// `versions` row for that storage joined to a row that is gone.
+//
+// NOTHING DOWNSTREAM WOULD HAVE CAUGHT IT. `versions.storage_id` is a plain TEXT column added by
+// `ALTER TABLE` (`0006_storage.sql:43`) with no FOREIGN KEY, so the detachment would have been
+// silent and permanent.
+//
+// ASSERTED ON THE DECISION, NOT THROUGH THE ENDPOINT, and the reason is worth recording: closing
+// the store also breaks the session lookup, so the request 401s before it reaches the handler. The
+// endpoint route cannot exercise this branch at all, which is why the PR that introduced it
+// declared the branch untested. This tests what the branch decides; the 422 that carries it is the
+// same `writeJSON` the versions case above already proves.
+func TestVersionsGuardRefusesWhenItCannotCheck(t *testing.T) {
+	d := testDeps(t)
+	id, backend, when := "01JS00000000000000000000", "copy", time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	if err := d.Store.UpsertStorage(store.StorageRow{
+		Name: "shuttle", StorageID: &id, Backend: &backend, Path: "/mnt/shuttle",
+		CreatedAt: &when, SeenAt: when,
+	}); err != nil {
+		t.Fatalf("seeding the row: %v", err)
+	}
+	// The control: nothing blocks while the database is readable, so a refusal below is caused by
+	// the close and not by the fixture.
+	if why := d.versionsBlockingForget("shuttle"); why != "" {
+		t.Fatalf("control failed — nothing should block yet, got: %s", why)
+	}
+
+	if err := d.Store.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	why := d.versionsBlockingForget("shuttle")
+	if why == "" {
+		t.Fatal("an unreadable database allowed the forget — the guard failed open (quince#1534)")
+	}
+	// It must say it COULD NOT CHECK, not that backups exist: those are different facts and only
+	// one of them is known.
+	for _, want := range []string{"could not check", "Try again"} {
+		if !strings.Contains(why, want) {
+			t.Errorf("the refusal does not say %q — an unknown must not read as a finding: %s", want, why)
+		}
+	}
+	if strings.Contains(why, "still holds") {
+		t.Errorf("the refusal claims backups exist, which is not known: %s", why)
+	}
+}
+
+// A nil Store cannot answer either, and the delete would panic on it besides.
+func TestVersionsGuardRefusesWithNoStore(t *testing.T) {
+	d := testDeps(t)
+	d.Store = nil
+	if why := d.versionsBlockingForget("shuttle"); why == "" {
+		t.Fatal("a nil store allowed the forget — the guard failed open")
+	}
+}
