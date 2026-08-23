@@ -689,6 +689,37 @@ Beyond `make gates` and `make gates-ui-e2e`:
   click-list. It is not a park — the build ships with slice 7.
 - **G7** — `make privacy-check` over the branch, and by eye over every fixture, before merge.
 
+
+### G6's walk — what to do, and what to write down
+
+**Slice 7f. The build is shipped and the list is here rather than in a PR body, because a PR body is
+not where somebody looks six weeks later.** Two things are owed on hardware and neither can be done
+from a session box: there is no browser, and `gates-ui-e2e` runs against `--demo`, which carries no
+unlockable backup and therefore no conversation, no attachment and no thread to scroll.
+
+**1. CORRECTNESS — the half M7's gate actually names.** Unlock a real backup, open Messages, and
+compare against iMazing on the same device:
+
+1. **The conversation list** — are the same conversations there, named the same way? Group chats
+   should show a participant count rather than the word *Group*.
+2. **One busy thread** — open the largest conversation. The first open takes **~18 s** and must show
+   a climbing count, not a bare spinner. Later conversations open instantly.
+3. **Ten messages against iMazing** — sender, time, and text. **Tapbacks, edits and unsends must read
+   as what they are**, never as an empty bubble.
+4. **One photo, one non-photo attachment** — a photo should render inline, a HEIC or video should be
+   a named link. **A broken-image icon is a defect, not a quirk** (D6).
+5. **Search a word you know is in an old message.** If the box says the index could not be built,
+   that sentence and its reason are the finding.
+
+**2. VIRTUALIZATION — the number D9's narrowing is conditional on.** In the busiest thread, press
+*Load older messages* until several thousand rows are in the DOM, then scroll and type. **Record the
+row count at which interaction stops feeling immediate.** If a plausible amount of scrolling reaches
+it, a virtualizer lands and the narrowing is spent — without re-litigating the order.
+
+**What to write down either way.** The rung does not close on *it looked fine*: record the device,
+the message count, the first-open time, and the row count from (2). **Every disagreement with iMazing
+becomes a replay fixture before it is fixed**, per the hard rule — the transcript matters more than
+the diagnosis.
 ## Fixtures
 
 **Built at TEST TIME by `core/internal/vault/messages/msgfixture`, not committed as binaries.**
@@ -777,8 +808,8 @@ Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewa
 | **7c-2a** | the Messages route — session, unlock, and the chats list reachable (D2, D9) | **merged** — quince#1517, follow-ups in quince#1519 |
 | **7c-2b** | the thread view, its paging, and the `messages.indexing` wait state (D3, D9) | **merged** — quince#1520 |
 | **7d** | attachments in the thread: inline images, named links, the absent state (D6) | **merged** — quince#1521 |
-| **7e** | the search box, and the four outcomes that all look like "nothing found" (D4) | **open** — this PR |
-| **7f** | G6 to the Operator — a dev-deploy build and a click-list | not open |
+| **7e** | the search box, and the four outcomes that all look like "nothing found" (D4) | **merged** — quince#1522 |
+| **7f** | G6 to the Operator — the build, and the walk written into this spec | **open** — this PR |
 
 **This table is a second part describing the whole, so it is stale by default after every
 merge** — quince#409. Update it in the diff that changes what it describes.
