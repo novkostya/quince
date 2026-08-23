@@ -325,6 +325,30 @@ to break this is already on the roadmap (architect, quince#1498).
 `TestScanMaterializesNothingBeyondThePreMaterializedFile` asserts the scan asks for nothing beyond
 the pre-materialized key, with a control that it asked for *something*. The guard was **proven to
 fail**: an off-key `Materialize` injected into the real scan path was caught and named, then
+
+**AND THAT GUARD WAS NARROWER THAN THE HAZARD — MEASURED, AND IT COST A REAL DEFECT.** Counting
+`Materialize` answers *what did the scan ask the filesystem for*. The property that has to hold is
+*how many times did the scan reach the vault*, and those came apart exactly where the memo did:
+`Materialize` was memoised and `Exists` was **not**, so `Exists` → `lookup` → `vault.List` ran on
+every call. **The scan was making an unsynchronised vault call, outside `registry.With`, from the
+moment slice 2b merged** — against this seam's own rule that *"`vault.Vault` makes no concurrency
+promise and the session registry serializes access."*
+
+Reproduced by disabling the memo read and running the guard: `the scan reached the vault 1
+time(s): [List]`.
+
+**The fix is at `parserfs`, not at the caller: `lookup` is memoised, including MISSES.** A
+committed version's manifest is immutable by hard rule, so caching a path→entry answer is sound by
+construction rather than by luck; a *failed* lookup is not cached, because that failure is about
+the moment rather than about the file. Both `Exists` and `Materialize` go through `lookup`, so one
+memo covers both.
+
+**And the guard now sits at the seam where the property is true or false.**
+`msgfixture.CountingVault` counts what reaches the **vault**, and
+`TestScanReachesTheVaultZeroTimes` asserts zero — with a control that phase 1 reached it, or the
+test would pass against a stub. **This is the fourth instance in this rung of measuring a
+component and reporting it as the whole, and the first where the narrow check was one built to
+prevent that class.**
 reverted. **A slice that needs a second file must hold the vault for it, or pre-materialize it too
 — and this test is what will say so.**
 
@@ -349,7 +373,7 @@ unreadable backup.
 
 **THE THREAD ROUTE IS THE ONE THAT PAYS FOR THE PROJECTION, AND IT BLOCKS.** ~18 s on the first
 conversation opened in a session; 265 µs for every page after. The server's write timeout is 120 s
-(`cmd/quince/main.go`), so the request completes — **checked rather than assumed**, because a
+(`core/cmd/quince/main.go`), so the request completes — **checked rather than assumed**, because a
 handler that cannot finish inside the server's own deadline fails in a way no test of the handler
 would show.
 
@@ -562,7 +586,8 @@ Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewa
 | **2b** | the domain reader + the session projection and its one scan (D2) | **merged** — quince#1497 |
 | **3** | `GET /api/sessions/{id}/messages/chats` (D3, contracts §1) | **merged** — quince#1498 |
 | **3b** | the scan's materialize key set asserted, not documented (D2b) | **merged** — quince#1499 |
-| **4** | `GET …/chats/{chat}/messages`, cursored (D3) | **open** |
+| **4** | `GET …/chats/{chat}/messages`, cursored (D3) | **merged** — quince#1500 |
+| **5a** | `parserfs` memoises `lookup`; the scan reaches the vault zero times (D2b) | **open** |
 | **5** | attachments: the join to `qn.8`'s download route (D6) | not open |
 | **6** | FTS5 search and its capability gate (D4) | not open |
 | **7** | the surface (D9), then G6 to the Operator | not open |

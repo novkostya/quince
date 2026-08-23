@@ -53,6 +53,21 @@ type FS struct {
 	mu   sync.Mutex
 	seq  int
 	made map[string]string // domain\x00relativePath → materialized path
+
+	// found memoises lookup, so a repeated question about the SAME path costs no vault
+	// call. A nil value is a recorded MISS — "this backup does not hold that file" is an
+	// answer worth caching too, and re-asking would reach the vault every time.
+	//
+	// SOUND BY CONSTRUCTION RATHER THAN BY LUCK: the manifest of a committed version is
+	// immutable by hard rule (never mutate a committed version), so an entry cannot change
+	// under the cache. The cache lives as long as the FS, which lives as long as the
+	// session.
+	//
+	// IT IS A CORRECTNESS FIX, NOT A SPEED ONE (quince#1483). qn.10 D2b runs an ~16 s scan
+	// OUTSIDE the session lock, on the argument that Materialize is memoised and so reaches
+	// no vault. Exists was not memoised, so the scan called vault.List unsynchronised while
+	// other requests used the same Vault — against this file's own rule two paragraphs up.
+	found map[string]*vault.FileEntry
 }
 
 // New builds an FS over an UNLOCKED vault, writing into scratchDir, which must already
@@ -68,7 +83,7 @@ func New(v vault.Vault, scratchDir string) (*FS, error) {
 	if !st.IsDir() {
 		return nil, fmt.Errorf("parserfs: scratch path %s is not a directory", scratchDir)
 	}
-	return &FS{v: v, scratch: scratchDir, made: map[string]string{}}, nil
+	return &FS{v: v, scratch: scratchDir, made: map[string]string{}, found: map[string]*vault.FileEntry{}}, nil
 }
 
 // Compile-time proof that this satisfies both the required and the optional contract. The
@@ -186,7 +201,26 @@ func (f *FS) ReadDir(domain, relativeDir string) ([]string, error) {
 // library exports no file-id derivation, so this is the only route — and the prefix filter
 // is what keeps it from being a full walk: a specific path matches itself and its children,
 // which is a handful of rows rather than a hundred thousand.
+// lookup resolves one path to its manifest entry, MEMOISED — including a miss.
+//
+// THE MEMO IS WHY THE SCAN TOUCHES NO VAULT. qn.10 D2b runs the projection scan outside the
+// session lock, and that is only safe if every FS call the scan makes is served from memory.
+// Materialize was memoised and Exists was not, so the scan reached vault.List unsynchronised
+// while other requests used the same Vault (quince#1483). Memoising here covers BOTH, because
+// both go through this function.
+//
+// A nil entry is cached as a nil entry: "not in this backup" is an answer, and re-asking it
+// would reach the vault every time — which is exactly the case Exists produces.
 func (f *FS) lookup(domain, relativePath string) (*vault.FileEntry, error) {
+	key := memoKey(domain, relativePath)
+
+	f.mu.Lock()
+	if e, ok := f.found[key]; ok {
+		f.mu.Unlock()
+		return e, nil
+	}
+	f.mu.Unlock()
+
 	var found *vault.FileEntry
 	err := f.walk(domain, relativePath, func(e vault.FileEntry) {
 		if found == nil && e.RelativePath == relativePath {
@@ -195,8 +229,15 @@ func (f *FS) lookup(domain, relativePath string) (*vault.FileEntry, error) {
 		}
 	})
 	if err != nil {
+		// A FAILED lookup is not cached. The failure is the vault's — a locked session, an
+		// io error — and is about the moment rather than about the file, so caching it
+		// would turn one transient error into a permanent answer.
 		return nil, err
 	}
+
+	f.mu.Lock()
+	f.found[key] = found
+	f.mu.Unlock()
 	return found, nil
 }
 
