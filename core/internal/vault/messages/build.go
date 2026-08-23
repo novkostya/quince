@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	backup "github.com/novkostya/ios-backup-parser"
 	parser "github.com/novkostya/ios-backup-parser/messages"
@@ -165,7 +166,7 @@ func (r *Reader) scan(ctx context.Context, m *parser.Messages, db *sql.DB, onPro
 		if _, err := msgIns.Exec(msg.ID, msg.GUID, msg.Time.UnixNano(), boolInt(msg.IsFromMe),
 			handle, msg.Text, boolInt(msg.BodyUndecoded), len(msg.Attachments),
 			msg.AssociatedType, msg.AssociatedGUID, msg.ItemType, msg.BalloonBundleID,
-			msg.DateEdited.UnixNano(), msg.DateRetracted.UnixNano()); err != nil {
+			nanos(msg.DateEdited), nanos(msg.DateRetracted)); err != nil {
 			return 0, fmt.Errorf("messages: insert %d: %w", msg.ID, err)
 		}
 		for _, c := range msg.ChatIDs {
@@ -261,4 +262,24 @@ func boolInt(b bool) int64 {
 		return 1
 	}
 	return 0
+}
+
+// nanos is UnixNano for a time that MIGHT BE ZERO, and it exists because `time.Time{}.UnixNano()`
+// is NOT zero — it is -6795364578871345152. The zero time is year 1, which UnixNano cannot
+// represent, so it returns garbage rather than 0 or an error.
+//
+// THIS COST THE WHOLE FEATURE ONCE. `date_edited` and `date_retracted` are absent for almost every
+// message, so the parser leaves them as the zero time; writing `.UnixNano()` unconditionally
+// stored that huge negative number, and the reader's `edited != 0` turned it into `true`. On the
+// Operator's real backup 792 of 799 sampled messages came back edited AND retracted, and because
+// the surface renders "unsent" ahead of the body, every conversation displayed as a wall of
+// *"This message was unsent."* with no readable content anywhere (quince#1527).
+//
+// USE THIS FOR ANY OPTIONAL TIME going into the projection. `msg.Time` is always set and is left
+// calling UnixNano directly; a column that can be absent must come through here.
+func nanos(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.UnixNano()
 }
