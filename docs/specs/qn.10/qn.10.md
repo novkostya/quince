@@ -478,6 +478,33 @@ particular browser.
 required only for mutating methods, so a bare `<img src>` on `qn.8`'s file route authenticates
 itself. The join is the whole of this slice, as D6 says.
 
+**MEASURED, BECAUSE THE ALLOWLIST IS DOWNSTREAM OF A QUESTION NOBODY HAD ANSWERED** (quince#1521
+review). `handleSessionFile` serves every file as `application/octet-stream`, with
+`Content-Disposition: attachment` and `X-Content-Type-Options: nosniff` from `securityHeaders` — so
+an `<img>` is being asked to decode bytes declared as a non-image type by a server that has said *do
+not guess*. If browsers refused, the allowlist would be decorative and every attachment a link.
+
+**They do not refuse.** 2026-08-23, Playwright, a 1×1 PNG served with that exact header triple, each
+engine with an `image/png` control alongside:
+
+| engine | control | as the file route serves it |
+| --- | --- | --- |
+| chromium | decodes | **decodes** |
+| firefox | decodes | **decodes** |
+| webkit | decodes | **decodes** |
+
+`nosniff` governs script and style MIME checking; that it does not block an image decode is what was
+measured, not why. **`ui/e2e/story13-attachment-decodes.spec.ts` keeps it true** — the failure mode
+it guards is invisible, because `onError` would turn a total failure into "every attachment is a
+link" with every unit test still green.
+
+**AND IT DOES NOT REOPEN quince#1397, which ruled `inline` OUT.** That ruling is about serving backup
+content with a *real content type* inside quince's origin, where an SVG or HTML file executes script
+with the session cookie in scope. **No header changes here**: the type stays `application/octet-stream`
+and the disposition stays `attachment`. An `<img>` decodes bytes and executes no script — not even
+for SVG, which is script-disabled in that context — and the allowlist is raster-only, so SVG never
+reaches it. The stored-XSS surface quince#1397 closed stays closed.
+
 ### D7 — `Missing` maps onto the envelope, field by field, and an empty field is never silently empty
 
 **"NO NEW FILE-SERVING SURFACE" FORBIDS A SECOND WAY TO STREAM BYTES, NOT A SECOND WAY TO NAME A
