@@ -5,7 +5,8 @@ import type { MessagesChat, MessagesChats } from "@/lib/types";
 // ChatList renders the conversations in an unlocked backup — qn.10 slice 7a, story 1.
 //
 // IT IS THE FIRST MESSAGES SCREEN AND IT COSTS NOTHING. The conversation list is answered
-// live off the parser — 23 ms for 390 conversations on a real backup — and does NOT build the
+// live off the parser — 9.5 ms warm for 390 conversations on a real backup, 770 ms on the first
+// call in a session, which pays the decrypt-and-copy — and does NOT build the
 // session projection, whose ~18 s scan is deferred until someone opens an actual conversation
 // (qn.10 D2). So this screen must not grow anything that needs the projection: a message
 // preview or an unread count would drag that cost onto the first thing a user sees.

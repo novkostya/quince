@@ -28,7 +28,8 @@ import { useMessagesIndexingStore } from "@/stores/messagesIndexing";
 // id dies at its TTL, so a link carrying one is stale within minutes where a version id is durable.
 //
 // THIS SCREEN COSTS NOTHING TO OPEN, AND THAT IS THE POINT OF D2. The conversation list is answered
-// live off the parser — 23 ms for 390 conversations — and builds no projection. The ~18 s scan
+// live off the parser — 770 ms on the first call in a session, 9.5 ms warm, for 390 conversations
+// on a real backup (measured 2026-08-23) — and builds no projection. The ~11 s scan
 // belongs to opening a conversation (7c-2b), which is why nothing here previews a message or counts
 // unread ones. Do not add either: it would drag that cost onto the first thing a user sees.
 
