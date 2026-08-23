@@ -350,3 +350,57 @@ func TestMalformedCursorIsItsOwnError(t *testing.T) {
 		t.Errorf("a cursor quince issued was rejected: %v", err)
 	}
 }
+
+// TestPlainMessagesAreNotEditedOrRetracted is a REPLAY OF A BUG FOUND ON HARDWARE, written before
+// the fix per the hard rule. On the Operator's own backup, 792 of 799 sampled messages came back
+// with BOTH `retracted` and `edited` true, and 778 of those carried a non-empty body — a message
+// cannot be unsent and still hold its text. The surface renders `retracted` first, so every
+// conversation displayed as a wall of *"This message was unsent."* and no message content was
+// readable at all.
+//
+// THE CAUSE IS `time.Time{}.UnixNano()`, WHICH IS NOT ZERO. It is -6795364578871345152: the zero
+// time is year 1, far outside the range UnixNano can represent. The projection wrote
+// `msg.DateEdited.UnixNano()` unconditionally and read it back as `edited != 0`, so a message that
+// was never edited stored a huge negative number and read as edited.
+//
+// WHY NOTHING CAUGHT IT: every existing assertion was in the POSITIVE direction — msg-7 HAS an
+// edit date, msg-8 HAS a retract date — and at the parser rather than through the projection. The
+// negative was never asserted, so a round trip that turns every message into "edited and unsent"
+// passed. That is this rung's recurring shape: the pair, not the branch.
+func TestPlainMessagesAreNotEditedOrRetracted(t *testing.T) {
+	r := reader(t, msgfixture.Spec{})
+	page, err := r.Thread(t.Context(), 1, "", 200, nil)
+	if err != nil {
+		t.Fatalf("Thread: %v", err)
+	}
+	if len(page.Messages) == 0 {
+		t.Fatal("no messages")
+	}
+
+	var edited, retracted, plain int
+	for _, m := range page.Messages {
+		if m.Edited {
+			edited++
+		}
+		if m.Retracted {
+			retracted++
+		}
+		if !m.Edited && !m.Retracted {
+			plain++
+		}
+		// THE CONTRADICTION THE OPERATOR ACTUALLY SAW, asserted directly: a retracted message
+		// holding text is not a state iOS produces, and it is the signature of this defect.
+		if m.Retracted && m.Body != "" {
+			t.Errorf("message %d is retracted AND carries a body — a message cannot be unsent and still hold its text", m.ID)
+		}
+	}
+
+	// The fixture has ONE edited and ONE retracted message (msgfixture msg-7 and msg-8), and they
+	// are not in this chat's default page in every spec — so the assertion is that the flags are
+	// RARE, not that they are absent. Before the fix these counted every message in the page.
+	if plain == 0 {
+		t.Errorf("no plain messages: %d/%d edited, %d/%d retracted — every message claims to have "+
+			"been edited or unsent, which is the hardware defect this test replays",
+			edited, len(page.Messages), retracted, len(page.Messages))
+	}
+}
