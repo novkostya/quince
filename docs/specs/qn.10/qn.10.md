@@ -402,6 +402,19 @@ other messages route takes. A holder scoped to their own device should see their
 progress; nobody else should learn a scan is running at all. **If the precedents point both ways,
 name the two and it will be ruled on the PR.**
 
+**BUILT IN 7c-1, AND HERE IS WHAT THE SHAPE AND SCOPE CLASS CAME OUT AS.** The event is
+`messages.indexing`, carrying `{session_id, udid, messages}`, classified **device-bearing** in
+`wire.EventDevice` — the class the architect's reading proposed. The precedents did **not** turn out
+to point both ways: `session.locked` is global because a client that misses it is left *wrong*
+(showing decrypted views of a dead session), where a client that misses a progress frame is merely
+uninformed. That distinction is now written into `eventscope.go` and `contracts.md` §3, because the
+next session-shaped event will look at `session.locked` and see only its subject.
+
+**Throttled at the PUBLISHER, at 500 ms, matching `job.updated`'s ≤2/s.** The reader's
+`progressEvery` is a row count and the contract's promise is a rate; a row count cannot hold a rate,
+because the per-row cost is what varies between machines. At the measured ~25 µs/row, 10,000 rows is
+about four frames a second — twice what the table promises.
+
 ### D4 — Search is FTS5 over the projection, session-scoped, and it is a CAPABILITY that can be off
 
 An FTS5 table built alongside the projection in the same scan. It advertises `"search"` in the
@@ -686,7 +699,8 @@ Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewa
 | **6** | FTS5 search and its capability gate (D4) | **merged** — quince#1503 |
 | **7a** | the chats list — the first Messages screen, which builds nothing (D9) | **merged** — quince#1507, roles corrected in quince#1508 |
 | **7b** | `MessageRow` — the five states that all look like an empty bubble (D7, D9) | **merged** — quince#1509 |
-| **7c** | the thread view, its page, and the scan's progress over the WebSocket (D2, D3, D9) | not open — **unblocked**, both rulings taken |
+| **7c-1** | `messages.indexing` — the scan's progress over the WebSocket, device-scoped (D2, D3) | **open** — this PR |
+| **7c-2** | the thread view and its page (D3, D9) | not open — unblocked, and no longer waiting on the progress question |
 | **7d** | attachments in the thread: inline images, named links, the absent state (D6) | not open |
 | **7e** | the search box, shown only when `capabilities` carries `search` (D4) | not open |
 | **7f** | G6 to the Operator — a dev-deploy build and a click-list | not open |

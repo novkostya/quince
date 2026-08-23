@@ -39,7 +39,13 @@ type Versions interface {
 type Service struct {
 	versions Versions
 	registry *vault.Registry
-	log      *slog.Logger
+
+	// pub is where messages.indexing frames go. NIL IS SUPPORTED and means the scan is not
+	// narrated — see indexingFor. It is a constructor parameter rather than a setter because
+	// a setter creates a window in which the service is built and unwired, and "forgot to wire
+	// it" is a silent failure that looks exactly like a quiet scan.
+	pub Publisher
+	log *slog.Logger
 
 	// open builds a Vault for a version. A field so a test can substitute one without a
 	// backup on disk, and so the encrypted/unencrypted selection has ONE home (see openFor).
@@ -76,12 +82,14 @@ type Service struct {
 }
 
 // New builds the service. scratchRoot is wiped — see vault.NewRegistry.
-func New(versions Versions, scratchRoot string, ttl time.Duration, log *slog.Logger) (*Service, error) {
+//
+// pub MAY BE NIL, and a test that does not care about frames passes nil rather than a stub.
+func New(versions Versions, scratchRoot string, ttl time.Duration, log *slog.Logger, pub Publisher) (*Service, error) {
 	reg, err := vault.NewRegistry(scratchRoot, ttl)
 	if err != nil {
 		return nil, err
 	}
-	return &Service{versions: versions, registry: reg, log: log, open: openFor,
+	return &Service{versions: versions, registry: reg, log: log, open: openFor, pub: pub,
 		capCache: map[string][]wire.DomainCapability{}, preCache: map[string]preunlock.Tier{},
 		msgReaders: map[string]*messages.Reader{}}, nil
 }
@@ -680,18 +688,18 @@ func (s *Service) messagesReader(sessionID string) (*messages.Reader, string, st
 // (cmd/quince/main.go), so it completes, and blocking is the honest shape for a synchronous
 // REST surface.
 //
-// PROGRESS IS NOT REPORTED HERE, AND THAT IS DECLARED RATHER THAN OVERLOOKED. The reader takes
-// an onProgress callback and this passes nil, because a synchronous JSON response has nowhere
-// to put progress. D2 makes the report load-bearing at 18 s, so delivering it is slice 7's,
-// over the WebSocket that already carries job progress — the callback is the seam it will
-// attach to.
+// PROGRESS IS REPORTED OVER THE SOCKET, NOT IN THIS RESPONSE. A synchronous JSON response has
+// nowhere to put it, so the reader's onProgress callback publishes `messages.indexing` frames
+// instead (D3, contracts §3) — `indexingFor` builds the callback and throttles it. The frames
+// carry a live count and no total, so a surface renders an indeterminate indicator; the
+// response arriving is what says the scan finished.
 func (s *Service) MessagesThread(sessionID string, chatID int64, cursor string, limit int) (wire.MessagesThread, string, string) {
 	r, code, msg := s.messagesReader(sessionID)
 	if code != "" {
 		return wire.MessagesThread{}, code, msg
 	}
 
-	page, err := r.Thread(context.Background(), chatID, cursor, limit, nil)
+	page, err := r.Thread(context.Background(), chatID, cursor, limit, s.indexingFor(sessionID))
 	if err != nil {
 		switch {
 		case errors.Is(err, messages.ErrUnsupported):
@@ -767,7 +775,7 @@ func (s *Service) MessagesSearch(sessionID, term string, limit int) (wire.Messag
 		return wire.MessagesSearch{}, code, msg
 	}
 
-	res, err := r.Search(context.Background(), term, limit, nil)
+	res, err := r.Search(context.Background(), term, limit, s.indexingFor(sessionID))
 	if err != nil {
 		switch {
 		case errors.Is(err, messages.ErrEmptyQuery):

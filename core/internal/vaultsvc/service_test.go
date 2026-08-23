@@ -66,7 +66,7 @@ func (s *shortReader) Close() error { return nil }
 func newService(t *testing.T, v wire.Version, ok bool, fv *fakeVault) *Service {
 	t.Helper()
 	s, err := New(stubVersions{v: v, ok: ok}, filepath.Join(t.TempDir(), "scratch"),
-		time.Hour, slog.New(slog.DiscardHandler))
+		time.Hour, slog.New(slog.DiscardHandler), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestUnknownVersionIsNotFound(t *testing.T) {
 // than 404, and the seam keeps them apart.
 func TestARegistryFailureIsIONotNotFound(t *testing.T) {
 	s, err := New(stubVersions{err: errors.New("db is down")},
-		filepath.Join(t.TempDir(), "scratch"), time.Hour, slog.New(slog.DiscardHandler))
+		filepath.Join(t.TempDir(), "scratch"), time.Hour, slog.New(slog.DiscardHandler), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
