@@ -1,16 +1,18 @@
 import * as React from "react";
-import { useParams } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useParams, useSearchParams } from "react-router-dom";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BackLink } from "@/components/BackLink";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { APIError, api, messageFor } from "@/lib/api";
 import { useDialogRoute } from "@/lib/useDialogRoute";
-import type { MessagesChats, Session, Version } from "@/lib/types";
+import type { MessagesChats, MessagesThread, Session, Version } from "@/lib/types";
 import { useDevicesStore } from "@/stores/devices";
 import { useVersionsStore } from "@/stores/versions";
 import { UnlockDialog } from "@/features/vault/UnlockDialog";
-import { ChatList } from "@/features/messages/ChatList";
+import { ChatList, nameFor } from "@/features/messages/ChatList";
+import { Thread } from "@/features/messages/Thread";
+import { useMessagesIndexingStore } from "@/stores/messagesIndexing";
 
 // MessagesPage is the Messages surface of one backup — qn.10 slice 7c-2a, story 1.
 //
@@ -27,6 +29,18 @@ import { ChatList } from "@/features/messages/ChatList";
 // live off the parser — 23 ms for 390 conversations — and builds no projection. The ~18 s scan
 // belongs to opening a conversation (7c-2b), which is why nothing here previews a message or counts
 // unread ones. Do not add either: it would drag that cost onto the first thing a user sees.
+
+// chatName titles the open conversation, reusing the list's own naming rule.
+//
+// `nameFor` RATHER THAN A SECOND RULE, so the header and the row a reader just clicked cannot
+// disagree — display name, else participants, else identifier, else the id. A conversation that
+// is not in the loaded list falls back to a neutral title rather than inventing a name: the
+// thread route answers by id, so a hand-edited `?chat=` can legitimately open something the
+// list does not carry.
+function chatName(data: MessagesChats | undefined, chatID: number): string {
+  const chat = data?.page.items.find((c) => c.id === chatID);
+  return chat ? nameFor(chat) : "Conversation";
+}
 export function MessagesPage() {
   const { id = "" } = useParams();
 
@@ -71,6 +85,58 @@ export function MessagesPage() {
     retry: false,
   });
 
+  // THE SELECTED CONVERSATION LIVES IN THE URL, NOT IN COMPONENT STATE, so Back leaves the thread
+  // rather than the page — which is what a reader who pressed it expects. It is a SEARCH PARAM
+  // rather than a route segment for the reason 7c-2a gives: a route of its own would mount a
+  // different component, and the vault session lives here, so it would ask for the password again.
+  //
+  // A RELOAD LANDS ON THE LOCKED PANEL, and that is the design rather than lost state: the session
+  // did not survive, so neither should the view of its contents.
+  const [params, setParams] = useSearchParams();
+  const chatParam = params.get("chat");
+  const chatID = chatParam === null ? null : Number(chatParam);
+  // A non-numeric ?chat= is somebody's edit, not a conversation. Treated as none rather than sent
+  // to the server as NaN, which the route would answer as a bad request about a page marker.
+  const openChat = chatID !== null && Number.isSafeInteger(chatID) ? chatID : null;
+
+  const dropThread = React.useCallback(
+    (sid: string) => {
+      if (sid !== "") queryClient.removeQueries({ queryKey: ["messages-thread", sid] });
+    },
+    [queryClient],
+  );
+
+  const thread = useInfiniteQuery({
+    queryKey: ["messages-thread", sessionID, openChat],
+    enabled: sessionID !== "" && openChat !== null,
+    initialPageParam: "",
+    queryFn: ({ pageParam }) => {
+      const p = new URLSearchParams();
+      if (pageParam) p.set("cursor", String(pageParam));
+      const q = p.toString();
+      return api.get<MessagesThread>(
+        `/api/sessions/${sessionID}/messages/chats/${openChat}/messages${q ? `?${q}` : ""}`,
+      );
+    },
+    getNextPageParam: (last) => last.page.next_cursor || undefined,
+    refetchOnWindowFocus: false,
+    staleTime: Infinity,
+    retry: false,
+  });
+
+  // THE LIVE COUNT FROM `messages.indexing` (quince#1515). Read only while the first page is in
+  // flight — the scan happens once per session, so every later conversation resolves immediately
+  // and this is never shown again.
+  const indexing = useMessagesIndexingStore((s) => (sessionID === "" ? undefined : s.bySession[sessionID]));
+
+  // The envelope fields describe the CONVERSATION rather than the page, so they come from the
+  // first page; the items are concatenated in the order the cursor walked them, newest first.
+  const threadPages = thread.data?.pages;
+  const threadMessages = React.useMemo(
+    () => (threadPages ? threadPages.flatMap((p) => p.page.items) : []),
+    [threadPages],
+  );
+
   // A 409 `locked` means the session ended without anybody locking it — the TTL, or a daemon
   // restart. Same treatment as an explicit lock: what it produced is just as dead.
   //
@@ -89,9 +155,10 @@ export function MessagesPage() {
     if (sessionGone) {
       setExpired(true);
       dropChats(sessionID);
+      dropThread(sessionID);
       setSession(null);
     }
-  }, [sessionGone, sessionID, dropChats]);
+  }, [sessionGone, sessionID, dropChats, dropThread]);
 
   async function lock() {
     const sid = sessionID;
@@ -100,6 +167,7 @@ export function MessagesPage() {
       await api.post(`/api/sessions/${sid}/lock`, {});
       setSession(null);
       dropChats(sid);
+      dropThread(sid);
     } catch (err) {
       // `lock` is idempotent and an unknown id answers 204, so anything reaching here is a real
       // refusal and keeps the session on screen rather than pretending it closed.
@@ -205,7 +273,46 @@ export function MessagesPage() {
         </Card>
       ) : chats.data ? (
         <>
-          <ChatList data={chats.data} />
+          {openChat === null ? (
+            <ChatList
+              data={chats.data}
+              onOpen={(chat) => {
+                // `replace: false` — opening a conversation is a navigation, so Back returns to
+                // the list. Threading it through the URL is what makes that work at all.
+                setParams({ chat: String(chat.id) });
+              }}
+            />
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-4">
+                <h3 className="min-w-0 truncate text-sm font-medium text-fg">
+                  {chatName(chats.data, openChat)}
+                </h3>
+                <Button variant="outline" onClick={() => setParams({})}>
+                  All conversations
+                </Button>
+              </div>
+              {thread.isError ? (
+                <Card>
+                  {/* THE SERVER'S OWN SENTENCE. A bad page marker and an unreadable backup are
+                      different remedies — reload versus this backup is damaged — and the route
+                      keeps them apart, so the surface must not collapse them. */}
+                  <p className="text-sm text-danger">
+                    {messageFor(thread.error, "This conversation could not be read.")}
+                  </p>
+                </Card>
+              ) : (
+                <Thread
+                  data={thread.data?.pages[0]}
+                  messages={threadMessages}
+                  indexing={indexing}
+                  onOlder={() => void thread.fetchNextPage()}
+                  hasOlder={thread.hasNextPage}
+                  loadingOlder={thread.isFetchingNextPage}
+                />
+              )}
+            </>
+          )}
           <Card>
             <div className="flex items-center justify-between gap-4">
               <p className="text-xs text-muted">

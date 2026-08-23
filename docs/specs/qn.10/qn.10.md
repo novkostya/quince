@@ -563,6 +563,17 @@ without deleting work.** What is ruled is the ORDER: the cheapest reversible thi
 to scroll a long way"* is an assertion. **Render N rows, time interaction, and record the number
 here.** If a plausible scroll makes it bad, a virtualizer lands and this narrowing is spent —
 without re-litigating the order.
+
+**BUILT IN 7c-2b, AND THE MEASUREMENT IS STILL OWED.** The thread renders what the cursor fetched —
+50 a page, "load older" walking backwards — and holds no scroll state of its own, so swapping in a
+virtualizer stays a one-PR change if the number says it should. **`Thread` takes rows and renders
+them**, deliberately, to keep that door open.
+
+**Nobody has rendered N rows and timed interaction yet, and this rung does not close until somebody
+has.** It cannot be done from a session box: there is no browser, and `gates-ui-e2e` runs against
+`--demo`, which carries no unlocked backup and therefore no thread to scroll. **So it belongs to
+G6's walk on the stand**, with the number recorded here — not to a component test that would measure
+jsdom rather than a phone.
 not decode the payload.
 
 **Per `read user-facing text as a user`:** no `unsupported_schema`, no `RowError`, no
@@ -700,8 +711,8 @@ Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewa
 | **7a** | the chats list — the first Messages screen, which builds nothing (D9) | **merged** — quince#1507, roles corrected in quince#1508 |
 | **7b** | `MessageRow` — the five states that all look like an empty bubble (D7, D9) | **merged** — quince#1509 |
 | **7c-1** | `messages.indexing` — the scan's progress over the WebSocket, device-scoped (D2, D3) | **merged** — quince#1515 |
-| **7c-2a** | the Messages route — session, unlock, and the chats list reachable (D2, D9) | **open** — this PR |
-| **7c-2b** | the thread view, its paging, and the `messages.indexing` wait state (D3, D9) | not open |
+| **7c-2a** | the Messages route — session, unlock, and the chats list reachable (D2, D9) | **merged** — quince#1517, follow-ups in quince#1519 |
+| **7c-2b** | the thread view, its paging, and the `messages.indexing` wait state (D3, D9) | **open** — this PR |
 | **7d** | attachments in the thread: inline images, named links, the absent state (D6) | not open |
 | **7e** | the search box, shown only when `capabilities` carries `search` (D4) | not open |
 | **7f** | G6 to the Operator — a dev-deploy build and a click-list | not open |

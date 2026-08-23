@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MessagesPage } from "./MessagesPage";
 import { APIError, api } from "@/lib/api";
 import type { MessagesChats, Version } from "@/lib/types";
 import { useDevicesStore } from "@/stores/devices";
+import { useMessagesIndexingStore } from "@/stores/messagesIndexing";
 import { useVersionsStore } from "@/stores/versions";
 
 // EVERY IDENTIFIER HERE IS INVENTED (spec D8/D10).
@@ -93,6 +94,7 @@ beforeEach(() => {
   vi.restoreAllMocks();
   useVersionsStore.setState({ byId: {}, order: [] });
   useDevicesStore.setState({ byUdid: {}, order: [] });
+  useMessagesIndexingStore.setState({ bySession: {} });
 });
 
 describe("MessagesPage", () => {
@@ -204,5 +206,107 @@ describe("MessagesPage", () => {
     expect(await screen.findByRole("alert")).toBeTruthy();
     expect(screen.queryByText(/not in this quince's version list/i)).toBeNull();
     expect(screen.queryByRole("button", { name: /^unlock$/i })).toBeNull();
+  });
+
+  // ── 7c-2b: the thread ────────────────────────────────────────────────────────────────────
+  //
+  // These go through the PAGE rather than the Thread component, because what they check is the
+  // wiring: the same session serves both, the selection lives in the URL, and the live count
+  // reaches the wait state. Thread's own rendering is covered in Thread.test.tsx.
+
+  function unlockedWithThread(threadImpl?: (url: string) => Promise<unknown>) {
+    vi.spyOn(api, "post").mockResolvedValue({ id: "S1", version_id: "V1", expires_at: "" });
+    vi.spyOn(api, "get").mockImplementation(async (url: string) => {
+      if (url.includes("/messages/chats/")) {
+        return threadImpl ? threadImpl(url) : {
+          capabilities: ["threads"], adapter_version: "messages.v1", warnings: [],
+          unsupported_reason: null,
+          page: { items: [{ id: 9, guid: "M9", time: "2026-08-20T10:00:00Z", from_me: false, handle: "A", body: "the first message", body_unknown: false, is_tapback: false, edited: false, retracted: false }] },
+        };
+      }
+      if (url.includes("/messages/chats")) return chats();
+      return { versions: [ver()] };
+    });
+  }
+
+  it("opens a conversation without asking for the password again, and puts it in the URL", async () => {
+    unlockedWithThread();
+    renderPage();
+    await openAndUnlock();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Book Club/ }));
+
+    // THE SAME SESSION SERVES BOTH. A second unlock here would mean the thread had been given a
+    // route of its own, which is the thing 7c-2a's shape exists to prevent.
+    expect(await screen.findByText("the first message")).toBeTruthy();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("goes back to the list without tearing down the session", async () => {
+    unlockedWithThread();
+    renderPage();
+    await openAndUnlock();
+    fireEvent.click(await screen.findByRole("button", { name: /Book Club/ }));
+    await screen.findByText("the first message");
+
+    fireEvent.click(screen.getByRole("button", { name: /all conversations/i }));
+
+    expect(await screen.findByText("Book Club")).toBeTruthy();
+    // Still unlocked: leaving a conversation is navigation, not a lock.
+    expect(screen.getByRole("button", { name: /^lock$/i })).toBeTruthy();
+  });
+
+  it("shows the live indexing count while the first conversation is being prepared", async () => {
+    // The thread request never resolves — this is the ~18 s scan, which is exactly when the
+    // count is the only thing telling the user quince has not hung.
+    unlockedWithThread(() => new Promise(() => {}));
+    renderPage();
+    await openAndUnlock();
+    fireEvent.click(await screen.findByRole("button", { name: /Book Club/ }));
+
+    // Before any frame: a sentence with no number, not a zero.
+    expect((await screen.findByRole("status")).textContent).toMatch(/Preparing/);
+    expect(screen.getByRole("status").textContent).not.toMatch(/0 so far/);
+
+    // The event arrives on the socket, keyed by THIS session.
+    act(() => {
+      useMessagesIndexingStore.getState().note("S1", 40000);
+    });
+    await waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/40,000 so far/));
+  });
+
+  it("ignores a count belonging to another session", async () => {
+    unlockedWithThread(() => new Promise(() => {}));
+    renderPage();
+    await openAndUnlock();
+    fireEvent.click(await screen.findByRole("button", { name: /Book Club/ }));
+    await screen.findByRole("status");
+
+    act(() => {
+      useMessagesIndexingStore.getState().note("SOMEONE-ELSE", 999999);
+    });
+
+    // A number about another backup must never appear against this one.
+    expect(screen.getByRole("status").textContent).not.toMatch(/999,999/);
+  });
+
+  it("treats a hand-edited ?chat= that is not a number as no selection", async () => {
+    unlockedWithThread();
+    useVersionsStore.getState().replaceAll([ver()]);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/versions/V1/messages?chat=not-a-number"]}>
+          <Routes>
+            <Route path="/versions/:id/messages" element={<MessagesPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await openAndUnlock();
+
+    // The conversation list, not a request for chat NaN — which the route would answer as a
+    // complaint about a page marker the user never saw.
+    expect(await screen.findByText("Book Club")).toBeTruthy();
   });
 });

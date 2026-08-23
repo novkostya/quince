@@ -5,6 +5,7 @@ import type { Device, Job, Version, WSEnvelope } from "@/lib/types";
 import { useConnectionStore } from "@/stores/connection";
 import { useDevicesStore } from "@/stores/devices";
 import { useJobsStore } from "@/stores/jobs";
+import { useMessagesIndexingStore } from "@/stores/messagesIndexing";
 import { useVersionsStore } from "@/stores/versions";
 import { configKey } from "@/lib/config";
 import { queryClient } from "@/lib/queryClient";
@@ -134,5 +135,36 @@ describe("dispatch on config.updated", () => {
     expect(() => dispatch(env("config.updated", undefined))).not.toThrow();
     expect(spy).toHaveBeenCalledTimes(1);
     spy.mockRestore();
+  });
+});
+
+describe("messages.indexing", () => {
+  beforeEach(() => {
+    useMessagesIndexingStore.setState({ bySession: {} });
+  });
+
+  it("records the live count against its own session", () => {
+    dispatch(env("messages.indexing", { session_id: "S1", udid: "DEV-A", messages: 40000 }));
+    expect(useMessagesIndexingStore.getState().bySession["S1"]).toBe(40000);
+  });
+
+  it("keeps two sessions' counts apart", () => {
+    // THE KEY IS WHY THIS CANNOT GO WRONG rather than a convention. One quince can hold several
+    // unlocked sessions, and a count from another one rendered against this thread would be a
+    // number about somebody else's backup.
+    dispatch(env("messages.indexing", { session_id: "S1", udid: "DEV-A", messages: 10 }));
+    dispatch(env("messages.indexing", { session_id: "S2", udid: "DEV-B", messages: 20 }));
+    expect(useMessagesIndexingStore.getState().bySession).toEqual({ S1: 10, S2: 20 });
+  });
+
+  it("drops the count when its session locks — story 6", () => {
+    dispatch(env("messages.indexing", { session_id: "S1", udid: "DEV-A", messages: 40000 }));
+    dispatch(env("messages.indexing", { session_id: "S2", udid: "DEV-B", messages: 5 }));
+
+    dispatch(env("session.locked", { session_id: "S1", reason: "user" }));
+
+    // Only the locked one. A lock is about one session, and taking the other down with it would
+    // be a different bug in the same file.
+    expect(useMessagesIndexingStore.getState().bySession).toEqual({ S2: 5 });
   });
 });

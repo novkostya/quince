@@ -1,11 +1,12 @@
 import type { Device, Job, Op, Version, WSEnvelope } from "@/lib/types";
-import type { DeviceEvent, HelloEvent, JobLogEvent, SessionLockedEvent } from "./types";
+import type { DeviceEvent, HelloEvent, JobLogEvent, MessagesIndexingEvent, SessionLockedEvent } from "./types";
 import { configKey } from "@/lib/config";
 import { queryClient } from "@/lib/queryClient";
 import { useConnectionStore } from "@/stores/connection";
 import { useDevicesStore } from "@/stores/devices";
 import { useJobsStore } from "@/stores/jobs";
 import { useOpsStore } from "@/stores/ops";
+import { useMessagesIndexingStore } from "@/stores/messagesIndexing";
 import { useSessionStore } from "@/stores/session";
 import { useVersionsStore } from "@/stores/versions";
 
@@ -46,9 +47,18 @@ export function dispatch(env: WSEnvelope): void {
     case "version.deleted":
       useVersionsStore.getState().remove((env.data as Version).id);
       break;
+    case "messages.indexing": {
+      const m = env.data as MessagesIndexingEvent;
+      useMessagesIndexingStore.getState().note(m.session_id, m.messages);
+      break;
+    }
     case "session.locked": {
       const s = env.data as SessionLockedEvent;
       useSessionStore.getState().drop(s.session_id, s.reason);
+      // STORY 6 — the indexing count is a fact about this backup, so it goes with the session.
+      // Harmless if left (it is only read while a request is in flight) and dropped anyway,
+      // because "nothing read from a backup survives a lock" is easier to keep than to qualify.
+      useMessagesIndexingStore.getState().drop(s.session_id);
       break;
     }
     case "op.updated":
