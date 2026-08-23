@@ -273,10 +273,32 @@ func boolInt(b bool) int64 {
 // stored that huge negative number, and the reader's `edited != 0` turned it into `true`. On the
 // Operator's real backup 792 of 799 sampled messages came back edited AND retracted, and because
 // the surface renders "unsent" ahead of the body, every conversation displayed as a wall of
-// *"This message was unsent."* with no readable content anywhere (quince#1527).
+// *"This message was unsent."* with no readable content anywhere (quince#1528).
 //
-// USE THIS FOR ANY OPTIONAL TIME going into the projection. `msg.Time` is always set and is left
-// calling UnixNano directly; a column that can be absent must come through here.
+// `msg.Time` IS NOT ROUTED THROUGH HERE, AND THE REASON IS NOW READ FROM THE PARSER RATHER THAN
+// ASSUMED (quince#1528 review). The optional columns guard on `Valid && != 0`; `date` guards on
+// `Valid` ALONE:
+//
+//	if r.date.Valid { m.Time = cocoa.FromNanoseconds(r.date.Int64) }
+//
+// So a `date` of **0** yields the Apple epoch (2001-01-01) — a real instant, not the zero time —
+// which is why this column behaves differently from the two above. **But `date IS NULL` leaves
+// `m.Time` zero**, and that case is not impossible, merely unobserved: 0 of 799 messages sampled
+// on a real backup carried one (years 2023-2026 only).
+//
+// ITS CONSEQUENCE WOULD BE WORSE THAN THE FLAGS BUG, which is why it is written down rather than
+// left: `msg.Time` is the ordering key and the thread cursor (`query.go`), so a zero would sort a
+// message to the far end of every thread and poison the cursor rather than mislabel one row.
+//
+// IT IS DELIBERATELY NOT ROUTED THROUGH `nanos()`. That would turn a parser-level fault into a
+// silent 1970 timestamp — a wrong answer that looks plausible — where the garbage value at least
+// announces itself. If a backup ever produces one, the right shape is the build's existing
+// row-error path, which already warns "N message(s) could not be read", not a quiet default.
+//
+// USE THIS FOR ANY OPTIONAL TIME going into the projection. `msg.Time` is left
+// calling UnixNano directly for the reason above — NOT because it cannot be zero, but because a
+// zero there is a parser fault that should stay visible; a column that is merely ABSENT must come
+// through here.
 func nanos(t time.Time) int64 {
 	if t.IsZero() {
 		return 0
