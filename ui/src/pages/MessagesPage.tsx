@@ -323,6 +323,7 @@ export function MessagesPage() {
               ) : (
                 <Thread
                   data={thread.data?.pages[0]}
+                  sessionID={sessionID}
                   messages={threadMessages}
                   indexing={indexing}
                   onOlder={() => void thread.fetchNextPage()}

@@ -465,6 +465,19 @@ bytes.
 The parser reports that rather than fabricating a path, and the surface says *not in this
 backup* rather than offering a link that 404s.
 
+**BUILT IN 7d, AND "INLINE WHERE THEY ARE IMAGES" NEEDED NARROWING.** The test is not *is this an
+image* but *will this browser draw it*. **iOS backups are full of `image/heic`, which no browser
+except Safari renders** — so a `startsWith("image/")` check points an `<img>` at a file the browser
+cannot decode and shows a broken-image icon, which is the surface asserting the photo is damaged
+when it is fine and simply not displayable here. Attachments are therefore drawn from an
+**allowlist** of formats browsers reliably render, and everything else — HEIC included — becomes a
+named link, which always works. An `onError` fallback covers the allowlist being wrong about a
+particular browser.
+
+**No blob fetch and no object URL.** The API is cookie-authenticated and `same-origin`, and CSRF is
+required only for mutating methods, so a bare `<img src>` on `qn.8`'s file route authenticates
+itself. The join is the whole of this slice, as D6 says.
+
 ### D7 — `Missing` maps onto the envelope, field by field, and an empty field is never silently empty
 
 **"NO NEW FILE-SERVING SURFACE" FORBIDS A SECOND WAY TO STREAM BYTES, NOT A SECOND WAY TO NAME A
@@ -712,8 +725,8 @@ Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewa
 | **7b** | `MessageRow` — the five states that all look like an empty bubble (D7, D9) | **merged** — quince#1509 |
 | **7c-1** | `messages.indexing` — the scan's progress over the WebSocket, device-scoped (D2, D3) | **merged** — quince#1515 |
 | **7c-2a** | the Messages route — session, unlock, and the chats list reachable (D2, D9) | **merged** — quince#1517, follow-ups in quince#1519 |
-| **7c-2b** | the thread view, its paging, and the `messages.indexing` wait state (D3, D9) | **open** — this PR |
-| **7d** | attachments in the thread: inline images, named links, the absent state (D6) | not open |
+| **7c-2b** | the thread view, its paging, and the `messages.indexing` wait state (D3, D9) | **merged** — quince#1520 |
+| **7d** | attachments in the thread: inline images, named links, the absent state (D6) | **open** — this PR |
 | **7e** | the search box, shown only when `capabilities` carries `search` (D4) | not open |
 | **7f** | G6 to the Operator — a dev-deploy build and a click-list | not open |
 
