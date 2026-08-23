@@ -15,6 +15,7 @@ import { NotificationsInstallPage } from "@/pages/NotificationsInstallPage";
 import { StorageDetailsPage } from "@/pages/StorageDetailsPage";
 import { AddStoragePage } from "@/pages/AddStoragePage";
 import { VaultBrowsePage } from "@/pages/VaultBrowsePage";
+import { MessagesPage } from "@/pages/MessagesPage";
 import { VersionOverviewPage } from "@/pages/VersionOverviewPage";
 import { EnrolPage } from "@/pages/EnrolPage";
 
@@ -156,6 +157,9 @@ export const router = createBrowserRouter([
       // below it renders on arrival with no password.
       { path: "versions/:id", element: <VersionOverviewPage /> },
       { path: "versions/:id/browse", element: <VaultBrowsePage /> },
+      // Messages sits beside the browser, one click behind the version page (qn.10 D9, slice
+      // 7c-2a). Same shape as `browse`: routed on the durable version id, not on a session.
+      { path: "versions/:id/messages", element: <MessagesPage /> },
       // SETTINGS IS ADMIN-ONLY AND ITS ROUTES DO NOT RESOLVE for a scoped holder — D8's
       // *hidden, not merely empty*. Hiding the nav item alone leaves the URL working, and a
       // bookmark is how a household member reaches a screen that then errors at them.
