@@ -107,6 +107,41 @@ export function MessagesPage() {
     }
   }
 
+  // AN UNRESOLVED VERSION IS THREE STATES, NOT ONE, AND THE UNLOCK BUTTON MUST NOT RENDER FOR ANY
+  // OF THEM (quince#1518). The control is what opens `UnlockDialog`, and the dialog needs the
+  // version; rendering the button without one gives a screen whose only control writes a route and
+  // paints nothing — no error, no spinner, no sentence. On a cold deep link that is a short window,
+  // but for a deleted version or a failed list fetch it is permanent.
+  //
+  // THE THIRD STATE IS THE ONE THAT LIES. A failed fetch is neither "loading" nor "not in the
+  // list": quince did not check, it failed to read, and the id in the address bar may be perfectly
+  // good — so reporting it as absent sends the reader hunting a typo they did not make. The
+  // server's own sentence is shown rather than replaced, because "the storage subsystem is not
+  // answering" is knowledge this client cannot reconstruct.
+  //
+  // COPIED FROM VaultBrowsePage, INCLUDING THE REASON, which got this right via review finding
+  // quince#1410. Two later pages inherited the shape without the guard.
+  if (!version) {
+    return (
+      <div className="flex flex-col gap-4">
+        <BackLink to="/">Home</BackLink>
+        <Card>
+          <p className="text-sm text-muted">
+            {all.isPending ? (
+              "Loading…"
+            ) : all.error ? (
+              <span role="alert" className="text-danger">
+                {messageFor(all.error, "Could not read this quince's version list.")}
+              </span>
+            ) : (
+              "That backup is not in this quince's version list."
+            )}
+          </p>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <BackLink to={`/versions/${id}`}>{deviceName ?? "Back"}</BackLink>
@@ -144,15 +179,22 @@ export function MessagesPage() {
         <Card>
           <p className="text-sm text-muted">Reading this backup&rsquo;s conversations…</p>
         </Card>
-      ) : chats.isError ? (
+      ) : chats.isError && !sessionGone ? (
         <Card>
-          {/* THE SERVER'S OWN MESSAGE. "could not read this backup's Messages domain" and a
+          {/* THE SERVER'S OWN MESSAGE — but NOT for a session that has gone. `expired` is
+              state set in an effect, so it is still false on the render that first sees the 409;
+              without `!sessionGone` this arm paints `session not found or expired` in danger red
+              for one frame before the warn banner replaces it. `sessionGone`, not `expired`, is
+              the flag that is true in that render (quince#1517 review). VaultBrowsePage carries
+              the same guard.
+
+              "could not read this backup's Messages domain" and a
               session that has gone are different facts with different remedies. */}
           <p className="text-sm text-danger">
             {messageFor(chats.error, "These conversations could not be read.")}
           </p>
         </Card>
-      ) : (
+      ) : chats.data ? (
         <>
           <ChatList data={chats.data} />
           <Card>
@@ -167,22 +209,31 @@ export function MessagesPage() {
             {lockError ? <p className="mt-2 text-sm text-danger">{lockError}</p> : null}
           </Card>
         </>
+      ) : (
+        // THE HANDOVER FRAME: the 409 has landed, so the error arm above is suppressed, and the
+        // effect that clears the session has not run yet — one render with no data and no
+        // session-gone panel. Nothing is drawn on purpose. A sentence here would appear for a
+        // single frame and be replaced by the banner that actually explains it, which is a
+        // flicker saying something quince cannot stand behind.
+        null
       )}
 
-      {version ? (
-        <UnlockDialog
-          version={version}
-          deviceName={deviceName}
-          open={open}
-          onOpenChange={onOpenChange}
-          onUnlocked={(s) => {
-            // The banner describes the LAST session, so a new one clears it. Left standing it
-            // would explain a problem the user has just fixed.
-            setExpired(false);
-            setSession(s);
-          }}
-        />
-      ) : null}
+      {/* NO `version ?` GATE, and its absence is the fix rather than a tidy-up. The early return
+          above guarantees a version here, so gating again would restore the exact mismatch
+          quince#1518 is about: a control rendered under one condition opening a dialog rendered
+          under a stricter one. One guard, at the top, for both. */}
+      <UnlockDialog
+        version={version}
+        deviceName={deviceName}
+        open={open}
+        onOpenChange={onOpenChange}
+        onUnlocked={(s) => {
+          // The banner describes the LAST session, so a new one clears it. Left standing it
+          // would explain a problem the user has just fixed.
+          setExpired(false);
+          setSession(s);
+        }}
+      />
     </div>
   );
 }
