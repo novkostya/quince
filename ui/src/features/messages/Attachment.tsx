@@ -11,6 +11,20 @@ import type { MessagesAttachment } from "@/lib/types";
 // required only for mutating methods, so the browser sends the session cookie on a GET it issues
 // itself. No blob fetch, no object URL to revoke.
 
+// THE ROUTE SERVES octet-stream + nosniff + attachment, AND AN <img> DECODES IT ANYWAY. Measured
+// 2026-08-23 across chromium, firefox and webkit, each with an `image/png` control alongside
+// (qn.10 D6). Worth knowing before touching this: an `<img>` here is being asked to decode bytes
+// declared as a non-image type by a server that said "do not guess", and the reasonable
+// expectation is that it refuses. It does not. `ui/e2e/story13-attachment-decodes.spec.ts` keeps
+// that true, because if it stopped being true the `onError` fallback below would turn a TOTAL
+// failure into "every attachment is a link" with every unit test still passing.
+//
+// THIS DOES NOT REOPEN quince#1397, WHICH RULED `inline` OUT. That ruling is about serving backup
+// content with a REAL content type inside quince's origin, where an SVG or HTML file from a
+// backup executes script with the session cookie in scope. No header changes here — the type
+// stays `application/octet-stream` and the disposition stays `attachment`. An `<img>` decodes
+// bytes and executes no script, not even for SVG, and RENDERABLE is raster-only so SVG never
+// reaches it. The surface quince#1397 closed stays closed.
 // RENDERABLE is an ALLOWLIST, and the reason is HEIC. iOS backups are full of `image/heic`, and
 // no browser except Safari renders it — an <img> pointed at one shows a broken-image icon, which
 // is a screen claiming the photo is damaged when it is fine and simply not displayable here.
