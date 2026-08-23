@@ -130,6 +130,12 @@ func (s *Store) CountUnattributedVersions() (int, error) {
 // a sentence naming what blocks it rather than a bare no — see the forget handler. This function
 // is deliberately unguarded so that the guard lives where it can be explained.
 //
+// AND NOTHING DOWNSTREAM WOULD CATCH A MISTAKE HERE. `versions.storage_id` is a plain `TEXT`
+// column added by `ALTER TABLE` (`0006_storage.sql:43`) with NO `FOREIGN KEY`, so `PRAGMA
+// foreign_keys=ON` has nothing to enforce on this join. A delete that should not have happened
+// detaches a backup history silently and permanently. The caller's guard is the ONLY guard
+// (quince#1534 review), which is why it refuses when it cannot check rather than proceeding.
+//
 // Missing rows are not an error: forgetting a storage quince has never resolved is a no-op, not a
 // failure, and a caller that had to distinguish them would be handling a case with no remedy.
 func (s *Store) DeleteStorage(name string) error {

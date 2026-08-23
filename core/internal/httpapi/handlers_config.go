@@ -238,25 +238,51 @@ func (d Deps) handleConfigStorageDelete() http.HandlerFunc {
 // nothing can have been committed to it. That is also the state a user most wants to forget, which
 // is why it must not be blocked by a lookup that finds nothing.
 //
-// A FAILED COUNT DOES NOT BLOCK. This is a guard over a user's own destructive action, and a
-// database read that errors is not evidence that backups exist; refusing on it would make a
-// transient failure look like a permanent one. The error is logged and the forget proceeds — the
-// row deletion is itself guarded by the same join in the other direction.
+// A READ THAT FAILS REFUSES, AND THIS FUNCTION FAILED OPEN UNTIL quince#1534's REVIEW. The comment
+// here claimed the row deletion was "guarded by the same join in the other direction" — it is not.
+// `versions.storage_id` is a plain `TEXT` column added by `ALTER TABLE` (`0006_storage.sql:43`)
+// with NO `FOREIGN KEY`, so nothing downstream would have caught a delete that should not have
+// happened, and the detachment would have been silent and permanent.
+//
+// The reasoning that produced it — *a database read that errors is not evidence that backups
+// exist* — is true and is not the question: it is not evidence they do NOT exist either, and the
+// two mistakes cost differently. Refusing wrongly costs a retry. Allowing wrongly detaches a real
+// backup history from the disk holding it, unrecoverably as far as quince's record goes. Over an
+// irreversible action on data that cannot be regenerated, "I could not check" must never read as
+// "there is nothing to check".
+//
+// AND THE OBJECTION IS ANSWERED BY THE MESSAGE, NOT BY THE DECISION. *Refusing makes a transient
+// failure look permanent* is a property of what the sentence says; one that names the failure as a
+// failed check and asks for a retry is transient-shaped, honest about not knowing, and tells the
+// user more than proceeding silently ever could.
 func (d Deps) versionsBlockingForget(name string) string {
+	// Named once: three call sites must not drift into three different explanations of one state.
+	cannotCheck := fmt.Sprintf(
+		"quince could not check whether any backups reference storage %q, so it has not forgotten "+
+			"it — that check is the only thing standing between a forget and a backup history "+
+			"detached from the disk holding it. Try again. If it keeps failing, quince cannot read "+
+			"its own database and that is the problem to fix first; nothing on the disk is affected "+
+			"either way.", name)
+
+	// A nil Store cannot answer, and the delete below would panic on it besides.
 	if d.Store == nil {
-		return ""
+		d.Log.Error("cannot check versions before forget: no store", "storage", name)
+		return cannotCheck
 	}
 	row, ok, err := d.Store.GetStorage(name)
-	if err != nil || !ok || row.StorageID == nil {
-		if err != nil {
-			d.Log.Error("could not read storage row before forget", "error", err, "storage", name)
-		}
+	if err != nil {
+		d.Log.Error("could not read storage row before forget", "error", err, "storage", name)
+		return cannotCheck
+	}
+	// UNKNOWN and KNOWN-EMPTY are different, and only the second may proceed. No row means nothing
+	// to delete; a nil id means quince never reached the storage, so nothing can reference it.
+	if !ok || row.StorageID == nil {
 		return ""
 	}
 	counts, err := d.Store.CountVersionsByStorage()
 	if err != nil {
 		d.Log.Error("could not count versions before forget", "error", err, "storage", name)
-		return ""
+		return cannotCheck
 	}
 	c, ok := counts[*row.StorageID]
 	if !ok || c.Backups == 0 {
