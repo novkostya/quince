@@ -800,7 +800,14 @@ func (s *Service) MessagesSearch(sessionID, term string, limit int) (wire.Messag
 		Page:           wire.MessagesSearchPage{Items: []wire.MessagesSearchHit{}},
 	}
 	// THE CAPABILITY IS DERIVED FROM WHETHER AN INDEX EXISTS, not asserted. A session
-	// without one advertises no "search", and the surface hides the box.
+	// without one advertises no "search".
+	//
+	// THE SURFACE NO LONGER HIDES THE BOX ON THIS, and this comment said it did until 7e
+	// (quince#1522). Nothing here can be read before a search happens — MessagesChats and
+	// MessagesThread report `threads` and `attachments` only — and the index is written during
+	// the projection scan, so a freshly unlocked session genuinely has none. Hiding the box on
+	// that would hide it at the moment a user most wants it. The surface offers the box and lets
+	// this answer decide; D4 in `docs/specs/qn.10/qn.10.md` is the ruling.
 	out.Capabilities = []string{"threads", "attachments"}
 	if res.Searchable {
 		out.Capabilities = append(out.Capabilities, "search")

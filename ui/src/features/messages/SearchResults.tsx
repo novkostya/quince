@@ -52,7 +52,32 @@ export function SearchResults({ data, term }: { data: MessagesSearch; term: stri
     return (
       <Card className="p-6">
         {/* THE TERM IS QUOTED BACK, so a typo is visible without retyping it. */}
-        <p className="text-sm text-fg">No messages match “{term}”.</p>
+        <p className="text-sm text-fg">No messages match &ldquo;{term}&rdquo;.</p>
+
+        {/* THE WARNINGS BELONG HERE MORE THAN ANYWHERE ELSE, and dropping them was the defect
+            (quince#1522 review). They are the PROJECTION BUILD's, carried on the reader, so they
+            are independent of hit count — and one of them is
+            `"N message(s) could not be read and are missing from this view"`. Without it this
+            screen answers a search over an INCOMPLETE index with a COMPLETE negative: a definite
+            claim about somebody's data with the one fact that qualifies it suppressed, on the
+            only screen where it changes the meaning.
+
+            Surfacing them when there ARE hits and swallowing them when there are none is exactly
+            backwards, and it is the harm this file's own header names — telling somebody they
+            never wrote a word they may well have written.
+
+            `text-warn` RATHER THAN `text-muted`: beside a list of results a warning is a footnote,
+            beside a negative it QUALIFIES THE ANSWER, and muted styling would rank it below the
+            sentence it is correcting.
+
+            THE NEGATIVE ITSELF IS NOT REWORDED, deliberately. The warning already states the
+            qualification in the server's own words; a second, softer sentence composed here would
+            be quince paraphrasing a fact it was handed, and free to drift from it. */}
+        {data.warnings.map((w) => (
+          <p key={w} className="mt-2 text-sm text-warn">
+            {w}
+          </p>
+        ))}
       </Card>
     );
   }
