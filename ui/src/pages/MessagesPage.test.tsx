@@ -309,4 +309,32 @@ describe("MessagesPage", () => {
     // complaint about a page marker the user never saw.
     expect(await screen.findByText("Book Club")).toBeTruthy();
   });
+
+  // THE CASE THIS SCREEN EXISTS FOR, and the one that passed today because no test opened a
+  // conversation first (quince#1520 review). A reader dwells in a thread; that is where the TTL
+  // runs out, so that is where the 409 lands — on the query that was NOT being watched.
+  it("notices a session that ends while a conversation is open, and takes its contents with it", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({ id: "S1", version_id: "V1", expires_at: "" });
+    vi.spyOn(api, "get").mockImplementation(async (url: string) => {
+      if (url.includes("/messages/chats/")) {
+        throw new APIError(409, "locked", "session not found or expired");
+      }
+      if (url.includes("/messages/chats")) return chats();
+      return { versions: [ver()] };
+    });
+    const { qc } = renderPage();
+    await openAndUnlock();
+    fireEvent.click(await screen.findByRole("button", { name: /Book Club/ }));
+
+    // 1. The reader is TOLD, rather than left on a screen that silently stopped working.
+    expect(await screen.findByText(/timed out, or quince restarted/i)).toBeTruthy();
+    // 2. NOT the raw server sentence — the guard that quince#1519 added for the chats query
+    //    has to cover this one too, or it is intact and bypassed.
+    expect(screen.queryByText(/session not found or expired/i)).toBeNull();
+    // 3. STORY 6, and this is the assertion that makes the finding blocking rather than cosmetic:
+    //    the conversation list was cached under the old session, and a page that never noticed
+    //    the expiry would render those correspondent names again on "All conversations".
+    await waitFor(() => expect(heldForSession(qc, "S1")).toBe(0));
+    expect(screen.queryByText("Book Club")).toBeNull();
+  });
 });

@@ -94,7 +94,11 @@ export function MessagesPage() {
   // did not survive, so neither should the view of its contents.
   const [params, setParams] = useSearchParams();
   const chatParam = params.get("chat");
-  const chatID = chatParam === null ? null : Number(chatParam);
+  // `=== ""` AS WELL AS null: `Number("")` is 0 and `Number.isSafeInteger(0)` is true, so an empty
+  // `?chat=` would open conversation 0 rather than none — the server answers honestly, but the
+  // claim here is that a hand-edited param is no selection, and for the empty case it was not
+  // (quince#1520 review).
+  const chatID = chatParam === null || chatParam === "" ? null : Number(chatParam);
   // A non-numeric ?chat= is somebody's edit, not a conversation. Treated as none rather than sent
   // to the server as NaN, which the route would answer as a bad request about a page marker.
   const openChat = chatID !== null && Number.isSafeInteger(chatID) ? chatID : null;
@@ -150,7 +154,22 @@ export function MessagesPage() {
   // MEASURED, NOT REASONED: the same derived shape in VersionOverviewPage is unreachable today
   // and no test covers it (quince#1516).
   const [expired, setExpired] = React.useState(false);
-  const sessionGone = chats.error instanceof APIError && chats.error.code === "locked";
+  // EITHER REQUEST CAN BE THE ONE THAT DISCOVERS THE SESSION IS GONE, and in a thread it is the
+  // LIKELY one: that is where a reader dwells while the TTL runs out. Watching only `chats` reads
+  // correct and cannot work — that query has `staleTime: Infinity` and never refetches, so once it
+  // has succeeded its error stays undefined for the life of the page, and the 409 lands on
+  // `thread` instead.
+  //
+  // THE SOCKET DOES NOT COVER THIS EITHER. `session.locked` reaches `useSessionStore`, but this
+  // page holds its session in local state by design (7c-2a), and nothing joins the two. A request
+  // 409 is the only detection route here, so it has to watch every request that can carry one.
+  //
+  // WHAT IT COSTS TO MISS: the session is never cleared, `dropChats`/`dropThread` never run, and
+  // pressing "All conversations" renders the cached list — correspondent names on screen, from a
+  // session that no longer exists. That is story 6, which is why this is not a tidiness concern
+  // (quince#1520 review).
+  const lockedErr = (e: unknown) => e instanceof APIError && e.code === "locked";
+  const sessionGone = lockedErr(chats.error) || lockedErr(thread.error);
   React.useEffect(() => {
     if (sessionGone) {
       setExpired(true);
@@ -292,7 +311,7 @@ export function MessagesPage() {
                   All conversations
                 </Button>
               </div>
-              {thread.isError ? (
+              {thread.isError && !sessionGone ? (
                 <Card>
                   {/* THE SERVER'S OWN SENTENCE. A bad page marker and an unreadable backup are
                       different remedies — reload versus this backup is damaged — and the route
