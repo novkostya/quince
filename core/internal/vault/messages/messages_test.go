@@ -319,3 +319,34 @@ func TestProjectionIsBuiltOnlyOnce(t *testing.T) {
 		t.Errorf("progress fired again (%d then %d) — the projection was rebuilt", first, builds)
 	}
 }
+
+// A cursor quince did not issue is the CALLER's fault and must be distinguishable from an
+// unreadable backup: one means "reload the page", the other means "this backup is damaged".
+// Reporting both as an IO error would put the wrong sentence on the screen.
+func TestMalformedCursorIsItsOwnError(t *testing.T) {
+	r := reader(t, msgfixture.Spec{})
+	_, err := r.Thread(t.Context(), 1, "!!!not-base64!!!", 10, nil)
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	if !errors.Is(err, messages.ErrBadCursor) {
+		t.Errorf("err = %v, want ErrBadCursor", err)
+	}
+	// A well-formed base64 string that is not JSON is the same class.
+	_, err = r.Thread(t.Context(), 1, "bm90LWpzb24", 10, nil)
+	if !errors.Is(err, messages.ErrBadCursor) {
+		t.Errorf("err = %v, want ErrBadCursor for valid base64 that is not a cursor", err)
+	}
+	// THE CONTROL: a cursor quince DID issue must still work, or the two assertions above
+	// would pass on an implementation that rejects everything.
+	page, err := r.Thread(t.Context(), 1, "", 1, nil)
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if page.NextCursor == "" {
+		t.Fatal("control failed: no cursor was issued, so nothing proves a good one is accepted")
+	}
+	if _, err := r.Thread(t.Context(), 1, page.NextCursor, 1, nil); err != nil {
+		t.Errorf("a cursor quince issued was rejected: %v", err)
+	}
+}

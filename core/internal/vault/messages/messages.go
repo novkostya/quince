@@ -125,6 +125,14 @@ var ErrUnsupported = errors.New("messages: this backup has no readable Messages 
 // asserted these were the same error and the test was wrong, not the code.
 var ErrChatsUnavailable = errors.New("messages: this backup's schema has no conversations")
 
+// ErrBadCursor is returned for a page marker quince did not issue.
+//
+// IT IS THE CALLER'S FAULT, NOT THE BACKUP'S, and the distinction reaches the user: a
+// malformed cursor is a 400 with "that page marker is not one quince issued", where an
+// unreadable database is a 500. Returning one error for both would put "could not read this
+// conversation" on a screen whose real remedy is "reload the page".
+var ErrBadCursor = errors.New("messages: malformed page cursor")
+
 // ensure builds the projection if it has not been built, and is idempotent.
 //
 // A FAILED BUILD IS REMEMBERED AND RETRIED, not cached as a permanent failure: the causes are

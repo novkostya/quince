@@ -363,3 +363,44 @@ func (d Deps) handleSessionMessagesChats() http.HandlerFunc {
 		writeJSON(w, d.Log, http.StatusOK, out)
 	}
 }
+
+// handleSessionMessagesThread serves
+// GET /api/sessions/{id}/messages/chats/{chat}/messages?cursor&limit — qn.10 slice 4.
+//
+// THE CHAT ID IS PARSED HERE AND A BAD ONE IS A 400. A non-numeric chat id is a malformed
+// request, not a missing conversation: answering 404 would tell a caller the conversation does
+// not exist when what happened is that they did not ask for one.
+func (d Deps) handleSessionMessagesThread() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		chatID, err := strconv.ParseInt(r.PathValue("chat"), 10, 64)
+		if err != nil {
+			writeError(w, d.Log, http.StatusBadRequest, "bad_request",
+				"that conversation id is not a number")
+			return
+		}
+		q := r.URL.Query()
+		limit := 0
+		if raw := q.Get("limit"); raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil {
+				writeError(w, d.Log, http.StatusBadRequest, "bad_request",
+					"limit must be a number")
+				return
+			}
+			limit = n
+		}
+
+		out, code, msg := d.VaultBrowse.MessagesThread(r.PathValue("id"), chatID, q.Get("cursor"), limit)
+		if code != "" {
+			writeError(w, d.Log, statusForVaultCode(code), code, msg)
+			return
+		}
+		if out.Page.Items == nil {
+			out.Page.Items = []wire.MessagesMessage{}
+		}
+		if out.Warnings == nil {
+			out.Warnings = []string{}
+		}
+		writeJSON(w, d.Log, http.StatusOK, out)
+	}
+}

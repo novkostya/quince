@@ -652,3 +652,84 @@ func (s *Service) messagesReader(sessionID string) (*messages.Reader, string, st
 	s.msgReaders[sessionID] = reader
 	return reader, "", ""
 }
+
+// MessagesThread serves one page of a conversation — qn.10 slice 4.
+//
+// THIS IS THE ROUTE THAT PAYS FOR THE PROJECTION. Opening a conversation for the first time in
+// a session builds it — ~18 s on a real backup (qn.10 D2) — and every page after that is a
+// seek measured at 265 µs. The request BLOCKS for that build: writeTimeout is 120 s
+// (cmd/quince/main.go), so it completes, and blocking is the honest shape for a synchronous
+// REST surface.
+//
+// PROGRESS IS NOT REPORTED HERE, AND THAT IS DECLARED RATHER THAN OVERLOOKED. The reader takes
+// an onProgress callback and this passes nil, because a synchronous JSON response has nowhere
+// to put progress. D2 makes the report load-bearing at 18 s, so delivering it is slice 7's,
+// over the WebSocket that already carries job progress — the callback is the seam it will
+// attach to.
+func (s *Service) MessagesThread(sessionID string, chatID int64, cursor string, limit int) (wire.MessagesThread, string, string) {
+	r, code, msg := s.messagesReader(sessionID)
+	if code != "" {
+		return wire.MessagesThread{}, code, msg
+	}
+
+	page, err := r.Thread(context.Background(), chatID, cursor, limit, nil)
+	if err != nil {
+		switch {
+		case errors.Is(err, messages.ErrUnsupported):
+			return unsupportedThread("this backup has no Messages database quince can read"), "", ""
+		case errors.Is(err, messages.ErrChatsUnavailable):
+			return unsupportedThread("this backup stores messages without conversations, so a conversation cannot be opened"), "", ""
+		case errors.Is(err, vault.ErrNoSession):
+			return wire.MessagesThread{}, "not_found", "session not found or expired"
+		case errors.Is(err, vault.ErrSessionBusy):
+			return wire.MessagesThread{}, "busy", "this session is serving another request"
+		}
+		// A malformed cursor is the caller's fault and is said so, rather than being
+		// reported as an unreadable backup. Two causes, two remedies.
+		if errors.Is(err, messages.ErrBadCursor) {
+			return wire.MessagesThread{}, "bad_request", "that page marker is not one quince issued"
+		}
+		return wire.MessagesThread{}, "io", "could not read this conversation"
+	}
+
+	out := wire.MessagesThread{
+		Capabilities:   []string{"threads", "attachments"},
+		AdapterVersion: messagesAdapterVersion,
+		Warnings:       append([]string{}, page.Warnings...),
+		Page: wire.MessagesThreadPage{
+			Items:      make([]wire.MessagesMessage, 0, len(page.Messages)),
+			NextCursor: page.NextCursor,
+		},
+	}
+	if page.LimitClamped {
+		// The clamp is DISCLOSED, exactly as browse discloses its own. A truncated page
+		// that does not say so is a silent cap.
+		out.Warnings = append(out.Warnings, "more messages were requested than quince serves in one page; the page was shortened")
+	}
+	for _, m := range page.Messages {
+		wm := wire.MessagesMessage{
+			ID: m.ID, GUID: m.GUID, Time: m.Time.UTC().Format(time.RFC3339),
+			FromMe: m.FromMe, Handle: m.Handle, Body: m.Body, BodyUnknown: m.BodyUnknown,
+			IsTapback: m.IsTapback, ReactsTo: m.ReactsTo,
+			Edited: m.Edited, Retracted: m.Retracted, Balloon: m.Balloon,
+		}
+		for _, a := range m.Attachments {
+			wm.Attachments = append(wm.Attachments, wire.MessagesAttachment{
+				Domain: a.Domain, RelativePath: a.RelativePath, MIMEType: a.MIMEType,
+				Name: a.Name, Bytes: a.Bytes, Sticker: a.IsSticker, Present: a.Present,
+			})
+		}
+		out.Page.Items = append(out.Page.Items, wm)
+	}
+	return out, "", ""
+}
+
+func unsupportedThread(reason string) wire.MessagesThread {
+	return wire.MessagesThread{
+		Capabilities:      []string{},
+		AdapterVersion:    messagesAdapterVersion,
+		Warnings:          []string{},
+		UnsupportedReason: &reason,
+		Page:              wire.MessagesThreadPage{Items: []wire.MessagesMessage{}},
+	}
+}

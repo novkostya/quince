@@ -139,11 +139,11 @@ func decodeThreadCursor(s string) (threadCursor, bool, error) {
 	}
 	b, err := base64.RawURLEncoding.DecodeString(s)
 	if err != nil {
-		return threadCursor{}, false, fmt.Errorf("messages: malformed cursor")
+		return threadCursor{}, false, fmt.Errorf("%w", ErrBadCursor)
 	}
 	var c threadCursor
 	if err := json.Unmarshal(b, &c); err != nil {
-		return threadCursor{}, false, fmt.Errorf("messages: malformed cursor")
+		return threadCursor{}, false, fmt.Errorf("%w", ErrBadCursor)
 	}
 	return c, true, nil
 }
