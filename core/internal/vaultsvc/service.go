@@ -699,25 +699,6 @@ func (s *Service) messagesReader(sessionID string) (*messages.Reader, string, st
 // `indexingFor`, and that is where the count is earned now: searching is the one action that
 // asks for something needing a full read.
 func (s *Service) MessagesThread(sessionID string, chatID int64, cursor string, limit int) (wire.MessagesThread, string, string) {
-	//
-	// THIS IS THE ROUTE THAT PAYS FOR THE PROJECTION. Opening a conversation for the first time in
-	// a session builds it — ~18 s on a real backup (qn.10 D2) — and every page after that is a
-	// seek measured at 265 µs. The request BLOCKS for that build: writeTimeout is 120 s
-	// (cmd/quince/main.go), so it completes, and blocking is the honest shape for a synchronous
-	// REST surface.
-	//
-	//
-	// NOTHING IS REPORTED HERE BECAUSE NOTHING WAITS. This route used to build the projection and
-	// narrate it over the socket; since quince#1531 it pages through the parser and builds nothing —
-	// 0.128 s for the first conversation opened in a session, measured end to end.
-	//
-	// SO NO CALLBACK IS PASSED, and that is a deletion rather than a nil. `indexingFor` resolves
-	// session → version → device, which is a storage row read, and handing it to a route that
-	// discards it would pay that on every page for a publisher that can never fire.
-	//
-	// `messages.indexing` IS NOT ORPHANED — it moved with the scan. MessagesSearch still passes
-	// `indexingFor`, and that is where the count is earned now: searching is the one action that
-	// asks for something needing a full read.
 	r, code, msg := s.messagesReader(sessionID)
 	if code != "" {
 		return wire.MessagesThread{}, code, msg
