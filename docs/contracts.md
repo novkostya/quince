@@ -2427,6 +2427,46 @@ on real iOS schemas, never before):
  "page": {"items": [...], "next_cursor": "..."}}
 ```
 
+### `GET /api/sessions/{id}/messages/chats` — qn.10 slice 3
+
+The conversation list, in the envelope above. **Appended here by the slice that built it**, which
+is what the paragraph above asks for.
+
+```jsonc
+{"capabilities": ["threads", "attachments"],
+ "adapter_version": "messages-quince.v1",
+ "warnings": [],
+ "unsupported_reason": null,
+ "page": {"items": [
+   {"id": 2, "guid": "iMessage;+;chat999000111", "display_name": "weekend plans",
+    "identifier": "chat999000111", "is_group": true,
+    "participants": ["+15550100001", "+15550100002"]}
+ ]}}
+```
+
+**`next_cursor` is always absent, and the route reads no paging arguments.** The list is bounded
+by how many people someone has talked to rather than by how much they have said — 390
+conversations answered in 23 ms on a real backup — so there is nothing to page. The `page`
+wrapper stays because the envelope's shape is frozen; the field is there if a backup ever needs
+it.
+
+**`capabilities` omits `search` until the FTS5 index exists** (qn.10 D4). It is quince's
+capability rather than the parser's, so it is quince's to advertise and quince's to withhold —
+and a surface hides the search box rather than offering one that returns nothing.
+
+**No message preview and no unread count, deliberately.** Both would need the session projection,
+whose build is ruled to wait until the user opens an actual conversation (qn.10 D2, measured at
+~18 s). Putting either on this route would drag that cost onto the *first* Messages screen and
+undo the ruling.
+
+**`unsupported_reason` carries TWO causes and they are not merged**: a backup with no readable
+Messages database, and one whose schema has no conversation tables. The second still has
+messages — only the grouping is missing — and they have different remedies (qn.10 D7).
+
+**`display_name` is often empty, including for group chats**, and `participants` is empty when the
+schema's `handles` unit is absent. Empty there means *not recorded*, never *a conversation with
+nobody*; the capability report is what says which.
+
 ## 2. Objects
 
 ```jsonc

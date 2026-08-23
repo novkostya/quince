@@ -284,6 +284,40 @@ the surface slices is reviewable as a defect, not an omission.** The reader emit
 10,000 messages, which is about four times a second at the measured rate. `Progress.Total` is
 deliberately absent: the parser does not count rows up front, so a percentage would be invented.
 
+### D2b — The vault is held for `Materialize` ONLY. The scan runs outside the session lock
+
+`vault.Registry.With` is **exclusive and non-blocking** — `TryLock`, else `ErrSessionBusy` — and
+the house pattern for per-session derived state (`vaultsvc.capabilityReport`) wraps its whole
+build in it. Doing that here would refuse every other call on the session for the ~16 s the
+projection takes: a browse, a file download, and the user's own second click.
+
+**Measured on the real backup, both arms, slice 3:**
+
+| arm | build | concurrent vault calls during it |
+| --- | --- | --- |
+| build inside `With` | 16.331 s | **ok=0, BUSY=808** |
+| **materialize inside `With`, scan outside** | 1.118 s + 12.144 s | **ok=531**, BUSY=56 |
+
+The first arm is the **control**: it proves the probe can detect contention, without which the
+second arm's 531 successes would be a probe that was never testing anything. The 56 refusals in
+the second are exactly the 1.118 s materialize window, and that residue is unavoidable — the vault
+must decrypt.
+
+**So there is no trade-off here and nothing to rule on.** This was raised as a question needing a
+decision and answered by measuring instead.
+
+**SCANNING OUTSIDE THE LOCK IS SAFE BECAUSE `parserfs` MEMOISES, AND THAT IS A SAFETY PROPERTY
+RATHER THAN A SPEED ONE.** If the memo missed, the scan's own `Materialize` would reach the vault
+outside `With`, concurrently with another request — a race, and **a race need not produce an
+error**, so *"the arm ran without failing"* would not have been evidence. Measured directly: a
+second `Materialize` of the same file is **1 µs against 806 ms** and returns the **identical**
+path. A miss would re-decrypt 446 MiB and, since each copy carries its own sequence number, hand
+back a different path.
+
+**Session scratch peaks around 762 MiB** on device B: decrypted `Manifest.db` 252.9 MiB +
+materialized `sms.db` 446 MiB + projection 63 MiB. Not a constraint on any host quince targets,
+and worth knowing before several sessions open Messages at once.
+
 ### D3 — A thread pages by `(date, ROWID)` cursor, in the frozen envelope
 
 `page.next_cursor` per contracts §1, opaque, ordered by `(date, ROWID)` — the parser's own
@@ -491,8 +525,8 @@ Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewa
 | --- | --- | --- |
 | **1** | this spec | **merged** — quince#1491 |
 | **2a** | `msgfixture` — the fixture builder every later slice reads from, with G5 asserted | **merged** — quince#1496 |
-| **2b** | the domain reader + the session projection and its one scan (D2) | **open** |
-| **3** | `GET /api/sessions/{id}/messages/chats` (D3, contracts §1) | not open |
+| **2b** | the domain reader + the session projection and its one scan (D2) | **merged** — quince#1497 |
+| **3** | `GET /api/sessions/{id}/messages/chats` (D3, contracts §1) | **open** |
 | **4** | `GET …/chats/{chat}/messages`, cursored (D3) | not open |
 | **5** | attachments: the join to `qn.8`'s download route (D6) | not open |
 | **6** | FTS5 search and its capability gate (D4) | not open |

@@ -1346,3 +1346,66 @@ type VersionCellular struct {
 	ICCID       string `json:"iccid"`
 	PhoneNumber string `json:"phone_number"`
 }
+
+// MessagesChats is the conversations list — qn.10 slice 3, in contracts §1's frozen domain
+// envelope. Every field below is the envelope's; none of it is new vocabulary.
+//
+// IT IS NOT PAGINATED, AND THAT IS A MEASUREMENT RATHER THAN AN OMISSION. The conversation
+// list is answered by one pass over the `chat` table — 23 ms for 390 conversations on the
+// Operator's real backup — and it is bounded by how many people someone has talked to rather
+// than by how much they have said. The envelope's `page` still carries the rows, because the
+// shape is frozen; `next_cursor` is simply always absent. If a backup ever appears where the
+// list is large enough to page, the field is already there to start using.
+type MessagesChats struct {
+	// Capabilities is what this adapter can do, per the envelope. "search" appears only
+	// when the FTS5 index exists (qn.10 D4) — it is quince's capability, not the parser's,
+	// so it is quince's to advertise and quince's to withhold.
+	Capabilities []string `json:"capabilities"`
+
+	AdapterVersion string `json:"adapter_version"`
+
+	// Warnings carries anything degraded — a conversation that could not be read, or the
+	// attachment-total shortfall qn.10 D5 reconciles. Never nil on the wire: a client
+	// iterating warnings should not have to distinguish "none" from "field absent".
+	Warnings []string `json:"warnings"`
+
+	// UnsupportedReason is set when the adapter cannot serve this backup AT ALL, and is null
+	// otherwise. It carries TWO distinct causes and they must not be merged: a backup with
+	// no readable Messages database, and one whose schema has no conversation tables. The
+	// second still has messages; only the grouping is missing (qn.10 D7).
+	UnsupportedReason *string `json:"unsupported_reason"`
+
+	Page MessagesChatsPage `json:"page"`
+}
+
+// MessagesChatsPage is the envelope's `page`, whose shape is frozen as {items, next_cursor}.
+type MessagesChatsPage struct {
+	Items      []MessagesChat `json:"items"`
+	NextCursor string         `json:"next_cursor,omitempty"`
+}
+
+// MessagesChat is one conversation.
+//
+// NO MESSAGE PREVIEW AND NO UNREAD COUNT, DELIBERATELY. Both would need the projection, and
+// the projection costs an 18-second scan that qn.10 D2 rules must not happen until the user
+// opens an actual conversation. Putting a preview here would drag that cost onto the FIRST
+// Messages screen and undo the ruling — so the list shows who and what, and the thread shows
+// what was said.
+type MessagesChat struct {
+	ID   int64  `json:"id"`
+	GUID string `json:"guid"`
+
+	// DisplayName is the user-set group name and is often empty, including for most group
+	// chats. A surface falls back to the participants rather than showing a blank row.
+	DisplayName string `json:"display_name,omitempty"`
+
+	// Identifier is the address or group id the conversation is keyed by.
+	Identifier string `json:"identifier,omitempty"`
+
+	IsGroup bool `json:"is_group"`
+
+	// Participants are the correspondents' messaging identities — a phone number, email or
+	// Apple ID. EMPTY when the schema's `handles` unit is absent, which the capability
+	// report names: empty here means "not recorded", never "a conversation with nobody".
+	Participants []string `json:"participants,omitempty"`
+}

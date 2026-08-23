@@ -96,9 +96,15 @@ func (r *Reader) Close() error {
 	return err
 }
 
-// Progress reports how far a build has got. Total is 0 until it is known, which for this
-// scan is never — the parser does not count rows up front, so a caller renders indeterminate
-// progress with a live count rather than a percentage that would be a lie.
+// Progress reports how far a build has got: a running count of messages projected.
+//
+// THERE IS DELIBERATELY NO Total FIELD, AND ITS ABSENCE IS THE DESIGN. The parser does not
+// count rows before streaming them, so any total quince put here would be invented — and
+// *state honesty* forbids inventing one. A caller renders an indeterminate indicator with a
+// live count, never a percentage.
+//
+// (This comment described a `Total` field that does not exist until slice 3 — architect,
+// quince#1497. Prose one step from the code is this rung's recurring defect at its smallest.)
 type Progress struct {
 	Messages int64
 }

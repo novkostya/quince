@@ -482,6 +482,14 @@ type VaultBrowse interface {
 	// session routes.
 	VersionOverview(versionID string) (o wire.VersionOverview, code, message string)
 
+	// MessagesChats returns the session's conversation list — qn.10 slice 3.
+	//
+	// IT DOES NOT BUILD THE PROJECTION. Chats are answered live off the parser (23 ms for
+	// 390 conversations on a real backup), so the FIRST Messages screen costs nothing and
+	// the 18-second projection build waits for someone to open an actual conversation
+	// (qn.10 D2). A preview or an unread count on this route would undo that.
+	MessagesChats(sessionID string) (c wire.MessagesChats, code, message string)
+
 	// Overview returns the version's domain totals and capability report — contracts §1's
 	// domain envelope plus qn.9's two additive fields.
 	Overview(sessionID string, q wire.BrowseQuery) (o wire.Overview, code, message string)
@@ -514,6 +522,10 @@ func (UnavailableVaultBrowse) Browse(string, wire.BrowseQuery) (wire.BrowsePage,
 
 func (UnavailableVaultBrowse) VersionOverview(string) (wire.VersionOverview, string, string) {
 	return wire.VersionOverview{}, wire.VaultCodeUnavailable, vaultUnavailable
+}
+
+func (UnavailableVaultBrowse) MessagesChats(string) (wire.MessagesChats, string, string) {
+	return wire.MessagesChats{}, wire.VaultCodeUnavailable, vaultUnavailable
 }
 
 func (UnavailableVaultBrowse) Overview(string, wire.BrowseQuery) (wire.Overview, string, string) {

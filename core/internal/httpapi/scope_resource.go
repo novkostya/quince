@@ -119,6 +119,9 @@ var resourceDevice = map[string]deviceResolver{
 	// to a device. Named here rather than left to unresolvableToday, because it IS resolvable —
 	// the route carries exactly the id `fromSession` already takes.
 	"GET /api/sessions/{id}/overview": fromSession,
+
+	// qn.10 slice 3 — same session→version hop as every other session route.
+	"GET /api/sessions/{id}/messages/chats": fromSession,
 	// qn.9 slice 6. The SHORTER hop of the two: this route carries the version id
 	// directly, so it needs no session lookup at all — `fromVersion`, like the unlock it
 	// sits beside.
