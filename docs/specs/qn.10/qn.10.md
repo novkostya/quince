@@ -690,6 +690,30 @@ Beyond `make gates` and `make gates-ui-e2e`:
 - **G7** — `make privacy-check` over the branch, and by eye over every fixture, before merge.
 
 
+**MEASURED ON THE STAND, 2026-08-23 — and three figures in this spec were off.** Through the API on
+the Operator's real iPhone backup, current build, so these are route costs rather than parser costs:
+
+| | this spec said | measured through the route |
+| --- | --- | --- |
+| conversations | 390 | **390** |
+| chats list, first call in a session | 23 ms | **770 ms** — the 23 ms is the WARM parser call |
+| chats list, warm | — | **9.5 ms** |
+| first thread open | ~18 s | **11.3 s** |
+| every later thread open | 265 µs | **11 ms** through HTTP |
+| search | — | **79 ms** |
+
+**The 23 ms was never wrong, it was answering a different question**, and the surface comment that
+quoted it as the screen's cost has been corrected. The first call pays `Materialize` — decrypt and
+copy of the messages database — which the warm figure does not.
+
+**~18 s stands as the SPEC's number and 11.3 s is this device's**, taken once. Both are the same
+order and the design conclusion is unchanged; the walk quotes the measured one because a tester
+comparing against 18 s would wait for something that already happened.
+
+**Attachment formats, sampled across 40 conversations: 18 `image/heic`, 6 `image/png`, 1
+`video/quicktime`.** That is **72% HEIC**, which settles D6's allowlist as load-bearing rather than
+cautious: a `startsWith("image/")` check would have shown a broken-image icon for most photos in
+this backup.
 ### G6's walk — what to do, and what to write down
 
 **Slice 7f. The build is shipped and the list is here rather than in a PR body, because a PR body is
@@ -700,10 +724,11 @@ unlockable backup and therefore no conversation, no attachment and no thread to 
 **1. CORRECTNESS — the half M7's gate actually names.** Unlock a real backup, open Messages, and
 compare against iMazing on the same device:
 
-1. **The conversation list** — are the same conversations there, named the same way? Group chats
-   should show a participant count rather than the word *Group*.
-2. **One busy thread** — open the largest conversation. The first open takes **~18 s** and must show
-   a climbing count, not a bare spinner. Later conversations open instantly.
+1. **The conversation list** — are the same conversations there, named the same way? A group shows
+   its **participant count**, or the word **Group** when the backup carries no participant list —
+   both are correct, and a group showing *neither* is the finding.
+2. **One busy thread** — open the largest conversation. The first open takes **~11 s** on a real
+   backup and must show a **climbing count**, not a bare spinner. Later conversations open instantly.
 3. **Ten messages against iMazing** — sender, time, and text. **Tapbacks, edits and unsends must read
    as what they are**, never as an empty bubble.
 4. **One photo, one non-photo attachment** — a photo should render inline, a HEIC or video should be
@@ -720,6 +745,7 @@ it, a virtualizer lands and the narrowing is spent — without re-litigating the
 the message count, the first-open time, and the row count from (2). **Every disagreement with iMazing
 becomes a replay fixture before it is fixed**, per the hard rule — the transcript matters more than
 the diagnosis.
+
 ## Fixtures
 
 **Built at TEST TIME by `core/internal/vault/messages/msgfixture`, not committed as binaries.**
