@@ -633,8 +633,8 @@ Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewa
 | **5** | attachments: the join to `qn.8`'s download route (D6) | **merged** — quince#1506 |
 | **6** | FTS5 search and its capability gate (D4) | **merged** — quince#1503 |
 | **7a** | the chats list — the first Messages screen, which builds nothing (D9) | **merged** — quince#1507, roles corrected in quince#1508 |
-| **7b** | `MessageRow` — the five states that all look like an empty bubble (D7, D9) | **open** |
-| **7c** | the thread view, virtualized, its page, and the scan's wait state (D2, D9) | not open |
+| **7b** | `MessageRow` — the five states that all look like an empty bubble (D7, D9) | **merged** — quince#1509 |
+| **7c** | the thread view, its page, and the scan's wait state — **BLOCKED on two rulings, quince#1483** (D2, D9) | not open |
 | **7d** | attachments in the thread: inline images, named links, the absent state (D6) | not open |
 | **7e** | the search box, shown only when `capabilities` carries `search` (D4) | not open |
 | **7f** | G6 to the Operator — a dev-deploy build and a click-list | not open |
