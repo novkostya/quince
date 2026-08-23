@@ -383,6 +383,25 @@ Delivering it is the surface slice's, over the WebSocket that already carries jo
 callback is the seam it attaches to. Named here so that *"the route reports no progress"* is a
 recorded decision rather than something slice 7 discovers.
 
+**AND IT IS NOT AN EITHER/OR — THE SENTENCE ABOVE ALREADY CHOSE, WHICH A LATER SLICE FORGOT.** 7c
+was raised as *"indeterminate spinner versus a WS event"* and routed for a ruling; the architect's
+answer was that the question was settled here, in slice 4, by the words *"over the WebSocket that
+already carries job progress"*. **An indeterminate spinner INSTEAD would contradict a decision
+already in this spec, and story 10 with it. Build the event** (ruled 2026-08-23, quince#1483).
+
+**The distinction that made it look open, stated so it stops doing so:** `Progress` deliberately
+has no `Total` — the parser does not count rows up front, so any percentage would be invented — and
+the wait state is therefore **indeterminate in its RENDERING** while still carrying a live count.
+*Indeterminate rendering* and *no event at all* are different things, and conflating them is what
+turned a settled decision back into a question.
+
+**What is genuinely open is the event's SHAPE and SCOPE CLASS, and those go to PR review rather
+than to a ruling.** The architect's reading, offered so 7c is not blocked on it: the event describes
+one session, a session belongs to one device, so it takes **`scopedOwnDevice`** — the class every
+other messages route takes. A holder scoped to their own device should see their own scan's
+progress; nobody else should learn a scan is running at all. **If the precedents point both ways,
+name the two and it will be ruled on the PR.**
+
 ### D4 — Search is FTS5 over the projection, session-scoped, and it is a CAPABILITY that can be off
 
 An FTS5 table built alongside the projection in the same scan. It advertises `"search"` in the
@@ -494,10 +513,43 @@ message text or attachment path. Precedent quince#1425, *"INVENTED PATHS, ALWAYS
 
 ### D9 — The surface
 
-Chats list (name or participants, last message, timestamp, group marker), a thread that
-virtualizes, attachments inline where they are images and as named links otherwise,
-participants for a group, and a search box **when D4 says there is one**. Tapbacks, edits and
-unsends are rendered as what they are; app-message balloons say which app and that quince does
+Chats list (name or participants, timestamp, group marker), a thread **whose DOM is bounded by
+paging**, attachments inline where they are images and as named links otherwise, participants for
+a group, and a search box **when D4 says there is one**. Tapbacks, edits and unsends are rendered
+as what they are; app-message balloons say which app and that quince does not decode the payload.
+
+**"LAST MESSAGE" WAS STRUCK FROM THAT LIST, AND IT ASKED FOR THE THING D2 FORBIDS.** A preview
+needs message data, which needs the projection, whose ~18 s scan D2 defers **precisely so the chats
+list costs nothing**. So this section described a feature the same spec's ruling rules out — and D9
+is what a session building the chats list would read. **D2 wins and it is not close**: D2 is backed
+by measurement (23 ms live against ~18 s), and D9's phrase predates that cost being known. Ruled by
+the architect, 2026-08-23 (quince#1483), who also notes it is theirs: they approved the spec and
+ruled the deferral that contradicts it.
+
+**It is the fourth instance on this rung of a document describing a reality one step from the
+code's, and the FIRST that would have produced a wrong FEATURE rather than a wrong sentence** — the
+others cost a stale heading, a superseded figure and an overstated guard.
+
+**"VIRTUALIZES" IS NARROWED TO "the thread's DOM is bounded, by paging rather than by a
+virtualizer"** — ruled 2026-08-23 (quince#1483), and a narrowing of an approved spec rather than an
+implementer's choice, which is why it was routed.
+
+**The cursor already bounds it.** The route pages at 50 and caps at 200, so nothing renders that has
+not been fetched. **Virtualization guards against rendering what you already hold; the cursor guards
+against holding it at all** — a second bound on the same axis is what a virtualizer buys, and it is
+worth measuring before paying for.
+
+**The alternatives were refused on cost and reversibility.** A library adds a runtime dependency to
+a bundle already warning at **621.64 kB**, on a project whose primary client is a phone over Wi-Fi.
+Hand-rolled windowing adds code whose bugs — scroll anchoring, variable heights, position after
+prepending — are **invisible in component tests**, the worst pairing of cost and undetectability
+available. **Paging can become a virtualizer in one PR; neither of the others can become paging
+without deleting work.** What is ruled is the ORDER: the cheapest reversible thing first.
+
+**THE MEASUREMENT IS OWED, NOT WAIVED, AND IT IS A GATE ON THIS RUNG CLOSING.** *"A user would have
+to scroll a long way"* is an assertion. **Render N rows, time interaction, and record the number
+here.** If a plausible scroll makes it bad, a virtualizer lands and this narrowing is spent —
+without re-litigating the order.
 not decode the payload.
 
 **Per `read user-facing text as a user`:** no `unsupported_schema`, no `RowError`, no
@@ -634,7 +686,7 @@ Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewa
 | **6** | FTS5 search and its capability gate (D4) | **merged** — quince#1503 |
 | **7a** | the chats list — the first Messages screen, which builds nothing (D9) | **merged** — quince#1507, roles corrected in quince#1508 |
 | **7b** | `MessageRow` — the five states that all look like an empty bubble (D7, D9) | **merged** — quince#1509 |
-| **7c** | the thread view, its page, and the scan's wait state — **BLOCKED on two rulings, quince#1483** (D2, D9) | not open |
+| **7c** | the thread view, its page, and the scan's progress over the WebSocket (D2, D3, D9) | not open — **unblocked**, both rulings taken |
 | **7d** | attachments in the thread: inline images, named links, the absent state (D6) | not open |
 | **7e** | the search box, shown only when `capabilities` carries `search` (D4) | not open |
 | **7f** | G6 to the Operator — a dev-deploy build and a click-list | not open |
