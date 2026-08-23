@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Link, useParams } from "react-router-dom";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderTree } from "lucide-react";
+import { FolderTree, MessageSquare } from "lucide-react";
 import { BackLink } from "@/components/BackLink";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -219,6 +219,22 @@ export function VersionOverviewPage() {
           onUnlocked={(s) => setSession(s)}
         />
       ) : null}
+
+      {/* MESSAGES — qn.10 slice 7c-2a. Beside the browser rather than above it: the browser is
+          the escape hatch that reaches any file, and this is one domain rendered as itself.
+          Both are one click behind the version, and both need the password. */}
+      <Card>
+        <Link
+          to={`/versions/${id}/messages`}
+          className="flex items-center gap-2 text-sm text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          <MessageSquare size={16} aria-hidden />
+          Read the messages in this backup
+        </Link>
+        <p className="mt-1 text-xs text-muted">
+          Conversations, as they were. Needs the backup password.
+        </p>
+      </Card>
 
       {/* D9 — THE BROWSER STAYS, one click away. Kept even while the overview is loading or
           has failed: a version whose plists will not parse is exactly when somebody wants the

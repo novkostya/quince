@@ -699,8 +699,9 @@ Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewa
 | **6** | FTS5 search and its capability gate (D4) | **merged** — quince#1503 |
 | **7a** | the chats list — the first Messages screen, which builds nothing (D9) | **merged** — quince#1507, roles corrected in quince#1508 |
 | **7b** | `MessageRow` — the five states that all look like an empty bubble (D7, D9) | **merged** — quince#1509 |
-| **7c-1** | `messages.indexing` — the scan's progress over the WebSocket, device-scoped (D2, D3) | **open** — this PR |
-| **7c-2** | the thread view and its page (D3, D9) | not open — unblocked, and no longer waiting on the progress question |
+| **7c-1** | `messages.indexing` — the scan's progress over the WebSocket, device-scoped (D2, D3) | **merged** — quince#1515 |
+| **7c-2a** | the Messages route — session, unlock, and the chats list reachable (D2, D9) | **open** — this PR |
+| **7c-2b** | the thread view, its paging, and the `messages.indexing` wait state (D3, D9) | not open |
 | **7d** | attachments in the thread: inline images, named links, the absent state (D6) | not open |
 | **7e** | the search box, shown only when `capabilities` carries `search` (D4) | not open |
 | **7f** | G6 to the Operator — a dev-deploy build and a click-list | not open |
