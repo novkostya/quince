@@ -18,9 +18,12 @@ import (
 	"sync"
 	"time"
 
+	parsermessages "github.com/novkostya/ios-backup-parser/messages"
+
 	"github.com/novkostya/quince/core/internal/id"
 	"github.com/novkostya/quince/core/internal/vault"
 	"github.com/novkostya/quince/core/internal/vault/capability"
+	"github.com/novkostya/quince/core/internal/vault/messages"
 	"github.com/novkostya/quince/core/internal/vault/parserfs"
 	"github.com/novkostya/quince/core/internal/vault/preunlock"
 	"github.com/novkostya/quince/core/internal/wire"
@@ -47,6 +50,13 @@ type Service struct {
 	capMu    sync.Mutex
 	capCache map[string][]wire.DomainCapability
 
+	// msgReaders holds each session's Messages reader, so the 18-second projection build
+	// happens once per session rather than once per request. Same lifetime discipline as
+	// capCache: AttachDerived closes it and drops the entry when the session ends by any
+	// route, so nothing derived from decrypted content outlives the lock.
+	msgMu      sync.Mutex
+	msgReaders map[string]*messages.Reader
+
 	// preCache memoises the PRE-UNLOCK plist read, keyed by version id (spec D2c:
 	// "read once per version and memoised, not per request"). Info.plist is XML and
 	// costs 10-99 ms scaling with the app count, and it sits on the path of the thing
@@ -72,7 +82,8 @@ func New(versions Versions, scratchRoot string, ttl time.Duration, log *slog.Log
 		return nil, err
 	}
 	return &Service{versions: versions, registry: reg, log: log, open: openFor,
-		capCache: map[string][]wire.DomainCapability{}, preCache: map[string]preunlock.Tier{}}, nil
+		capCache: map[string][]wire.DomainCapability{}, preCache: map[string]preunlock.Tier{},
+		msgReaders: map[string]*messages.Reader{}}, nil
 }
 
 // Registry exposes the registry so the daemon can sweep expired sessions and tear them all
@@ -512,4 +523,132 @@ func rfc3339OrEmpty(t time.Time) string {
 		return ""
 	}
 	return t.UTC().Format(time.RFC3339)
+}
+
+// MessagesChats serves the conversation list for an unlocked session — qn.10 slice 3.
+func (s *Service) MessagesChats(sessionID string) (wire.MessagesChats, string, string) {
+	r, code, msg := s.messagesReader(sessionID)
+	if code != "" {
+		return wire.MessagesChats{}, code, msg
+	}
+
+	chats, warnings, err := r.Chats(context.Background())
+	if err != nil {
+		// THE TWO UNSUPPORTED CAUSES STAY APART. A backup with no readable Messages
+		// database and one whose schema has no conversation tables are different facts
+		// with different screens; the second still has messages (qn.10 D7).
+		switch {
+		case errors.Is(err, messages.ErrUnsupported):
+			return unsupportedChats("this backup has no Messages database quince can read"), "", ""
+		case errors.Is(err, messages.ErrChatsUnavailable):
+			return unsupportedChats("this backup stores messages without conversations, so they cannot be listed"), "", ""
+		case errors.Is(err, vault.ErrNoSession):
+			return wire.MessagesChats{}, "not_found", "session not found or expired"
+		case errors.Is(err, vault.ErrSessionBusy):
+			return wire.MessagesChats{}, "busy", "this session is serving another request"
+		}
+		return wire.MessagesChats{}, "io", "could not read this backup's conversations"
+	}
+
+	out := wire.MessagesChats{
+		Capabilities:   []string{"threads", "attachments"},
+		AdapterVersion: messagesAdapterVersion,
+		// Never nil on the wire: a client iterating should not have to distinguish
+		// "none" from "field absent".
+		Warnings: append([]string{}, warnings...),
+		Page:     wire.MessagesChatsPage{Items: []wire.MessagesChat{}},
+	}
+	for _, c := range chats {
+		out.Page.Items = append(out.Page.Items, wire.MessagesChat{
+			ID: c.ID, GUID: c.GUID, DisplayName: c.DisplayName,
+			Identifier: c.Identifier, IsGroup: c.IsGroup, Participants: c.Participants,
+		})
+	}
+	return out, "", ""
+}
+
+// messagesAdapterVersion names the reader, not an iOS version. The parser's own schema alias
+// is a discovery-order ordinal for the same reason: a fingerprint's identity is the
+// introspected structure, never a version claim.
+const messagesAdapterVersion = "messages-quince.v1"
+
+// unsupportedChats builds the envelope for a backup this adapter cannot serve. It is a 200
+// carrying unsupported_reason rather than an error status, because the SESSION is fine and
+// the surface has something true to render — which is the envelope's whole purpose.
+func unsupportedChats(reason string) wire.MessagesChats {
+	return wire.MessagesChats{
+		Capabilities:      []string{},
+		AdapterVersion:    messagesAdapterVersion,
+		Warnings:          []string{},
+		UnsupportedReason: &reason,
+		Page:              wire.MessagesChatsPage{Items: []wire.MessagesChat{}},
+	}
+}
+
+// messagesReader returns the session's reader, building and attaching it on first call.
+//
+// THE VAULT IS HELD ONLY LONG ENOUGH TO MATERIALIZE, NEVER FOR THE SCAN. registry.With is
+// exclusive and non-blocking — TryLock, else ErrSessionBusy — so wrapping the whole build in
+// it would refuse every other call on this session for the ~16 s it runs, including a browse,
+// a file download, and the user's own second click.
+//
+// MEASURED, BOTH ARMS, ON A REAL BACKUP (quince#1483): build inside With → 808 concurrent
+// calls, ALL refused; materialize inside With and scan outside → 531 succeeded, and the 56
+// refusals are exactly the 1.1 s materialize window. The residue is unavoidable, because the
+// vault must decrypt.
+//
+// SCANNING OUTSIDE THE LOCK IS SAFE BECAUSE parserfs MEMOISES, and that is a safety property
+// rather than a speed one: if the memo missed, the scan's own Materialize would reach the
+// vault outside With, concurrently with another request, and a race need not produce an
+// error. Measured directly: a second Materialize of the same file is 1 µs against 806 ms and
+// returns the identical path.
+func (s *Service) messagesReader(sessionID string) (*messages.Reader, string, string) {
+	s.msgMu.Lock()
+	defer s.msgMu.Unlock()
+	if r, ok := s.msgReaders[sessionID]; ok {
+		return r, "", ""
+	}
+
+	var reader *messages.Reader
+	err := s.registry.With(sessionID, func(v vault.Vault) error {
+		scratch := s.registry.ScratchFor(sessionID)
+		fsys, err := parserfs.New(v, scratch)
+		if err != nil {
+			return err
+		}
+		// Materialize HERE, under the lock, so the scan that follows needs no vault.
+		//
+		// A FAILURE IS NOT FATAL AT THIS LAYER and is deliberately ignored: a backup with
+		// no Messages database is an unsupported_reason, not an error, and Chats is what
+		// reports which of the two causes it is. The reader is constructed either way.
+		_, _ = fsys.Materialize(parsermessages.Domain, parsermessages.RelativePath)
+		reader, err = messages.New(fsys, scratch)
+		return err
+	})
+	switch {
+	case errors.Is(err, vault.ErrNoSession):
+		return nil, "not_found", "session not found or expired"
+	case errors.Is(err, vault.ErrSessionBusy):
+		return nil, "busy", "this session is serving another request"
+	case err != nil:
+		return nil, "io", "could not open this backup's Messages domain"
+	}
+
+	// ATTACH BEFORE CACHING, as capabilityReport does: if the session has already ended,
+	// AttachDerived reports false and the reader is closed rather than memoised, so nothing
+	// built from decrypted content stays reachable in this map.
+	if !s.registry.AttachDerived(sessionID, closerFunc(func() error {
+		s.msgMu.Lock()
+		if r, ok := s.msgReaders[sessionID]; ok {
+			_ = r.Close()
+			delete(s.msgReaders, sessionID)
+		}
+		s.msgMu.Unlock()
+		return nil
+	})) {
+		_ = reader.Close()
+		return nil, "not_found", "session not found or expired"
+	}
+	s.msgReaders[sessionID] = reader
+	return reader, "", ""
 }

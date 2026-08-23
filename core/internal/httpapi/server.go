@@ -358,6 +358,9 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("POST /api/sessions/{id}/lock", deps.handleSessionLock())
 	apiMux.HandleFunc("GET /api/sessions/{id}/browse", deps.handleSessionBrowse())
 	apiMux.HandleFunc("GET /api/sessions/{id}/overview", deps.handleSessionOverview())
+	// qn.10 slice 3. Under /messages/ so the thread and search routes that follow share a
+	// prefix rather than each inventing one.
+	apiMux.HandleFunc("GET /api/sessions/{id}/messages/chats", deps.handleSessionMessagesChats())
 	apiMux.HandleFunc("GET /api/sessions/{id}/file/{file_id}", deps.handleSessionFile())
 	apiMux.HandleFunc("/api/", deps.handleAPINotFound())
 

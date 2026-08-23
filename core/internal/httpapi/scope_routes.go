@@ -174,6 +174,12 @@ var routeScope = map[string]scopeClass{
 	// FIFTH route it has named, and the first four are the paragraph above.
 	"GET /api/sessions/{id}/overview": scopedOwnDevice,
 
+	// qn.10 slice 3. A conversation list describes ONE version of ONE device, so a scoped
+	// principal reaches it exactly when that device is theirs — the same reasoning as every
+	// session route above, and it carries message correspondents, which is squarely what D8
+	// scopes.
+	"GET /api/sessions/{id}/messages/chats": scopedOwnDevice,
+
 	// qn.9 slice 6 — the PRE-UNLOCK tier. It needs no session and no password, and that
 	// changes nothing about WHOSE it is: it describes one version of one device, so a
 	// scoped principal reaches it exactly when that device is theirs. Needing no unlock is

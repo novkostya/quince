@@ -21,6 +21,7 @@ type stubVault struct {
 	page            wire.BrowsePage
 	overview        wire.Overview
 	versionOverview wire.VersionOverview
+	messagesChats   wire.MessagesChats
 	entry           wire.FileEntry
 	content         string
 	code            string
@@ -29,6 +30,7 @@ type stubVault struct {
 	lastQ           wire.BrowseQuery
 	lastFile        string
 	lastVersion     string
+	lastSession     string
 }
 
 func (s *stubVault) Unlock(versionID, password string) (wire.Session, string, string) {
@@ -45,6 +47,11 @@ func (s *stubVault) Overview(_ string, q wire.BrowseQuery) (wire.Overview, strin
 	s.lastQ = q
 	return s.overview, s.code, s.message
 }
+func (s *stubVault) MessagesChats(sessionID string) (wire.MessagesChats, string, string) {
+	s.lastSession = sessionID
+	return s.messagesChats, s.code, s.message
+}
+
 func (s *stubVault) VersionOverview(versionID string) (wire.VersionOverview, string, string) {
 	s.lastVersion = versionID
 	return s.versionOverview, s.code, s.message
@@ -664,5 +671,92 @@ func TestVersionOverviewIsUnavailableWithNoVaultWired(t *testing.T) {
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", res.StatusCode)
+	}
+}
+
+// The route must send `items` and `warnings` as EMPTY ARRAYS rather than null, so a client
+// iterating either does not have to distinguish "none" from "field absent". Asserted on the
+// raw JSON, because a Go round trip through the struct would hide exactly this.
+func TestMessagesChatsSendsEmptyArraysNotNull(t *testing.T) {
+	stub := &stubVault{messagesChats: wire.MessagesChats{
+		Capabilities:   []string{"threads", "attachments"},
+		AdapterVersion: "messages-quince.v1",
+		// Deliberately nil, which is what the service returns for a backup with no
+		// conversations and what the handler must normalise.
+		Warnings: nil,
+		Page:     wire.MessagesChatsPage{Items: nil},
+	}}
+	srv, client := vaultServer(t, stub)
+	res, err := client.Get(srv.URL + "/api/sessions/s1/messages/chats")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), `"items":null`) {
+		t.Errorf("items is null on the wire: %s", body)
+	}
+	if strings.Contains(string(body), `"warnings":null`) {
+		t.Errorf("warnings is null on the wire: %s", body)
+	}
+	if !strings.Contains(string(body), `"items":[]`) {
+		t.Errorf("want items as an empty array: %s", body)
+	}
+}
+
+// unsupported_reason must be an explicit null when the adapter CAN serve the backup — the
+// field's absence and its null mean different things to a client, and the envelope freezes
+// the key.
+func TestMessagesChatsSendsUnsupportedReasonAsExplicitNull(t *testing.T) {
+	stub := &stubVault{messagesChats: wire.MessagesChats{
+		Capabilities: []string{}, Warnings: []string{},
+		Page: wire.MessagesChatsPage{Items: []wire.MessagesChat{}},
+	}}
+	srv, client := vaultServer(t, stub)
+	res, err := client.Get(srv.URL + "/api/sessions/s1/messages/chats")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	body, _ := io.ReadAll(res.Body)
+	if !strings.Contains(string(body), `"unsupported_reason":null`) {
+		t.Errorf("want an explicit null unsupported_reason: %s", body)
+	}
+}
+
+// With no vault wired the route reports 503 honestly rather than an empty conversation list.
+// An empty list would say "you have no conversations", which is a claim about the user's data
+// that nobody checked.
+func TestMessagesChatsIsUnavailableWithNoVaultWired(t *testing.T) {
+	deps := testDeps(t)
+	srv := httptest.NewServer(NewRouter(deps))
+	t.Cleanup(srv.Close)
+	client := authedClient(t, srv)
+	res, err := client.Get(srv.URL + "/api/sessions/s1/messages/chats")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", res.StatusCode)
+	}
+}
+
+func TestMessagesChatsPassesTheSessionID(t *testing.T) {
+	stub := &stubVault{}
+	srv, client := vaultServer(t, stub)
+	res, err := client.Get(srv.URL + "/api/sessions/sess-42/messages/chats")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if stub.lastSession != "sess-42" {
+		t.Errorf("session = %q, want sess-42", stub.lastSession)
 	}
 }

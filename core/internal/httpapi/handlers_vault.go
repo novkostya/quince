@@ -337,3 +337,29 @@ func (d Deps) handleVersionOverview() http.HandlerFunc {
 		writeJSON(w, d.Log, http.StatusOK, out)
 	}
 }
+
+// handleSessionMessagesChats serves GET /api/sessions/{id}/messages/chats — qn.10 slice 3.
+//
+// IT READS NO QUERY ARGUMENTS. The conversation list is not paginated (wire.MessagesChats
+// says why: it is bounded by how many people someone has talked to, and measures 23 ms for
+// 390 of them), so paging arguments here would answer a question the route cannot be asked.
+// The envelope's `page` still carries the rows, because contracts §1 freezes that shape.
+func (d Deps) handleSessionMessagesChats() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		out, code, msg := d.VaultBrowse.MessagesChats(r.PathValue("id"))
+		if code != "" {
+			writeError(w, d.Log, statusForVaultCode(code), code, msg)
+			return
+		}
+		// Items and Warnings are never null on the wire, for the same reason Entries is
+		// not on browse: a client iterating a page should not have to distinguish "none"
+		// from "field absent".
+		if out.Page.Items == nil {
+			out.Page.Items = []wire.MessagesChat{}
+		}
+		if out.Warnings == nil {
+			out.Warnings = []string{}
+		}
+		writeJSON(w, d.Log, http.StatusOK, out)
+	}
+}
