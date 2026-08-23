@@ -180,6 +180,25 @@ func (s *Service) OpenFile(sessionID, fileID string) (io.ReadCloser, wire.FileEn
 	return s.registry.WatchIncomplete(sessionID, fileID, rc), toWireEntry(entry, false, false), "", ""
 }
 
+// OpenFileByPath is OpenFile addressed by (domain, relativePath) — qn.10 slice 5.
+//
+// SAME HANDLER, SAME STREAM, SAME GUARDS; only the addressing differs. D6's "no new
+// file-serving surface" forbids a second way to stream bytes, not a second way to name a file
+// the existing path then serves — ruled at quince#1483. Nothing leaves quince through code
+// that is not OpenFile's.
+//
+// OpenStreamByPath, NOT a resolve-then-OpenStream: two acquisitions with a gap between would
+// let a lock or a TTL sweep end the session between resolving the id and streaming it.
+func (s *Service) OpenFileByPath(sessionID, domain, relativePath string) (io.ReadCloser, wire.FileEntry, string, string) {
+	rc, entry, err := s.registry.OpenStreamByPath(context.Background(), sessionID, domain, relativePath)
+	if err != nil {
+		return nil, wire.FileEntry{}, codeFor(err), err.Error()
+	}
+	// The incompleteness watch is keyed by FILE ID, and the entry carries the one that was
+	// resolved — so a short read marks the same entry a browse listing would show.
+	return s.registry.WatchIncomplete(sessionID, entry.FileID, rc), toWireEntry(entry, false, false), "", ""
+}
+
 // codeFor maps a registry or seam error onto a contracts §4 code. Session-level errors are
 // this package's to classify; everything else the seam already owns.
 func codeFor(err error) string {

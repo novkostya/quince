@@ -74,10 +74,29 @@ func (d Deps) handleSessionBrowse() http.HandlerFunc {
 	}
 }
 
-// handleSessionFile serves GET /api/sessions/{id}/file/{file_id} → the decrypted bytes.
+// handleSessionFile serves the decrypted bytes of one file, addressed EITHER BY FILE ID or by
+// (domain, relative_path):
+//
+//	GET /api/sessions/{id}/file/{file_id}
+//	GET /api/sessions/{id}/file?domain=…&relative_path=…
+//
+// TWO ADDRESSINGS, ONE SURFACE. qn.10's Messages domain hands a client an attachment as a
+// domain and a relative path, because that is what the message record holds — it has no file
+// id and getting one would cost a round trip. D6's "no new file-serving surface" forbids a
+// second way to STREAM BYTES, not a second way to NAME a file the same handler then serves
+// (ruled, quince#1483): below the addressing switch there is one code path, one set of
+// headers, one short-read detection and one scope class.
+//
+// IT WIDENS NO REACH. Authorization is the session — which backup — and the route's scope
+// class — whose device. There is no per-file check and a file id is not a capability token:
+// browse hands them out for everything in the backup. Naming by path reaches exactly the set
+// naming by id already reaches.
 func (d Deps) handleSessionFile() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		rc, entry, code, msg := d.VaultBrowse.OpenFile(r.PathValue("id"), r.PathValue("file_id"))
+		rc, entry, code, msg, ok := d.openRequestedFile(w, r)
+		if !ok {
+			return // openRequestedFile has already written the refusal
+		}
 		if code != "" {
 			writeError(w, d.Log, statusForVaultCode(code), code, msg)
 			return
@@ -436,4 +455,31 @@ func (d Deps) handleSessionMessagesSearch() http.HandlerFunc {
 		}
 		writeJSON(w, d.Log, http.StatusOK, out)
 	}
+}
+
+// openRequestedFile picks the addressing and opens the stream. It is the ONLY place the two
+// shapes differ; everything downstream of it is shared.
+//
+// A REQUEST CARRYING NEITHER IS A 400, and one carrying a path with no domain is too. Guessing
+// a domain would serve a different file than the one asked for, which on a download route is
+// the worst available failure.
+func (d Deps) openRequestedFile(w http.ResponseWriter, r *http.Request) (io.ReadCloser, wire.FileEntry, string, string, bool) {
+	sessionID := r.PathValue("id")
+	if fileID := r.PathValue("file_id"); fileID != "" {
+		rc, e, code, msg := d.VaultBrowse.OpenFile(sessionID, fileID)
+		return rc, e, code, msg, true
+	}
+	q := r.URL.Query()
+	domain, rel := q.Get("domain"), q.Get("relative_path")
+	if domain == "" || rel == "" {
+		// A MALFORMED REQUEST, NOT A VAULT ERROR. contracts §4 fixes the vault codes, and
+		// `bad_request` is not among them — routing it through statusForVaultCode made this
+		// a 500, which would have told a caller their backup was unreadable when they had
+		// simply not named a file.
+		writeError(w, d.Log, http.StatusBadRequest, "bad_request",
+			"name the file either as /file/{file_id} or with both domain and relative_path")
+		return nil, wire.FileEntry{}, "", "", false
+	}
+	rc, e, code, msg := d.VaultBrowse.OpenFileByPath(sessionID, domain, rel)
+	return rc, e, code, msg, true
 }

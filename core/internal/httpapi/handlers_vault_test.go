@@ -37,6 +37,8 @@ type stubVault struct {
 	lastFile        string
 	lastVersion     string
 	lastSession     string
+	lastDomain      string
+	lastRel         string
 }
 
 func (s *stubVault) Unlock(versionID, password string) (wire.Session, string, string) {
@@ -75,6 +77,14 @@ func (s *stubVault) VersionOverview(versionID string) (wire.VersionOverview, str
 
 func (s *stubVault) OpenFile(_, fileID string) (io.ReadCloser, wire.FileEntry, string, string) {
 	s.lastFile = fileID
+	if s.code != "" {
+		return nil, wire.FileEntry{}, s.code, s.message
+	}
+	return io.NopCloser(strings.NewReader(s.content)), s.entry, "", ""
+}
+
+func (s *stubVault) OpenFileByPath(_, domain, relativePath string) (io.ReadCloser, wire.FileEntry, string, string) {
+	s.lastDomain, s.lastRel = domain, relativePath
 	if s.code != "" {
 		return nil, wire.FileEntry{}, s.code, s.message
 	}
@@ -932,5 +942,70 @@ func TestMessagesSearchIsUnavailableWithNoVaultWired(t *testing.T) {
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503", res.StatusCode)
+	}
+}
+
+// The path addressing reaches the same handler and the same stream.
+func TestSessionFileByPathServesTheSameBytes(t *testing.T) {
+	stub := &stubVault{
+		content: "decrypted bytes",
+		entry:   wire.FileEntry{RelativePath: "Library/SMS/Attachments/aa/00/invented.heic", Size: 15},
+	}
+	srv, client := vaultServer(t, stub)
+	res, err := client.Get(srv.URL +
+		"/api/sessions/s1/file?domain=MediaDomain&relative_path=Library/SMS/Attachments/aa/00/invented.heic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	if stub.lastDomain != "MediaDomain" {
+		t.Errorf("domain = %q", stub.lastDomain)
+	}
+	if stub.lastRel != "Library/SMS/Attachments/aa/00/invented.heic" {
+		t.Errorf("relative_path = %q", stub.lastRel)
+	}
+	body, _ := io.ReadAll(res.Body)
+	if string(body) != "decrypted bytes" {
+		t.Errorf("body = %q", body)
+	}
+	// THE SECURITY HEADERS ARE THE POINT OF SHARING ONE HANDLER. If the path addressing
+	// ever grew its own serve path, these are what would quietly go missing.
+	if got := res.Header.Get("Content-Type"); got != "application/octet-stream" {
+		t.Errorf("Content-Type = %q — a real type plus inline is stored XSS on quince's own origin", got)
+	}
+	if got := res.Header.Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control = %q", got)
+	}
+	if got := res.Header.Get("Content-Length"); got != "15" {
+		t.Errorf("Content-Length = %q — without it a short read arrives looking complete", got)
+	}
+}
+
+// Naming neither shape is a 400. Guessing a domain would serve a different file than the one
+// asked for, which on a download route is the worst available failure.
+func TestSessionFileWithNeitherAddressingIsRefused(t *testing.T) {
+	stub := &stubVault{content: "x"}
+	srv, client := vaultServer(t, stub)
+	for _, u := range []string{
+		"/api/sessions/s1/file",
+		"/api/sessions/s1/file?domain=MediaDomain",
+		"/api/sessions/s1/file?relative_path=Library/SMS/x.heic",
+	} {
+		res, err := client.Get(srv.URL + u)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", u, res.StatusCode)
+		}
+	}
+	// CONTROL: the seam must not have been reached for any of them.
+	if stub.lastDomain != "" || stub.lastRel != "" {
+		t.Errorf("the seam was called despite an incomplete addressing: domain=%q rel=%q",
+			stub.lastDomain, stub.lastRel)
 	}
 }

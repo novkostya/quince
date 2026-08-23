@@ -168,6 +168,10 @@ var routeScope = map[string]scopeClass{
 	"GET /api/sessions/{id}/browse":         scopedOwnDevice,
 	"GET /api/sessions/{id}/file/{file_id}": scopedOwnDevice,
 
+	// qn.10 slice 5 — the same surface addressed by path. Same class, necessarily: it
+	// serves the same bytes to the same principals.
+	"GET /api/sessions/{id}/file": scopedOwnDevice,
+
 	// qn.9. Overview describes ONE version, which belongs to one device, so it is that device's on
 	// exactly the reasoning above — and it reaches the version through the same session id, so the
 	// guard resolves it by the same SessionVersion hop. Caught by the assertion, again: this is the

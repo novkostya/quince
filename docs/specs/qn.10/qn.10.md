@@ -435,6 +435,29 @@ backup* rather than offering a link that 404s.
 
 ### D7 — `Missing` maps onto the envelope, field by field, and an empty field is never silently empty
 
+**"NO NEW FILE-SERVING SURFACE" FORBIDS A SECOND WAY TO STREAM BYTES, NOT A SECOND WAY TO NAME A
+FILE** — ruled at quince#1483, and slice 5 builds it as a second parameter shape on the existing
+route rather than a sibling route. The test the ruling applies: **does a byte ever leave quince
+through code that is not the existing handler's?** It does not — same handler, same stream, same
+headers, same short-read detection, same scope class.
+
+**Measured, which is why the shape is this one.** Resolving one path to a file id costs **51 ms**;
+a page of 50 messages carries 11 present attachments, so resolving per page would cost **562 ms of
+exclusive session lock** on every newly-scrolled page. Resolving **at download time**, for the one
+file the user actually clicked, costs one lookup. A bulk walk was measured at **15.769 s** and
+rejected — it would take first-open from ~18 s to ~34 s, under the lock D2b exists to keep short.
+
+**Two constraints came with the ruling and both are structural.** The lookup is a **vault call**,
+so it happens inside the held session — doing it in the caller would reintroduce quince#1501's
+unsynchronised call one slice after fixing it. And it is **one acquisition**: `OpenStreamByPath`
+resolves and opens inside a single `busy` hold, because resolving then calling the id route leaves
+a gap in which a lock or a TTL sweep can end the session.
+
+**The match is exact, never by prefix.** A prefix matches `a.jpg` for `a` and would serve a
+different file's bytes than the one asked for — the worst available failure on a download route.
+It also means this design leans on **no** prefix selectivity, which is why quince#1505's
+unexplained figure does not block it.
+
 `backup.Capability.Missing` names the units this schema cannot provide. Each maps to the
 envelope: absent `chats` → no chats list and an `unsupported_reason`; absent `handles` → no
 participants, said so; absent `attachments` → no attachment rows, said so.
@@ -607,8 +630,8 @@ Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewa
 | **3b** | the scan's materialize key set asserted, not documented (D2b) | **merged** — quince#1499 |
 | **4** | `GET …/chats/{chat}/messages`, cursored (D3) | **merged** — quince#1500 |
 | **5a** | `parserfs` memoises `lookup`; the scan reaches the vault zero times (D2b) | **merged** — quince#1501 |
-| **5** | attachments: the join to `qn.8`'s download route (D6) | not open |
-| **6** | FTS5 search and its capability gate (D4) | **open** |
+| **5** | attachments: the join to `qn.8`'s download route (D6) | **open** |
+| **6** | FTS5 search and its capability gate (D4) | **merged** — quince#1503 |
 | **7** | the surface (D9), then G6 to the Operator | not open |
 
 **This table is a second part describing the whole, so it is stale by default after every
