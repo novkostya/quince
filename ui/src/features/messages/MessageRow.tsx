@@ -1,3 +1,4 @@
+import { Attachment } from "./Attachment";
 import type { MessagesMessage } from "@/lib/types";
 
 // MessageRow renders one message — qn.10 slice 7b, stories 2 and 8.
@@ -34,7 +35,7 @@ export function bodyText(m: MessagesMessage): { text: string; ownWords: boolean 
   return { text: "", ownWords: true };
 }
 
-export function MessageRow({ message }: { message: MessagesMessage }) {
+export function MessageRow({ message, sessionID }: { message: MessagesMessage; sessionID?: string }) {
   const { text, ownWords } = bodyText(message);
   const attachments = message.attachments ?? [];
 
@@ -55,14 +56,9 @@ export function MessageRow({ message }: { message: MessagesMessage }) {
       )}
 
       {attachments.map((a, i) => (
-        <p key={`${message.id}-${i}`} className="text-xs text-muted">
-          {a.present
-            ? (a.name ?? "attachment")
-            : // NO LINK, AND THE REASON. `present: false` means the backup does not hold the
-              // bytes — not downloaded, purged, or iCloud-only. Offering a link that cannot
-              // resolve would be worse than saying so.
-              `${a.name ?? "attachment"} — not in this backup`}
-        </p>
+        // KEYED BY INDEX because an attachment carries no id of its own — the record is a join
+        // row, and two attachments on one message can share a name. The list is never reordered.
+        <Attachment key={`${message.id}-${i}`} sessionID={sessionID} attachment={a} />
       ))}
     </li>
   );

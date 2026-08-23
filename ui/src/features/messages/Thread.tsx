@@ -34,6 +34,7 @@ export function indexingLabel(count: number | undefined): string {
 
 export function Thread({
   data,
+  sessionID,
   messages,
   indexing,
   onOlder,
@@ -41,6 +42,7 @@ export function Thread({
   loadingOlder,
 }: {
   data: MessagesThread | undefined;
+  sessionID?: string;
   messages: MessagesMessage[];
   indexing: number | undefined;
   onOlder: () => void;
@@ -104,7 +106,7 @@ export function Thread({
 
       <ul className="divide-y divide-line rounded-md border border-line">
         {messages.map((m) => (
-          <MessageRow key={m.id} message={m} />
+          <MessageRow key={m.id} message={m} sessionID={sessionID} />
         ))}
       </ul>
     </div>
