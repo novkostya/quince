@@ -39,12 +39,20 @@ export function nameFor(chat: MessagesChat): string {
 }
 
 export function ChatList({ data }: { data: MessagesChats }) {
+  // `text-fg`, NOT `text-muted`, ON BOTH SENTENCES BELOW, AND THAT IS NOT A STYLE PREFERENCE.
+  // Each is the ONLY content on its card — the answer to "where are my messages". There is
+  // nothing for it to be secondary to, and rendering the answer as secondary text
+  // de-emphasises the one thing the reader came for. `text-muted` is for an explanation
+  // sitting BESIDE primary content, which is how DomainReport uses it.
+  //
+  // quince#1215's class exactly: the contrast floors are right and the ROLE was wrong. The
+  // first version of this component had both muted.
   if (data.unsupported_reason) {
     // THE SENTENCE, NOT AN EMPTY LIST. It distinguishes "no readable Messages database" from
     // "a schema with no conversations", and those have different remedies.
     return (
       <Card className="p-6">
-        <p className="text-sm text-muted">{data.unsupported_reason}</p>
+        <p className="text-sm text-fg">{data.unsupported_reason}</p>
       </Card>
     );
   }
@@ -53,9 +61,7 @@ export function ChatList({ data }: { data: MessagesChats }) {
   if (chats.length === 0) {
     return (
       <Card className="p-6">
-        <p className="text-sm text-muted">
-          This backup has no conversations in it.
-        </p>
+        <p className="text-sm text-fg">This backup has no conversations in it.</p>
       </Card>
     );
   }
@@ -70,7 +76,7 @@ export function ChatList({ data }: { data: MessagesChats }) {
       <ul className="divide-y divide-line rounded-md border border-line">
         {chats.map((chat) => (
           <li key={chat.id} className="flex items-center gap-3 px-4 py-3">
-            <span className="min-w-0 flex-1 truncate text-sm">{nameFor(chat)}</span>
+            <span className="min-w-0 flex-1 truncate text-sm text-fg">{nameFor(chat)}</span>
             {chat.is_group && (
               <Badge tone="neutral">
                 {/* The COUNT rather than the word "group": a reader wants to know how many
