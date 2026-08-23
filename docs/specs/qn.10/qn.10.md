@@ -390,6 +390,25 @@ envelope's `capabilities` **only when it was actually built**; if FTS5 is unavai
 build failed, `search` is absent from `capabilities` and a `warnings` entry says why. The
 surface then hides the search box rather than offering one that returns nothing.
 
+
+**BUILT AS AN EXTERNAL-CONTENT INDEX (`content='msg'`), so the bodies are not duplicated.** FTS5
+stores the terms and points back at `msg.id` for everything else — which matters on a rung whose
+scratch already peaks near 762 MiB.
+
+**Failing to build is NOT an error and must never lose the reader.** A SQLite without FTS5, or a
+rebuild that fails, leaves the chats list and every thread working; `buildSearchIndex` returns
+nothing and records a warning, and the capability is derived from whether the index exists rather
+than asserted. Slice 6 measured the build at **1.235 s** over 254,949 real messages, against the
+15.9 s the scan itself costs.
+
+**A blank query and an unparsable one are both the CALLER's, and both are 400s** —
+`ErrEmptyQuery` and `ErrBadQuery`. Answering either with an empty result would state *nothing
+matched*, which is a claim about the user's messages that nobody checked. The term reaches FTS5 as
+a **bound parameter**; it is still interpreted by the matcher, which is why an unparsable one gets
+its own message rather than an error about the backup.
+
+**Each hit carries its `chat_ids`.** The only useful action on a search result is *open the
+conversation this came from*, and a hit with no home cannot offer it.
 **A missing capability is a fact about quince and is reported as one**, never as an empty
 result set — `capability.go`'s own rule, one layer up.
 
@@ -587,9 +606,9 @@ Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewa
 | **3** | `GET /api/sessions/{id}/messages/chats` (D3, contracts §1) | **merged** — quince#1498 |
 | **3b** | the scan's materialize key set asserted, not documented (D2b) | **merged** — quince#1499 |
 | **4** | `GET …/chats/{chat}/messages`, cursored (D3) | **merged** — quince#1500 |
-| **5a** | `parserfs` memoises `lookup`; the scan reaches the vault zero times (D2b) | **open** |
+| **5a** | `parserfs` memoises `lookup`; the scan reaches the vault zero times (D2b) | **merged** — quince#1501 |
 | **5** | attachments: the join to `qn.8`'s download route (D6) | not open |
-| **6** | FTS5 search and its capability gate (D4) | not open |
+| **6** | FTS5 search and its capability gate (D4) | **open** |
 | **7** | the surface (D9), then G6 to the Operator | not open |
 
 **This table is a second part describing the whole, so it is stale by default after every

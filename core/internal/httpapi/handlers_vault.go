@@ -404,3 +404,36 @@ func (d Deps) handleSessionMessagesThread() http.HandlerFunc {
 		writeJSON(w, d.Log, http.StatusOK, out)
 	}
 }
+
+// handleSessionMessagesSearch serves GET /api/sessions/{id}/messages/search?q&limit — qn.10
+// slice 6.
+//
+// THE TERM IS `q`, AND AN ABSENT ONE IS A 400 RATHER THAN AN EMPTY RESULT. A caller who
+// submitted nothing is told so; answering with an empty list would look like "nothing
+// matched", which is a claim about the user's messages that nobody checked.
+func (d Deps) handleSessionMessagesSearch() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		limit := 0
+		if raw := q.Get("limit"); raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil {
+				writeError(w, d.Log, http.StatusBadRequest, "bad_request", "limit must be a number")
+				return
+			}
+			limit = n
+		}
+		out, code, msg := d.VaultBrowse.MessagesSearch(r.PathValue("id"), q.Get("q"), limit)
+		if code != "" {
+			writeError(w, d.Log, statusForVaultCode(code), code, msg)
+			return
+		}
+		if out.Page.Items == nil {
+			out.Page.Items = []wire.MessagesSearchHit{}
+		}
+		if out.Warnings == nil {
+			out.Warnings = []string{}
+		}
+		writeJSON(w, d.Log, http.StatusOK, out)
+	}
+}

@@ -362,6 +362,7 @@ func NewRouter(deps Deps) http.Handler {
 	// prefix rather than each inventing one.
 	apiMux.HandleFunc("GET /api/sessions/{id}/messages/chats", deps.handleSessionMessagesChats())
 	apiMux.HandleFunc("GET /api/sessions/{id}/messages/chats/{chat}/messages", deps.handleSessionMessagesThread())
+	apiMux.HandleFunc("GET /api/sessions/{id}/messages/search", deps.handleSessionMessagesSearch())
 	apiMux.HandleFunc("GET /api/sessions/{id}/file/{file_id}", deps.handleSessionFile())
 	apiMux.HandleFunc("/api/", deps.handleAPINotFound())
 

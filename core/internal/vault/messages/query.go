@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	backup "github.com/novkostya/ios-backup-parser"
@@ -311,4 +313,139 @@ func asRowError(err error, target **backup.RowError) bool {
 		*target = re
 	}
 	return ok
+}
+
+// SearchHit is one message matching a query, with the conversation it belongs to so a surface
+// can offer "go to this message" rather than a body with no home.
+type SearchHit struct {
+	Message
+	ChatIDs []int64
+}
+
+// SearchResult carries hits plus whether searching was possible at all.
+type SearchResult struct {
+	Hits         []SearchHit
+	Warnings     []string
+	LimitClamped bool
+
+	// Searchable is false when this session has no full-text index. A caller must
+	// distinguish it from an empty Hits: NO INDEX is a fact about quince, and NO MATCHES is
+	// a fact about the user's messages. Reporting the first as the second tells someone
+	// their messages do not contain a word nobody looked for.
+	Searchable bool
+}
+
+// ErrEmptyQuery is returned for a blank search term. It is separate from "no matches" for the
+// same reason everything else on this rung is: a caller that submitted nothing gets told so,
+// rather than being shown an empty result that looks like an answer.
+var ErrEmptyQuery = errors.New("messages: empty search query")
+
+// Search finds messages whose body matches term, newest first, and BUILDS THE PROJECTION if
+// this is the first read that needs it.
+//
+// THE TERM IS PASSED AS A BOUND PARAMETER, never interpolated. FTS5 has its own query syntax
+// — prefixes, NEAR, boolean operators, column filters — so a term is still interpreted by the
+// matcher, but it cannot escape into SQL.
+func (r *Reader) Search(ctx context.Context, term string, limit int, onProgress func(Progress)) (SearchResult, error) {
+	if strings.TrimSpace(term) == "" {
+		return SearchResult{}, ErrEmptyQuery
+	}
+	limit, clamped := clampLimit(limit)
+
+	if err := r.ensure(ctx, onProgress); err != nil {
+		return SearchResult{}, err
+	}
+
+	r.mu.Lock()
+	db, warnings, searchable := r.proj, append([]string(nil), r.warnings...), r.searchable
+	r.mu.Unlock()
+
+	out := SearchResult{Warnings: warnings, LimitClamped: clamped, Searchable: searchable}
+	if !searchable {
+		// NOT an error and NOT an empty page: the caller reads Searchable and says so.
+		return out, nil
+	}
+
+	rows, err := db.QueryContext(ctx,
+		`SELECT m.id, m.guid, m.date, m.from_me, m.handle, m.body, m.body_undecoded,
+		        m.assoc_type, m.assoc_guid, m.edited, m.retracted, m.balloon
+		 FROM msg_fts f JOIN msg m ON m.id = f.rowid
+		 WHERE msg_fts MATCH ?
+		 ORDER BY m.date DESC, m.id DESC LIMIT ?`, term, limit)
+	if err != nil {
+		// A malformed FTS5 expression is the CALLER's, not the backup's — an unbalanced
+		// quote or a stray operator. Saying "could not read this backup" would send
+		// someone to look for a damaged database.
+		return SearchResult{}, fmt.Errorf("%w: %v", ErrBadQuery, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var ids []int64
+	for rows.Next() {
+		var m Message
+		var date, edited, retracted, fromMe, undecoded, assocType int64
+		var handle, body, assocGUID, balloon *string
+		if err := rows.Scan(&m.ID, &m.GUID, &date, &fromMe, &handle, &body, &undecoded,
+			&assocType, &assocGUID, &edited, &retracted, &balloon); err != nil {
+			return SearchResult{}, fmt.Errorf("messages: scan search row: %w", err)
+		}
+		m.Time = time.Unix(0, date)
+		m.FromMe, m.BodyUnknown = fromMe != 0, undecoded != 0
+		m.Handle, m.Body = deref(handle), deref(body)
+		m.ReactsTo, m.Balloon = deref(assocGUID), deref(balloon)
+		m.IsTapback = isTapback(assocType)
+		m.Edited, m.Retracted = edited != 0, retracted != 0
+		out.Hits = append(out.Hits, SearchHit{Message: m})
+		ids = append(ids, m.ID)
+	}
+	if err := rows.Err(); err != nil {
+		return SearchResult{}, fmt.Errorf("messages: search rows: %w", err)
+	}
+
+	if err := r.chatsFor(ctx, db, out.Hits, ids); err != nil {
+		return SearchResult{}, err
+	}
+	return out, nil
+}
+
+// ErrBadQuery is returned for a search term FTS5 cannot parse.
+var ErrBadQuery = errors.New("messages: malformed search query")
+
+// chatsFor fills each hit's conversation ids in ONE query rather than one per hit — the same
+// reason attachTo is batched.
+func (r *Reader) chatsFor(ctx context.Context, db *sql.DB, hits []SearchHit, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	q := `SELECT msg_id, chat_id FROM msg_chat WHERE msg_id IN (`
+	args := make([]any, 0, len(ids))
+	for i, id := range ids {
+		if i > 0 {
+			q += ","
+		}
+		q += "?"
+		args = append(args, id)
+	}
+	q += `) ORDER BY msg_id, chat_id`
+
+	rows, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("messages: search chats: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	byMsg := map[int64][]int64{}
+	for rows.Next() {
+		var msgID, chatID int64
+		if err := rows.Scan(&msgID, &chatID); err != nil {
+			return fmt.Errorf("messages: scan search chat: %w", err)
+		}
+		byMsg[msgID] = append(byMsg[msgID], chatID)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("messages: search chat rows: %w", err)
+	}
+	for i := range hits {
+		hits[i].ChatIDs = byMsg[hits[i].ID]
+	}
+	return nil
 }

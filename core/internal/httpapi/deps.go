@@ -497,6 +497,13 @@ type VaultBrowse interface {
 	// blocks for that build, which fits inside the 120 s server write timeout.
 	MessagesThread(sessionID string, chatID int64, cursor string, limit int) (t wire.MessagesThread, code, message string)
 
+	// MessagesSearch searches this session's messages — qn.10 slice 6.
+	//
+	// THE RESULT SAYS WHETHER SEARCHING WAS POSSIBLE. A session with no full-text index
+	// advertises no "search" capability, and a client hides the box rather than showing an
+	// empty result that reads as "you have no messages containing that".
+	MessagesSearch(sessionID, term string, limit int) (s wire.MessagesSearch, code, message string)
+
 	// Overview returns the version's domain totals and capability report — contracts §1's
 	// domain envelope plus qn.9's two additive fields.
 	Overview(sessionID string, q wire.BrowseQuery) (o wire.Overview, code, message string)
@@ -537,6 +544,10 @@ func (UnavailableVaultBrowse) MessagesChats(string) (wire.MessagesChats, string,
 
 func (UnavailableVaultBrowse) MessagesThread(string, int64, string, int) (wire.MessagesThread, string, string) {
 	return wire.MessagesThread{}, wire.VaultCodeUnavailable, vaultUnavailable
+}
+
+func (UnavailableVaultBrowse) MessagesSearch(string, string, int) (wire.MessagesSearch, string, string) {
+	return wire.MessagesSearch{}, wire.VaultCodeUnavailable, vaultUnavailable
 }
 
 func (UnavailableVaultBrowse) Overview(string, wire.BrowseQuery) (wire.Overview, string, string) {

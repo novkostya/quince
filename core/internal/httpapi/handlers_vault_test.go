@@ -23,6 +23,8 @@ type stubVault struct {
 	versionOverview wire.VersionOverview
 	messagesChats   wire.MessagesChats
 	messagesThread  wire.MessagesThread
+	messagesSearch  wire.MessagesSearch
+	lastTerm        string
 	lastChatID      int64
 	lastCursor      string
 	lastLimit       int
@@ -51,6 +53,11 @@ func (s *stubVault) Overview(_ string, q wire.BrowseQuery) (wire.Overview, strin
 	s.lastQ = q
 	return s.overview, s.code, s.message
 }
+func (s *stubVault) MessagesSearch(sessionID, term string, limit int) (wire.MessagesSearch, string, string) {
+	s.lastSession, s.lastTerm, s.lastLimit = sessionID, term, limit
+	return s.messagesSearch, s.code, s.message
+}
+
 func (s *stubVault) MessagesThread(sessionID string, chatID int64, cursor string, limit int) (wire.MessagesThread, string, string) {
 	s.lastSession, s.lastChatID, s.lastCursor, s.lastLimit = sessionID, chatID, cursor, limit
 	return s.messagesThread, s.code, s.message
@@ -867,6 +874,58 @@ func TestMessagesThreadIsUnavailableWithNoVaultWired(t *testing.T) {
 	t.Cleanup(srv.Close)
 	client := authedClient(t, srv)
 	res, err := client.Get(srv.URL + "/api/sessions/s1/messages/chats/1/messages")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", res.StatusCode)
+	}
+}
+
+// A session with no full-text index must NOT advertise "search". The client hides the box;
+// showing one that returns nothing would read as "you have no messages containing that".
+func TestMessagesSearchOmitsTheCapabilityWhenThereIsNoIndex(t *testing.T) {
+	stub := &stubVault{messagesSearch: wire.MessagesSearch{
+		Capabilities: []string{"threads", "attachments"}, // no "search"
+		Warnings:     []string{"search is unavailable for this session"},
+		Page:         wire.MessagesSearchPage{Items: []wire.MessagesSearchHit{}},
+	}}
+	srv, client := vaultServer(t, stub)
+	res, err := client.Get(srv.URL + "/api/sessions/s1/messages/search?q=hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	body, _ := io.ReadAll(res.Body)
+	if strings.Contains(string(body), `"search"`) {
+		t.Errorf("search advertised with no index: %s", body)
+	}
+	// CONTROL: the other capabilities must still be there, or this passes on an empty list.
+	if !strings.Contains(string(body), `"threads"`) {
+		t.Errorf("control failed: no capabilities at all, so the assertion above proves nothing: %s", body)
+	}
+}
+
+func TestMessagesSearchPassesTermAndLimit(t *testing.T) {
+	stub := &stubVault{}
+	srv, client := vaultServer(t, stub)
+	res, err := client.Get(srv.URL + "/api/sessions/s3/messages/search?q=weekend&limit=5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if stub.lastSession != "s3" || stub.lastTerm != "weekend" || stub.lastLimit != 5 {
+		t.Errorf("seam got session=%q term=%q limit=%d", stub.lastSession, stub.lastTerm, stub.lastLimit)
+	}
+}
+
+func TestMessagesSearchIsUnavailableWithNoVaultWired(t *testing.T) {
+	deps := testDeps(t)
+	srv := httptest.NewServer(NewRouter(deps))
+	t.Cleanup(srv.Close)
+	client := authedClient(t, srv)
+	res, err := client.Get(srv.URL + "/api/sessions/s1/messages/search?q=x")
 	if err != nil {
 		t.Fatal(err)
 	}
