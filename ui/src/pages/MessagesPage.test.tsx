@@ -67,6 +67,22 @@ function renderPage() {
   return { ...r, qc };
 }
 
+
+// renderUnresolved renders WITHOUT seeding the versions store, which is the whole point: the page
+// then has to resolve the version through the `/api/versions` fallback, and the three states below
+// are what it shows while it cannot. `renderPage` seeds the store, so it can never reach them.
+function renderUnresolved() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter initialEntries={["/versions/V1/messages"]}>
+        <Routes>
+          <Route path="/versions/:id/messages" element={<MessagesPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
 async function openAndUnlock() {
   fireEvent.click(await screen.findByRole("button", { name: /^unlock$/i }));
   fireEvent.submit(document.querySelector("form") as HTMLFormElement);
@@ -151,5 +167,60 @@ describe("MessagesPage", () => {
     // different facts, and rendering the first as the second is a claim about the user's data
     // that nobody established.
     expect(await screen.findByText(/no Messages database quince can read/i)).toBeTruthy();
+  });
+
+  // quince#1518 — THE THREE STATES OF AN UNRESOLVED VERSION.
+  //
+  // Each asserts the SAME structural claim as well as its own sentence: no Unlock button. A
+  // control that opens a dialog which cannot render is the defect; the wording is how the user
+  // learns which of three things happened.
+  it("says it is still loading, and offers no dead Unlock, before the version list arrives", async () => {
+    useVersionsStore.setState({ byId: {}, order: [] });
+    // Never resolves: this is the cold-deep-link window the /api/versions fallback exists for.
+    vi.spyOn(api, "get").mockImplementation(() => new Promise(() => {}));
+    renderUnresolved();
+
+    expect(await screen.findByText("Loading…")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^unlock$/i })).toBeNull();
+  });
+
+  it("says the backup is not in the list, and offers no dead Unlock, when it genuinely is not", async () => {
+    useVersionsStore.setState({ byId: {}, order: [] });
+    vi.spyOn(api, "get").mockResolvedValue({ versions: [] });
+    renderUnresolved();
+
+    expect(await screen.findByText(/not in this quince's version list/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^unlock$/i })).toBeNull();
+  });
+
+  it("shows the list fetch's own failure rather than reporting the backup absent", async () => {
+    useVersionsStore.setState({ byId: {}, order: [] });
+    vi.spyOn(api, "get").mockRejectedValue(new APIError(503, "unavailable", "the storage subsystem is not answering"));
+    renderUnresolved();
+
+    // THE STATE THAT LIES IF COLLAPSED. quince did not check the list, it failed to read it, and
+    // the id in the address bar may be perfectly good — so "not in the list" would send the
+    // reader hunting a typo they did not make.
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.queryByText(/not in this quince's version list/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /^unlock$/i })).toBeNull();
+  });
+
+  // quince#1517 review, finding 2 — the frame that showed the raw sentence.
+  it("never paints the raw server error for a session that has gone", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({ id: "S1", version_id: "V1", expires_at: "" });
+    vi.spyOn(api, "get").mockImplementation(async (url: string) => {
+      if (url.includes("/messages/chats")) throw new APIError(409, "locked", "session not found or expired");
+      return { versions: [ver()] };
+    });
+    renderPage();
+    await openAndUnlock();
+    await screen.findByText(/timed out, or quince restarted/i);
+
+    // `expired` is state set in an effect, so it is false on the render that first sees the 409.
+    // Without the `!sessionGone` guard that render paints the adapter's raw sentence in danger
+    // red for one frame. The END state was always right, which is why findByText passed either
+    // way and this assertion is the one that can see the difference.
+    expect(screen.queryByText(/session not found or expired/i)).toBeNull();
   });
 });
