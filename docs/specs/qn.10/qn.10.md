@@ -327,7 +327,9 @@ path cannot disagree with itself.
 
 **And it costs a disclosure, filed rather than absorbed** — quince#1535. The stale-attachment
 warning came from the build's reconcile, so a reader who only opens conversations is no longer
-told when `cache_has_attachments` and the join disagree. The check is not gone; its reach is.
+told when `cache_has_attachments` is 0 on messages that DO have join rows — real attachments made
+unreachable, which the build catches by comparing totals. The opposite direction was never detected
+on any path (quince#1537). The check is not gone; its reach is.
 
 ### D2b — The vault is held for `Materialize` ONLY. The scan runs outside the session lock
 

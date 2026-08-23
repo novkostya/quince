@@ -680,26 +680,50 @@ func (s *Service) messagesReader(sessionID string) (*messages.Reader, string, st
 	return reader, "", ""
 }
 
-// MessagesThread serves one page of a conversation — qn.10 slice 4.
+// MessagesThread serves one page of a conversation — qn.10 slice 4, made lazy in quince#1531.
 //
-// THIS IS THE ROUTE THAT PAYS FOR THE PROJECTION. Opening a conversation for the first time in
-// a session builds it — ~18 s on a real backup (qn.10 D2) — and every page after that is a
-// seek measured at 265 µs. The request BLOCKS for that build: writeTimeout is 120 s
-// (cmd/quince/main.go), so it completes, and blocking is the honest shape for a synchronous
-// REST surface.
+// THIS ROUTE NO LONGER PAYS FOR THE PROJECTION, AND THIS COMMENT SAID IT DID. It read "the route
+// that pays for the projection … ~18 s on a real backup … the request BLOCKS for that build".
+// Since quince#1531 it pages through the parser against Apple's own covering index and builds
+// nothing: **0.128 s** for the first conversation opened in a session, measured end to end, and
+// ~72 ms for every page after.
 //
-// PROGRESS IS REPORTED OVER THE SOCKET, NOT IN THIS RESPONSE. A synchronous JSON response has
-// nowhere to put it, so the reader's onProgress callback publishes `messages.indexing` frames
-// instead (D3, contracts §3) — `indexingFor` builds the callback and throttles it. The frames
-// carry a live count and no total, so a surface renders an indeterminate indicator; the
-// response arriving is what says the scan finished.
+// NOTHING IS REPORTED HERE BECAUSE NOTHING WAITS. This route used to narrate the build over the
+// socket; there is no build to narrate.
+//
+// SO NO CALLBACK IS PASSED, and that is a deletion rather than a nil. `indexingFor` resolves
+// session → version → device, which is a storage row read, and handing it to a route that
+// discards it would pay that on every page for a publisher that can never fire.
+//
+// `messages.indexing` IS NOT ORPHANED — it moved with the scan. MessagesSearch still passes
+// `indexingFor`, and that is where the count is earned now: searching is the one action that
+// asks for something needing a full read.
 func (s *Service) MessagesThread(sessionID string, chatID int64, cursor string, limit int) (wire.MessagesThread, string, string) {
+	//
+	// THIS IS THE ROUTE THAT PAYS FOR THE PROJECTION. Opening a conversation for the first time in
+	// a session builds it — ~18 s on a real backup (qn.10 D2) — and every page after that is a
+	// seek measured at 265 µs. The request BLOCKS for that build: writeTimeout is 120 s
+	// (cmd/quince/main.go), so it completes, and blocking is the honest shape for a synchronous
+	// REST surface.
+	//
+	//
+	// NOTHING IS REPORTED HERE BECAUSE NOTHING WAITS. This route used to build the projection and
+	// narrate it over the socket; since quince#1531 it pages through the parser and builds nothing —
+	// 0.128 s for the first conversation opened in a session, measured end to end.
+	//
+	// SO NO CALLBACK IS PASSED, and that is a deletion rather than a nil. `indexingFor` resolves
+	// session → version → device, which is a storage row read, and handing it to a route that
+	// discards it would pay that on every page for a publisher that can never fire.
+	//
+	// `messages.indexing` IS NOT ORPHANED — it moved with the scan. MessagesSearch still passes
+	// `indexingFor`, and that is where the count is earned now: searching is the one action that
+	// asks for something needing a full read.
 	r, code, msg := s.messagesReader(sessionID)
 	if code != "" {
 		return wire.MessagesThread{}, code, msg
 	}
 
-	page, err := r.Thread(context.Background(), chatID, cursor, limit, s.indexingFor(sessionID))
+	page, err := r.Thread(context.Background(), chatID, cursor, limit, nil)
 	if err != nil {
 		switch {
 		case errors.Is(err, messages.ErrUnsupported):

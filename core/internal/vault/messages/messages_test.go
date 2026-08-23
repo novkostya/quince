@@ -244,14 +244,19 @@ func allOf(t *testing.T, r *messages.Reader, chatID int64) []messages.Message {
 // quietly shorter list. The healthy fixture is the control.
 // TestStaleAttachmentCacheWarns — ON THE SEARCH PATH, WHICH IS THE ONE THAT STILL BUILDS.
 //
-// THIS TEST MOVED, AND THE MOVE IS A DISCLOSURE LOSS WORTH KNOWING ABOUT (quince#1535). The
-// warning comes from the projection build's reconcile: `cache_has_attachments` says a message
-// has attachments and the join has none, so rows were dropped and the build says so.
+// THIS TEST MOVED, AND THE MOVE IS A DISCLOSURE LOSS WORTH KNOWING ABOUT (quince#1535).
+//
+// THE DIRECTION MATTERS AND IS EASY TO GET BACKWARDS — I did, and the review caught it. The
+// reconcile catches `cache_has_attachments = 0` on messages that DO have join rows: the parser
+// gates fillAttachments on that flag, so real attachments become unreachable, and `joins >
+// yielded` sees the gap. The OPPOSITE case — flag set, no join rows — produces no discrepancy
+// at all and was never detected on any path (quince#1537).
+//
+// IT IS A TOTALS COMPARISON ACROSS THE WHOLE DATABASE, which is why a per-message check cannot
+// replace it: the evidence is two counts, not one row.
 //
 // Thread no longer builds (quince#1531), so **a reader who only opens conversations is no
-// longer told**. The parser gates `fillAttachments` on that same flag and returns an empty set
-// without reporting the discrepancy, so quince cannot detect it on the page path without the
-// parser exposing the flag — which is a library change, not a line here.
+// longer told** that attachments exist and cannot be reached.
 //
 // Kept pointed at Search rather than deleted, because the reconcile is still real and still
 // worth guarding; what is gone is its reach, not the check.
