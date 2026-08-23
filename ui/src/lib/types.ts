@@ -1001,3 +1001,44 @@ export interface DomainCapability {
   // issue needs; without it "unsupported" is a dead end for whoever adds support.
   fingerprint?: string;
 }
+
+// MessagesChats is GET /api/sessions/{id}/messages/chats — qn.10 slice 3, in contracts §1's
+// frozen domain envelope.
+//
+// IT IS NOT PAGINATED and `next_cursor` is always absent: the conversation list is bounded by
+// how many people someone has talked to rather than by how much they have said — 390
+// conversations answered in 23 ms on a real backup. The `page` wrapper stays because the
+// envelope's shape is frozen.
+export interface MessagesChats {
+  // "search" appears only when this session has a full-text index (qn.10 D4). A surface reads
+  // this and HIDES the search box rather than offering one that returns nothing: an empty
+  // result set is a claim about the user's messages, a missing capability is a fact about
+  // quince.
+  capabilities: string[];
+  adapter_version: string;
+  warnings: string[];
+  // Set when the adapter cannot serve this backup at all. It carries TWO distinct causes —
+  // no readable Messages database, and a schema with no conversation tables — and a surface
+  // shows the sentence rather than an empty list (qn.10 D7).
+  unsupported_reason: string | null;
+  page: { items: MessagesChat[]; next_cursor?: string };
+}
+
+// MessagesChat is one conversation.
+//
+// NO PREVIEW AND NO UNREAD COUNT, and their absence is a design decision rather than an
+// oversight: both would need the session projection, whose ~18 s build is deliberately
+// deferred until a conversation is opened (qn.10 D2). Putting either here would drag that
+// cost onto the FIRST Messages screen.
+export interface MessagesChat {
+  id: number;
+  guid: string;
+  // Often empty, INCLUDING for group chats — a surface falls back to the participants rather
+  // than rendering a blank row.
+  display_name?: string;
+  identifier?: string;
+  is_group: boolean;
+  // EMPTY means "not recorded", never "a conversation with nobody": the schema's `handles`
+  // unit can be absent, and the capability report is what says which.
+  participants?: string[];
+}
