@@ -490,6 +490,13 @@ type VaultBrowse interface {
 	// (qn.10 D2). A preview or an unread count on this route would undo that.
 	MessagesChats(sessionID string) (c wire.MessagesChats, code, message string)
 
+	// MessagesThread returns one page of a conversation, newest first — qn.10 slice 4.
+	//
+	// IT IS THE ROUTE THAT PAYS FOR THE PROJECTION: the first conversation opened in a
+	// session builds it (~18 s), and every page after is a 265 µs seek. The request
+	// blocks for that build, which fits inside the 120 s server write timeout.
+	MessagesThread(sessionID string, chatID int64, cursor string, limit int) (t wire.MessagesThread, code, message string)
+
 	// Overview returns the version's domain totals and capability report — contracts §1's
 	// domain envelope plus qn.9's two additive fields.
 	Overview(sessionID string, q wire.BrowseQuery) (o wire.Overview, code, message string)
@@ -526,6 +533,10 @@ func (UnavailableVaultBrowse) VersionOverview(string) (wire.VersionOverview, str
 
 func (UnavailableVaultBrowse) MessagesChats(string) (wire.MessagesChats, string, string) {
 	return wire.MessagesChats{}, wire.VaultCodeUnavailable, vaultUnavailable
+}
+
+func (UnavailableVaultBrowse) MessagesThread(string, int64, string, int) (wire.MessagesThread, string, string) {
+	return wire.MessagesThread{}, wire.VaultCodeUnavailable, vaultUnavailable
 }
 
 func (UnavailableVaultBrowse) Overview(string, wire.BrowseQuery) (wire.Overview, string, string) {

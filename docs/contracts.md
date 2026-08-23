@@ -2466,6 +2466,57 @@ messages — only the grouping is missing — and they have different remedies (
 **`display_name` is often empty, including for group chats**, and `participants` is empty when the
 schema's `handles` unit is absent. Empty there means *not recorded*, never *a conversation with
 nobody*; the capability report is what says which.
+### `GET /api/sessions/{id}/messages/chats/{chat}/messages?cursor&limit` — qn.10 slice 4
+
+One page of a conversation, **newest first**, in the same envelope.
+
+```jsonc
+{"capabilities": ["threads", "attachments"],
+ "adapter_version": "messages-quince.v1",
+ "warnings": [],
+ "unsupported_reason": null,
+ "page": {"items": [
+   {"id": 41, "guid": "invented-msg-41", "time": "2026-08-23T00:00:00Z",
+    "from_me": false, "handle": "+15550100001", "body": "see you then"},
+   {"id": 40, "guid": "invented-msg-40", "time": "2026-08-22T23:59:00Z",
+    "from_me": true, "body": "", "body_unknown": true},
+   {"id": 39, "guid": "invented-msg-39", "time": "2026-08-22T23:58:00Z",
+    "from_me": false, "handle": "+15550100001", "body": "look at this",
+    "attachments": [{"domain": "MediaDomain",
+                     "relative_path": "Library/SMS/Attachments/aa/00/invented.heic",
+                     "mime_type": "image/heic", "name": "invented.heic",
+                     "bytes": 4096, "present": true}]}
+ ], "next_cursor": "eyJkIjoxNzU1OTA0MzQwMDAwMDAwMDAwLCJpIjozOX0"}}
+```
+
+**THIS ROUTE PAYS FOR THE PROJECTION.** The first conversation opened in a session builds it —
+**~18 s** on a real backup — and every page after is a **265 µs** seek. The request blocks for
+that build; the server's write timeout is 120 s, so it completes. **Progress is not reported on
+this route** and cannot be, because a synchronous JSON response has nowhere to put it: qn.10 D2
+makes that report load-bearing at 18 s, and delivering it is the surface slice's, over the
+WebSocket that already carries job progress.
+
+**`body` and `body_unknown` are not the same absence.** An attachment-only message is legitimately
+empty; a message whose only body source could not be decoded is **unknown**. `body_unknown` is what
+separates them, and a surface that renders the second as an empty bubble has invented a fact.
+
+**`present` is sent explicitly, including when false** — it is not `omitempty`. A client must be
+able to tell *the backup does not hold this file* from *the field is missing*, and offering a
+download link for bytes that are not there is the failure it prevents. When false, `domain` and
+`relative_path` are absent, because there is nothing to fetch.
+
+**`next_cursor` is absent on the last page**, never present-but-empty. Ordering is
+`(date DESC, id DESC)`: message dates are not unique, and a date-only cursor would skip or repeat
+rows at a tie. **The cursor is opaque** — nothing outside the server may construct or parse one, and
+a marker quince did not issue is a **400**, not a 500: *reload the page* and *this backup is
+damaged* are different remedies.
+
+**A clamped `limit` adds a warning** rather than truncating quietly, exactly as `browse` discloses
+its own.
+
+**A non-numeric `{chat}` is a 400, not a 404.** Answering 404 would say the conversation does not
+exist when what happened is that none was asked for.
+
 
 ## 2. Objects
 

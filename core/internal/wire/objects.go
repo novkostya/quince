@@ -1409,3 +1409,85 @@ type MessagesChat struct {
 	// report names: empty here means "not recorded", never "a conversation with nobody".
 	Participants []string `json:"participants,omitempty"`
 }
+
+// MessagesThread is one page of a conversation — qn.10 slice 4, in contracts §1's frozen
+// domain envelope.
+//
+// UNLIKE THE CHATS LIST, THIS ONE PAGES. A conversation is bounded by how much was said
+// rather than by how many people said it: the largest on a real backup holds 98,598 messages.
+type MessagesThread struct {
+	Capabilities   []string `json:"capabilities"`
+	AdapterVersion string   `json:"adapter_version"`
+	Warnings       []string `json:"warnings"`
+
+	// UnsupportedReason carries the same two distinct causes as the chats list, plus the
+	// case where the conversation itself is not in this backup (qn.10 D7).
+	UnsupportedReason *string `json:"unsupported_reason"`
+
+	Page MessagesThreadPage `json:"page"`
+}
+
+// MessagesThreadPage is the envelope's `page`. next_cursor is absent on the last page — never
+// an empty-but-present cursor, which is how an infinite scroll spins forever.
+type MessagesThreadPage struct {
+	Items      []MessagesMessage `json:"items"`
+	NextCursor string            `json:"next_cursor,omitempty"`
+}
+
+// MessagesMessage is one message.
+//
+// NEWEST FIRST, which is where a reader starts, and the cursor walks backwards in time.
+type MessagesMessage struct {
+	ID   int64  `json:"id"`
+	GUID string `json:"guid"`
+
+	// Time is RFC3339, matching every other timestamp on the wire.
+	Time string `json:"time"`
+
+	FromMe bool `json:"from_me"`
+
+	// Handle is the remote party for a received message, and EMPTY for a sent one — the
+	// counterpart of a sent message lives on the chat, not on the message.
+	Handle string `json:"handle,omitempty"`
+
+	// Body is the message text. EMPTY IS AMBIGUOUS ON ITS OWN and BodyUnknown is what
+	// resolves it: an attachment-only message is legitimately empty, while a message whose
+	// only body source could not be decoded is UNKNOWN. A surface that renders the second
+	// as an empty bubble has invented a fact (qn.10 D7).
+	Body        string `json:"body,omitempty"`
+	BodyUnknown bool   `json:"body_unknown,omitempty"`
+
+	Attachments []MessagesAttachment `json:"attachments,omitempty"`
+
+	// IsTapback marks a reaction rather than a message; ReactsTo is the guid it reacts to.
+	IsTapback bool   `json:"is_tapback,omitempty"`
+	ReactsTo  string `json:"reacts_to,omitempty"`
+
+	// Edited and Retracted are distinct states: a message that was changed, and one that
+	// was unsent. Neither is an empty message.
+	Edited    bool `json:"edited,omitempty"`
+	Retracted bool `json:"retracted,omitempty"`
+
+	// Balloon names an app message (Apple Pay, a poll, a sticker) whose real content lives
+	// in a payload quince does NOT decode. The field exists so a surface can say "an
+	// <app> message" rather than rendering a blank.
+	Balloon string `json:"balloon,omitempty"`
+}
+
+// MessagesAttachment is one file on a message.
+type MessagesAttachment struct {
+	// Domain and RelativePath locate the bytes for qn.8's existing download route. They are
+	// EMPTY when Present is false.
+	Domain       string `json:"domain,omitempty"`
+	RelativePath string `json:"relative_path,omitempty"`
+
+	MIMEType string `json:"mime_type,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Bytes    int64  `json:"bytes,omitempty"`
+	Sticker  bool   `json:"sticker,omitempty"`
+
+	// Present is false when the backup does not hold the file — not downloaded, purged, or
+	// iCloud-only. THE FIELD EXISTS SO A SURFACE OFFERS NO LINK rather than one that
+	// cannot resolve, and so "absent" is never confused with "zero bytes".
+	Present bool `json:"present"`
+}

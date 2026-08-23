@@ -339,6 +339,26 @@ order, so a cursor means the same thing in the projection and in the source. `li
 **discloses** its clamp exactly as `browse` does. Newest-first for the thread, because that is
 where a reader starts.
 
+**A CURSOR QUINCE DID NOT ISSUE IS A 400, NOT A 500.** `ErrBadCursor` is its own error at the
+reader, so *"that page marker is not one quince issued"* and *"could not read this conversation"*
+stay apart — **reload the page** and **this backup is damaged** are different remedies, and
+*troubleshooting is actionable* names collapsing them as a defect even when both sentences are
+true. Slice 4 found this by writing the service against an `ErrBadCursor` that did not exist yet:
+the reader was returning an unwrapped error, so a mistyped cursor would have been reported as an
+unreadable backup.
+
+**THE THREAD ROUTE IS THE ONE THAT PAYS FOR THE PROJECTION, AND IT BLOCKS.** ~18 s on the first
+conversation opened in a session; 265 µs for every page after. The server's write timeout is 120 s
+(`cmd/quince/main.go`), so the request completes — **checked rather than assumed**, because a
+handler that cannot finish inside the server's own deadline fails in a way no test of the handler
+would show.
+
+**Progress is NOT reported on this route and cannot be**: a synchronous JSON response has nowhere
+to put it. The reader takes an `onProgress` callback and slice 4 passes `nil` deliberately.
+Delivering it is the surface slice's, over the WebSocket that already carries job progress — the
+callback is the seam it attaches to. Named here so that *"the route reports no progress"* is a
+recorded decision rather than something slice 7 discovers.
+
 ### D4 — Search is FTS5 over the projection, session-scoped, and it is a CAPABILITY that can be off
 
 An FTS5 table built alongside the projection in the same scan. It advertises `"search"` in the
@@ -541,8 +561,8 @@ Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewa
 | **2a** | `msgfixture` — the fixture builder every later slice reads from, with G5 asserted | **merged** — quince#1496 |
 | **2b** | the domain reader + the session projection and its one scan (D2) | **merged** — quince#1497 |
 | **3** | `GET /api/sessions/{id}/messages/chats` (D3, contracts §1) | **merged** — quince#1498 |
-| **3b** | the scan's materialize key set asserted, not documented (D2b) | **open** |
-| **4** | `GET …/chats/{chat}/messages`, cursored (D3) | not open |
+| **3b** | the scan's materialize key set asserted, not documented (D2b) | **merged** — quince#1499 |
+| **4** | `GET …/chats/{chat}/messages`, cursored (D3) | **open** |
 | **5** | attachments: the join to `qn.8`'s download route (D6) | not open |
 | **6** | FTS5 search and its capability gate (D4) | not open |
 | **7** | the surface (D9), then G6 to the Operator | not open |

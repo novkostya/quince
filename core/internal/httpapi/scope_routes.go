@@ -180,6 +180,10 @@ var routeScope = map[string]scopeClass{
 	// scopes.
 	"GET /api/sessions/{id}/messages/chats": scopedOwnDevice,
 
+	// qn.10 slice 4 — the message BODIES, so if anything on this rung is that device's
+	// alone, it is this.
+	"GET /api/sessions/{id}/messages/chats/{chat}/messages": scopedOwnDevice,
+
 	// qn.9 slice 6 — the PRE-UNLOCK tier. It needs no session and no password, and that
 	// changes nothing about WHOSE it is: it describes one version of one device, so a
 	// scoped principal reaches it exactly when that device is theirs. Needing no unlock is

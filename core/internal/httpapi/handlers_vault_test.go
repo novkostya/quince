@@ -22,6 +22,10 @@ type stubVault struct {
 	overview        wire.Overview
 	versionOverview wire.VersionOverview
 	messagesChats   wire.MessagesChats
+	messagesThread  wire.MessagesThread
+	lastChatID      int64
+	lastCursor      string
+	lastLimit       int
 	entry           wire.FileEntry
 	content         string
 	code            string
@@ -47,6 +51,11 @@ func (s *stubVault) Overview(_ string, q wire.BrowseQuery) (wire.Overview, strin
 	s.lastQ = q
 	return s.overview, s.code, s.message
 }
+func (s *stubVault) MessagesThread(sessionID string, chatID int64, cursor string, limit int) (wire.MessagesThread, string, string) {
+	s.lastSession, s.lastChatID, s.lastCursor, s.lastLimit = sessionID, chatID, cursor, limit
+	return s.messagesThread, s.code, s.message
+}
+
 func (s *stubVault) MessagesChats(sessionID string) (wire.MessagesChats, string, string) {
 	s.lastSession = sessionID
 	return s.messagesChats, s.code, s.message
@@ -758,5 +767,111 @@ func TestMessagesChatsPassesTheSessionID(t *testing.T) {
 	defer func() { _ = res.Body.Close() }()
 	if stub.lastSession != "sess-42" {
 		t.Errorf("session = %q, want sess-42", stub.lastSession)
+	}
+}
+
+// A non-numeric conversation id is a MALFORMED REQUEST, not a missing conversation. Answering
+// 404 would tell a caller the conversation does not exist when what happened is that they did
+// not ask for one — two causes with different remedies.
+func TestMessagesThreadRejectsANonNumericChatID(t *testing.T) {
+	stub := &stubVault{}
+	srv, client := vaultServer(t, stub)
+	res, err := client.Get(srv.URL + "/api/sessions/s1/messages/chats/not-a-number/messages")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", res.StatusCode)
+	}
+	// THE CONTROL: the seam must not have been reached at all. A 400 produced *after*
+	// calling through would still be wrong, and this is what tells the two apart.
+	if stub.lastChatID != 0 {
+		t.Errorf("the seam was called with chat %d despite a malformed id", stub.lastChatID)
+	}
+}
+
+func TestMessagesThreadPassesChatCursorAndLimit(t *testing.T) {
+	stub := &stubVault{}
+	srv, client := vaultServer(t, stub)
+	res, err := client.Get(srv.URL + "/api/sessions/s9/messages/chats/42/messages?cursor=abc&limit=7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if stub.lastSession != "s9" || stub.lastChatID != 42 || stub.lastCursor != "abc" || stub.lastLimit != 7 {
+		t.Errorf("seam got session=%q chat=%d cursor=%q limit=%d",
+			stub.lastSession, stub.lastChatID, stub.lastCursor, stub.lastLimit)
+	}
+}
+
+func TestMessagesThreadRejectsANonNumericLimit(t *testing.T) {
+	srv, client := vaultServer(t, &stubVault{})
+	res, err := client.Get(srv.URL + "/api/sessions/s1/messages/chats/1/messages?limit=abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", res.StatusCode)
+	}
+}
+
+// body_unknown must survive to the wire. It is the field that stops a surface rendering an
+// undecodable message as an empty bubble, and `omitempty` on a bool means it is present only
+// when true — which is correct, and worth asserting rather than assuming.
+func TestMessagesThreadCarriesBodyUnknownToTheWire(t *testing.T) {
+	stub := &stubVault{messagesThread: wire.MessagesThread{
+		Page: wire.MessagesThreadPage{Items: []wire.MessagesMessage{
+			{ID: 1, GUID: "g1", Time: "2026-08-23T00:00:00Z", BodyUnknown: true},
+			{ID: 2, GUID: "g2", Time: "2026-08-23T00:00:01Z", Body: "ordinary"},
+		}},
+	}}
+	srv, client := vaultServer(t, stub)
+	res, err := client.Get(srv.URL + "/api/sessions/s1/messages/chats/1/messages")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	body, _ := io.ReadAll(res.Body)
+	if !strings.Contains(string(body), `"body_unknown":true`) {
+		t.Errorf("body_unknown missing from the wire: %s", body)
+	}
+}
+
+// An attachment quince cannot serve must say so. `present` is NOT omitempty precisely so
+// false is on the wire — a surface must be able to tell "absent" from "field missing", and
+// offering a download link for a file the backup does not hold is the failure this prevents.
+func TestMessagesThreadSendsAttachmentPresenceExplicitly(t *testing.T) {
+	stub := &stubVault{messagesThread: wire.MessagesThread{
+		Page: wire.MessagesThreadPage{Items: []wire.MessagesMessage{{
+			ID: 1, GUID: "g1", Time: "2026-08-23T00:00:00Z",
+			Attachments: []wire.MessagesAttachment{{Name: "gone.jpg", Present: false}},
+		}}},
+	}}
+	srv, client := vaultServer(t, stub)
+	res, err := client.Get(srv.URL + "/api/sessions/s1/messages/chats/1/messages")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	body, _ := io.ReadAll(res.Body)
+	if !strings.Contains(string(body), `"present":false`) {
+		t.Errorf("want an explicit present:false: %s", body)
+	}
+}
+
+func TestMessagesThreadIsUnavailableWithNoVaultWired(t *testing.T) {
+	deps := testDeps(t)
+	srv := httptest.NewServer(NewRouter(deps))
+	t.Cleanup(srv.Close)
+	client := authedClient(t, srv)
+	res, err := client.Get(srv.URL + "/api/sessions/s1/messages/chats/1/messages")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", res.StatusCode)
 	}
 }
