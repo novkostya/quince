@@ -1,12 +1,12 @@
 package messages_test
 
 import (
+	"github.com/novkostya/quince/core/internal/vault"
 	"testing"
 
 	"github.com/novkostya/ios-backup-crypt/fixture"
 	parser "github.com/novkostya/ios-backup-parser/messages"
 
-	"github.com/novkostya/quince/core/internal/vault"
 	"github.com/novkostya/quince/core/internal/vault/messages"
 	"github.com/novkostya/quince/core/internal/vault/messages/msgfixture"
 	"github.com/novkostya/quince/core/internal/vault/parserfs"
@@ -111,5 +111,76 @@ func TestTheGuardDetectsAnOffKeyMaterialize(t *testing.T) {
 	}
 	if off[0].Domain != "MediaDomain" {
 		t.Errorf("off-key = %+v, want the MediaDomain request", off[0])
+	}
+}
+
+// THE PROPERTY, MEASURED AT THE SEAM WHERE IT IS TRUE OR FALSE: the scan must reach the vault
+// ZERO times.
+//
+// TestScanMaterializesNothingBeyondThePreMaterializedFile asserts what the scan ASKS the
+// filesystem for. This asserts what the filesystem could not answer from memory and had to go
+// to the vault for — and quince#1483 is the gap between those two questions: Materialize was
+// memoised so its calls never reached the vault, Exists was not, and the earlier guard counted
+// only Materialize and read as though it proved the scan touched nothing.
+//
+// D2b runs this scan outside registry.With, and vault.Vault makes no concurrency promise.
+func TestScanReachesTheVaultZeroTimes(t *testing.T) {
+	data, err := msgfixture.Build(t.TempDir(), msgfixture.Spec{Messages: 40})
+	if err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	dir := t.TempDir()
+	if _, err := fixture.Build(dir, fixture.Spec{Unencrypted: true, Files: []fixture.File{
+		{Domain: msgfixture.Domain, RelativePath: msgfixture.RelativePath, Flags: 1, Data: data},
+	}}); err != nil {
+		t.Fatalf("backup: %v", err)
+	}
+	inner, err := vault.OpenUnencrypted(dir)
+	if err != nil {
+		t.Fatalf("vault: %v", err)
+	}
+	t.Cleanup(func() { _ = inner.Close() })
+	if _, err := inner.Unlock(t.Context(), ""); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+
+	counting := msgfixture.NewCountingVault(inner)
+	scratch := t.TempDir()
+	fsys, err := parserfs.New(counting, scratch)
+	if err != nil {
+		t.Fatalf("parserfs: %v", err)
+	}
+	r, err := messages.New(fsys, scratch)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = r.Close() })
+
+	// Phase 1 — everything the service does while HOLDING the session lock.
+	if _, err := fsys.Materialize(parser.Domain, parser.RelativePath); err != nil {
+		t.Fatalf("pre-materialize: %v", err)
+	}
+	if _, err := fsys.Exists(parser.Domain, parser.RelativePath); err != nil {
+		t.Fatalf("pre-exists: %v", err)
+	}
+
+	// THE CONTROL: phase 1 must have reached the vault, or the vault is not wired through
+	// this FS at all and the assertion below would pass on a stub.
+	if len(counting.Calls()) == 0 {
+		t.Fatal("control failed: the pre-materialize reached the vault zero times, so this test is not measuring the vault")
+	}
+
+	counting.Reset()
+
+	// Phase 2 — the build, which the service runs OUTSIDE the lock.
+	if _, err := r.Thread(t.Context(), 1, "", 10, nil); err != nil {
+		t.Fatalf("Thread: %v", err)
+	}
+
+	if calls := counting.Calls(); len(calls) != 0 {
+		t.Errorf("the scan reached the vault %d time(s): %v\n"+
+			"vault.Vault makes no concurrency promise and the registry serialises access, so a "+
+			"call from here runs unsynchronised against every other request on this session "+
+			"(qn.10 D2b, quince#1483)", len(calls), calls)
 	}
 }
