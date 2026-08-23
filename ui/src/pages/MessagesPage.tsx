@@ -29,7 +29,7 @@ import { useMessagesIndexingStore } from "@/stores/messagesIndexing";
 //
 // THIS SCREEN COSTS NOTHING TO OPEN, AND THAT IS THE POINT OF D2. The conversation list is answered
 // live off the parser — 770 ms on the first call in a session, 9.5 ms warm, for 390 conversations
-// on a real backup (measured 2026-08-23) — and builds no projection. The ~11 s scan
+// on a real backup (measured 2026-08-23) — and builds no projection. The ~18 s scan
 // belongs to opening a conversation (7c-2b), which is why nothing here previews a message or counts
 // unread ones. Do not add either: it would drag that cost onto the first thing a user sees.
 
