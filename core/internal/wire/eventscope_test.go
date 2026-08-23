@@ -88,14 +88,15 @@ func TestDeviceEventsCarryTheirDevice(t *testing.T) {
 	// their own device's events, and this test would still pass. **A guard against hand-kept lists
 	// that is itself a hand-kept list**, one layer in.
 	cases := map[string]any{
-		EventDeviceAttached: DeviceEvent{Device: Device{UDID: "DEV-A"}},
-		EventDeviceDetached: DeviceEvent{Device: Device{UDID: "DEV-A"}},
-		EventDeviceUpdated:  Device{UDID: "DEV-A"},
-		EventJobUpdated:     Job{UDID: "DEV-A"},
-		EventJobLog:         JobLogChunk{JobID: "j1", UDID: "DEV-A"},
-		EventOpUpdated:      Op{UDID: "DEV-A"},
-		EventVersionCreated: Version{UDID: "DEV-A"},
-		EventVersionDeleted: Version{UDID: "DEV-A"},
+		EventDeviceAttached:   DeviceEvent{Device: Device{UDID: "DEV-A"}},
+		EventDeviceDetached:   DeviceEvent{Device: Device{UDID: "DEV-A"}},
+		EventDeviceUpdated:    Device{UDID: "DEV-A"},
+		EventJobUpdated:       Job{UDID: "DEV-A"},
+		EventJobLog:           JobLogChunk{JobID: "j1", UDID: "DEV-A"},
+		EventOpUpdated:        Op{UDID: "DEV-A"},
+		EventVersionCreated:   Version{UDID: "DEV-A"},
+		EventVersionDeleted:   Version{UDID: "DEV-A"},
+		EventMessagesIndexing: MessagesIndexing{SessionID: "s1", UDID: "DEV-A", Messages: 40000},
 	}
 
 	// COMPLETENESS, DERIVED. Every constant the classifier calls device-bearing must have a case, so

@@ -21,13 +21,24 @@ package wire
 func EventDevice(env Envelope) (udid string, scoped bool) {
 	switch env.Type {
 	// GLOBAL — about quince itself, not about any one device.
+	//
+	// `session.locked` IS NOT THE PRECEDENT A SESSION-SHAPED EVENT SHOULD FOLLOW, and it looks
+	// exactly like one. It names a session, as `messages.indexing` does, and lands in the other
+	// class — so read the REASON rather than the subject. It is global because withholding it
+	// would break the socket rather than confine it: a client must learn its own session ended,
+	// and a scoped holder that never heard would keep showing decrypted views of a session that
+	// is gone. Nothing breaks when a progress frame is withheld; the holder sees no count.
+	//
+	// So the two point the same way once the reason is read, and `messages.indexing` is
+	// device-bearing (quince#1483). A future session-shaped event belongs here only if a client
+	// that misses it is left WRONG rather than uninformed.
 	case EventHello, EventSessionLocked, EventConfigUpdated:
 		return "", false
 
 	// DEVICE-BEARING. Each payload names its own device; the type switch below is what reads it.
 	case EventDeviceAttached, EventDeviceDetached, EventDeviceUpdated,
 		EventJobUpdated, EventJobLog, EventOpUpdated,
-		EventVersionCreated, EventVersionDeleted:
+		EventVersionCreated, EventVersionDeleted, EventMessagesIndexing:
 		return udidOf(env.Data), true
 	}
 	// AN UNCLASSIFIED EVENT IS TREATED AS DEVICE-SCOPED WITH NO DEVICE, so it reaches nobody but the

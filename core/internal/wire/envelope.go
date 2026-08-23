@@ -35,6 +35,19 @@ const (
 	// `discarded`/`warnings`/`source` have flipped. That is the case an open page most needs to hear
 	// about, because the banner it should be showing is the one saying the file is not in force.
 	EventConfigUpdated = "config.updated"
+
+	// EventMessagesIndexing reports how far the Messages projection scan has got (qn.10 D2/D3).
+	//
+	// IT EXISTS BECAUSE THE ROUTE CANNOT CARRY IT. Opening the first conversation in a session
+	// builds the projection — ~18 s on a real backup — and a synchronous JSON response has
+	// nowhere to put progress. D3 named this socket as where it would come from, so the
+	// reader's onProgress callback is the seam and this is the frame.
+	//
+	// IT IS DEVICE-BEARING, and that is a ruling rather than a shape (quince#1483): the event
+	// describes one session, a session belongs to one version, a version to one device. See
+	// the note in eventscope.go for why the global `session.locked` is NOT the precedent it
+	// looks like.
+	EventMessagesIndexing = "messages.indexing"
 )
 
 // Now is the RFC3339 UTC timestamp stamped on envelopes and any live-generated wire time.
@@ -88,3 +101,23 @@ type SessionLocked struct {
 // because staticcheck QF1008 refuses the longer form.
 func (e DeviceEvent) DeviceUDID() string { return e.UDID }
 func (c JobLogChunk) DeviceUDID() string { return c.UDID }
+
+// MessagesIndexing is the data for messages.indexing: a live count of messages projected so far.
+//
+// THERE IS NO TOTAL, AND ITS ABSENCE IS THE DESIGN — the same reason messages.Progress has none.
+// The parser does not count rows before streaming them, so any total here would be invented, and
+// *state honesty* forbids inventing one. A client renders an indeterminate indicator carrying a
+// live count, never a percentage. Indeterminate RENDERING is not the same as no event at all, and
+// conflating the two is what briefly turned a settled decision back into a question (qn.10 D3).
+//
+// IT CARRIES ITS DEVICE for the same reason JobLogChunk does: the socket decides at send time
+// which principal may receive a frame (qn.13 D8), and it cannot do that for a payload whose
+// device is knowable only by looking the session up. The producer knows it for free.
+type MessagesIndexing struct {
+	SessionID string `json:"session_id"`
+	UDID      string `json:"udid"`
+	Messages  int64  `json:"messages"`
+}
+
+// DeviceUDID — see the note on `Device.DeviceUDID`.
+func (m MessagesIndexing) DeviceUDID() string { return m.UDID }

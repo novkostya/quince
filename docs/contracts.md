@@ -3323,6 +3323,7 @@ One socket per client, server→client only (commands go via REST). Envelope:
 | `op.updated` | `Op` | pair/encryption op narration + state changes |
 | `version.created` / `version.deleted` | `Version` | includes adopted versions found on disk |
 | `session.locked` | `{session_id, reason: "user" \| "ttl" \| "vault_crash"}` | UI drops decrypted views |
+| `messages.indexing` | `{session_id, udid, messages}` | how far the Messages projection scan has got, while a thread or search request blocks on it (`qn.10` D2/D3). **A live count and deliberately NO total** — the parser counts no rows up front, so a client renders an indeterminate indicator carrying the count, never a percentage. Throttled to ≤2/s, the same promise `job.updated` makes. **No terminal frame:** the response the scan was blocking is what says it finished. |
 | `config.updated` | `{}` — **empty by ruling** | the configuration SURFACE changed; refetch `GET /api/config` |
 | `hello` | `{server_version, time}` | first frame after auth |
 
@@ -3342,6 +3343,16 @@ were the same set. A device-scoped credential makes them different.
   has since gone.
 - **An unclassified event type reaches only the admin.** A gate asserts every declared event is
   classified, so a new one fails the build rather than silently choosing a side.
+
+**`messages.indexing` IS DEVICE-SCOPED, AND `session.locked` IS NOT THE PRECEDENT IT LOOKS LIKE** —
+ruled 2026-08-23, [quince#1483](https://github.com/novkostya/quince/issues/1483). Both events name a
+session, and they land in different classes, so the rule is **read the reason rather than the
+subject**. `session.locked` is global because withholding it would *break* the socket rather than
+confine it: a client must learn its own session ended, or it goes on showing decrypted views of a
+session that is gone. A withheld progress frame leaves a holder uninformed, not wrong — so nothing
+argues for widening it, and a scan is disclosed only to a principal scoped to the device whose backup
+is being scanned. **A future session-shaped event is global only if a client that misses it is left
+WRONG rather than merely uninformed.**
 
 **`/api/ws` bypasses the JSON API chain and therefore `authGuard`**, which is where the principal is
 bound for every REST route. Its own auth closure resolves one instead. That bypass is why the socket

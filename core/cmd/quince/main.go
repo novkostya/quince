@@ -343,7 +343,7 @@ func serve(args []string) error {
 		// reason — which is better than refusing to start a backup server because browsing is
 		// unavailable. Backing up is the product; browsing is a feature of it.
 		if vs, err := vaultsvc.New(ls.vaultVersions, bootstrap.ScratchRoot(),
-			vault.TTLFromMinutes(cfgSvc.Current().Vault.SessionTTLMinutes), log); err != nil {
+			vault.TTLFromMinutes(cfgSvc.Current().Vault.SessionTTLMinutes), log, eventBus); err != nil {
 			log.Error("vault: browsing is unavailable — the four session routes will answer 503",
 				"scratch", bootstrap.ScratchRoot(), "error", err)
 		} else {
