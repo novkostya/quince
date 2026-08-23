@@ -314,6 +314,20 @@ second `Materialize` of the same file is **1 µs against 806 ms** and returns th
 path. A miss would re-decrypt 446 MiB and, since each copy carries its own sequence number, hand
 back a different path.
 
+**THE MEMO ONLY HELPS FOR THE KEY THAT WAS PRE-MATERIALIZED, SO THE PROPERTY IS NOW CHECKED
+RATHER THAN DOCUMENTED.** A scan that materializes any *other* file misses the memo, reaches the
+vault outside `With`, and races — and by the argument above, that race need not announce itself.
+Today the property holds because `messages` asks for exactly one file and the parser asks for the
+same one. **Slice 5 joins attachments, which live under `MediaDomain`** — so the slice most likely
+to break this is already on the roadmap (architect, quince#1498).
+
+`msgfixture.CountingFS` records every materialize request, and
+`TestScanMaterializesNothingBeyondThePreMaterializedFile` asserts the scan asks for nothing beyond
+the pre-materialized key, with a control that it asked for *something*. The guard was **proven to
+fail**: an off-key `Materialize` injected into the real scan path was caught and named, then
+reverted. **A slice that needs a second file must hold the vault for it, or pre-materialize it too
+— and this test is what will say so.**
+
 **Session scratch peaks around 762 MiB** on device B: decrypted `Manifest.db` 252.9 MiB +
 materialized `sms.db` 446 MiB + projection 63 MiB. Not a constraint on any host quince targets,
 and worth knowing before several sessions open Messages at once.
@@ -526,7 +540,8 @@ Sequenced from `main`, never stacked (`CLAUDE.md` §1). Each carries one reviewa
 | **1** | this spec | **merged** — quince#1491 |
 | **2a** | `msgfixture` — the fixture builder every later slice reads from, with G5 asserted | **merged** — quince#1496 |
 | **2b** | the domain reader + the session projection and its one scan (D2) | **merged** — quince#1497 |
-| **3** | `GET /api/sessions/{id}/messages/chats` (D3, contracts §1) | **open** |
+| **3** | `GET /api/sessions/{id}/messages/chats` (D3, contracts §1) | **merged** — quince#1498 |
+| **3b** | the scan's materialize key set asserted, not documented (D2b) | **open** |
 | **4** | `GET …/chats/{chat}/messages`, cursored (D3) | not open |
 | **5** | attachments: the join to `qn.8`'s download route (D6) | not open |
 | **6** | FTS5 search and its capability gate (D4) | not open |
