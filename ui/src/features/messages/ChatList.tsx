@@ -38,7 +38,7 @@ export function nameFor(chat: MessagesChat): string {
   return `Conversation ${chat.id}`;
 }
 
-export function ChatList({ data }: { data: MessagesChats }) {
+export function ChatList({ data, onOpen }: { data: MessagesChats; onOpen?: (chat: MessagesChat) => void }) {
   // `text-fg`, NOT `text-muted`, ON BOTH SENTENCES BELOW, AND THAT IS NOT A STYLE PREFERENCE.
   // Each is the ONLY content on its card — the answer to "where are my messages". There is
   // nothing for it to be secondary to, and rendering the answer as secondary text
@@ -74,21 +74,46 @@ export function ChatList({ data }: { data: MessagesChats }) {
         </p>
       ))}
       <ul className="divide-y divide-line rounded-md border border-line">
-        {chats.map((chat) => (
-          <li key={chat.id} className="flex items-center gap-3 px-4 py-3">
-            <span className="min-w-0 flex-1 truncate text-sm text-fg">{nameFor(chat)}</span>
-            {chat.is_group && (
-              <Badge tone="neutral">
-                {/* The COUNT rather than the word "group": a reader wants to know how many
-                    people are in it, and an absent participant list is why this is
-                    conditional rather than always shown. */}
-                {chat.participants && chat.participants.length > 0
-                  ? `${chat.participants.length} people`
-                  : "Group"}
-              </Badge>
-            )}
-          </li>
-        ))}
+        {chats.map((chat) => {
+          // The row's CONTENT is built once and wrapped twice, so the two shapes below cannot
+          // drift apart — a group badge that appeared only in the clickable variant would be a
+          // difference nobody would notice until a list rendered without a handler.
+          const row = (
+            <>
+              <span className="min-w-0 flex-1 truncate text-sm text-fg">{nameFor(chat)}</span>
+              {chat.is_group && (
+                <Badge tone="neutral">
+                  {/* The COUNT rather than the word "group": a reader wants to know how many
+                      people are in it, and an absent participant list is why this is
+                      conditional rather than always shown. */}
+                  {chat.participants && chat.participants.length > 0
+                    ? `${chat.participants.length} people`
+                    : "Group"}
+                </Badge>
+              )}
+            </>
+          );
+          return (
+            <li key={chat.id}>
+              {/* A BUTTON, NOT A LINK, AND `onOpen` IS OPTIONAL. Opening a conversation cannot
+                  be a route of its own: the vault session lives in the page component, and a
+                  separate route would ask for the password a second time (7c-2a). So the caller
+                  selects within its own screen — and a list rendered WITHOUT a handler, as slice
+                  7a shipped it, stays exactly as it was rather than becoming a dead control. */}
+              {onOpen ? (
+                <button
+                  type="button"
+                  onClick={() => onOpen(chat)}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                >
+                  {row}
+                </button>
+              ) : (
+                <div className="flex items-center gap-3 px-4 py-3">{row}</div>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
