@@ -70,6 +70,23 @@ describe("SearchResults", () => {
     expect(screen.queryByText(/could not build a search index/i)).toBeNull();
   });
 
+  // THE PAIR NO TEST COVERED, WHICH IS WHY THE DEFECT PASSED (quince#1522 review): zero hits AND
+  // a warning. Each alone was covered; the combination is where an incomplete index gets reported
+  // as a complete negative.
+  it("qualifies a zero-hit answer with the build's warnings rather than swallowing them", () => {
+    render(
+      <SearchResults
+        term="hello"
+        data={res({ warnings: ["3 message(s) could not be read and are missing from this view"] })}
+      />,
+    );
+
+    // BOTH sentences. The negative is still said — it is true of what was searched — and the
+    // fact that qualifies it is beside it rather than only on the screen where it matters least.
+    expect(screen.getByText(/no messages match/i)).toBeTruthy();
+    expect(screen.getByText(/could not be read and are missing/i)).toBeTruthy();
+  });
+
   it("renders the hits, and surfaces warnings alongside them", () => {
     render(
       <SearchResults term="hello" data={res({ warnings: ["some messages could not be placed"], page: { items: [hit("hello there")] } })} />,
