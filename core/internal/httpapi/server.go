@@ -364,6 +364,9 @@ func NewRouter(deps Deps) http.Handler {
 	apiMux.HandleFunc("GET /api/sessions/{id}/messages/chats/{chat}/messages", deps.handleSessionMessagesThread())
 	apiMux.HandleFunc("GET /api/sessions/{id}/messages/search", deps.handleSessionMessagesSearch())
 	apiMux.HandleFunc("GET /api/sessions/{id}/file/{file_id}", deps.handleSessionFile())
+	// qn.10 slice 5 — the SAME handler, addressed by (domain, relative_path) instead of an
+	// id. Not a sibling route: one surface, two parameter shapes (quince#1483).
+	apiMux.HandleFunc("GET /api/sessions/{id}/file", deps.handleSessionFile())
 	apiMux.HandleFunc("/api/", deps.handleAPINotFound())
 
 	// setupGuard runs AFTER authGuard and csrfGuard, not before, and the order is the point: an

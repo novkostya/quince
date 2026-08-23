@@ -2277,6 +2277,7 @@ POST   /api/sessions/{id}/lock         → 204
 GET    /api/sessions/{id}/browse?domain&prefix&cursor&limit
                                        → {entries: FileEntry[], next_cursor?, effective_limit?}
 GET    /api/sessions/{id}/file/{file_id}                → streamed decrypted content
+GET    /api/sessions/{id}/file?domain=&relative_path=    → the same, addressed by path (qn.10)
 GET    /api/versions/{id}/overview     → VersionOverview   // qn.9 PRE-UNLOCK: no session, no password
 GET    /api/sessions/{id}/overview?cursor&limit         → domain totals + capability report
 ```
@@ -2516,6 +2517,39 @@ its own.
 
 **A non-numeric `{chat}` is a 400, not a 404.** Answering 404 would say the conversation does not
 exist when what happened is that none was asked for.
+### `GET /api/sessions/{id}/file?domain=&relative_path=` — qn.10 slice 5
+
+**The same file route, addressed by path instead of by id.** Not a second surface: below the
+addressing switch there is one handler, one stream, one set of headers, one short-read detection
+and one scope class. `qn.10` D6's *"no new file-serving surface"* forbids a second way to **stream
+bytes**, not a second way to **name** a file the existing path then serves — ruled at quince#1483.
+
+```
+GET /api/sessions/s1/file?domain=MediaDomain&relative_path=Library/SMS/Attachments/aa/00/x.heic
+→ 200, application/octet-stream, Content-Length from the recorded size, Cache-Control: no-store
+```
+
+**Why it exists.** The Messages domain records an attachment as a domain and a relative path —
+that is what `sms.db` holds — and never as a file id. Without this a client would need a round
+trip per attachment purely to translate.
+
+**It widens no reach.** Authorization is the **session** (which backup) and the route's **scope
+class** (whose device). There is no per-file check and **a file id is not a capability token**:
+`browse` hands them out for everything in the backup. Naming by path reaches exactly the set
+naming by id already reaches.
+
+**The lookup happens INSIDE the held session.** Resolving a path to a file id is a manifest read,
+and doing it in the caller would be a vault call from outside `registry.With` — the defect
+quince#1501 fixed one slice earlier. It is also **one acquisition, not two**: resolving and then
+calling the id route would leave a gap in which a lock or a TTL sweep can end the session, so the
+id would be resolved against one session and streamed against nothing.
+
+**The match is EXACT, not by prefix.** `Query.Prefix` narrows the scan; the equality test decides.
+A prefix would match `a.jpg` for `a` and serve a different file's bytes than the one asked for.
+
+**Naming neither shape, or a path without a domain, is a 400** — never a guess. It is a malformed
+request rather than a vault error, so it does not borrow a contracts §4 code.
+
 
 ### `GET /api/sessions/{id}/messages/search?q&limit` — qn.10 slice 6
 

@@ -556,3 +556,86 @@ func (r *Registry) AttachDerived(sessionID string, c io.Closer) bool {
 	e.derived = append(e.derived, c)
 	return true
 }
+
+// OpenStreamByPath is OpenStream addressed by (domain, relativePath) instead of a file id —
+// qn.10 slice 5.
+//
+// WHY IT EXISTS. The Messages domain hands a surface an attachment as a domain and a relative
+// path, because that is what the backup's own manifest records on the message. Turning that
+// into a file id is a manifest lookup, and doing it in the caller would mean a vault call from
+// OUTSIDE a held session — the exact defect quince#1501 fixed one rung-slice earlier. So the
+// resolution happens HERE, inside the acquisition that already exists.
+//
+// IT IS ONE ACQUISITION, NOT TWO. Resolving in the caller and then calling OpenStream would
+// take the session busy twice with a gap between, and in that gap a lock or a TTL sweep can
+// end the session — so the file id would be resolved against one session and streamed against
+// nothing. The whole point of this method is that the lookup and the open are inside the same
+// hold, and the hold then passes to the reader exactly as OpenStream's does.
+//
+// IT WIDENS NO REACH. Authorization is the session (which backup) and the route's scope class
+// (whose device); there is no per-file check and a file id is not a capability token — browse
+// hands them out for the whole backup. Naming by path reaches the set an id already reaches.
+func (r *Registry) OpenStreamByPath(ctx context.Context, sessionID, domain, relativePath string) (io.ReadCloser, FileEntry, error) {
+	r.mu.Lock()
+	e, ok := r.sessions[sessionID]
+	if !ok {
+		r.mu.Unlock()
+		return nil, FileEntry{}, ErrNoSession
+	}
+	if !e.session.ExpiresAt.After(r.now()) {
+		r.mu.Unlock()
+		_ = r.Lock(sessionID)
+		return nil, FileEntry{}, ErrNoSession
+	}
+	if !e.busy.TryLock() {
+		r.mu.Unlock()
+		return nil, FileEntry{}, ErrSessionBusy
+	}
+	r.mu.Unlock()
+
+	// From here every path must either hand the lock to the reader or release it, or the
+	// session is wedged — the same rule OpenStream states, and the reason there is no defer.
+	fileID, err := resolvePath(ctx, e.vault, domain, relativePath)
+	if err != nil {
+		e.busy.Unlock()
+		return nil, FileEntry{}, err
+	}
+	entry, err := e.vault.Stat(ctx, fileID)
+	if err != nil {
+		e.busy.Unlock()
+		return nil, FileEntry{}, err
+	}
+	rc, err := e.vault.Open(ctx, fileID)
+	if err != nil {
+		e.busy.Unlock()
+		return nil, FileEntry{}, err
+	}
+	return &streamHold{ReadCloser: rc, release: e.busy.Unlock}, entry, nil
+}
+
+// resolvePath finds one entry's file id by its domain and relative path.
+//
+// IT MATCHES EXACTLY, not by prefix. Query.Prefix narrows the SCAN; the equality test is what
+// decides, because a prefix matches "a.jpg" for "a" and would hand back a different file's
+// bytes than the one asked for — the worst available failure on a download route.
+//
+// The caller MUST already hold the session busy: this reaches the vault, which makes no
+// concurrency promise (quince#1501).
+func resolvePath(ctx context.Context, v Vault, domain, relativePath string) (string, error) {
+	cursor := ""
+	for {
+		page, err := v.List(ctx, Query{Domain: domain, Prefix: relativePath, Cursor: cursor})
+		if err != nil {
+			return "", err
+		}
+		for _, e := range page.Entries {
+			if e.Domain == domain && e.RelativePath == relativePath {
+				return e.FileID, nil
+			}
+		}
+		if page.NextCursor == "" {
+			return "", ErrFileNotFound
+		}
+		cursor = page.NextCursor
+	}
+}

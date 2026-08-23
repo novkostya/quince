@@ -514,6 +514,14 @@ type VaultBrowse interface {
 	// the recorded size — which is what makes a SHORT read detectable by the client rather
 	// than silently truncated (D8.1).
 	OpenFile(sessionID, fileID string) (rc io.ReadCloser, e wire.FileEntry, code, message string)
+
+	// OpenFileByPath is OpenFile addressed by (domain, relativePath) — qn.10 slice 5.
+	//
+	// SAME STREAM, DIFFERENT KEY. The Messages domain holds attachments as a domain and a
+	// relative path, never as a file id. Resolving one is a manifest lookup that MUST happen
+	// inside the held session (quince#1501), which is why this is a seam method rather than
+	// a resolve step in the caller.
+	OpenFileByPath(sessionID, domain, relativePath string) (rc io.ReadCloser, e wire.FileEntry, code, message string)
 }
 
 // UnavailableVaultBrowse is the VaultBrowse used when no vault subsystem is wired: every
@@ -555,6 +563,10 @@ func (UnavailableVaultBrowse) Overview(string, wire.BrowseQuery) (wire.Overview,
 }
 
 func (UnavailableVaultBrowse) OpenFile(string, string) (io.ReadCloser, wire.FileEntry, string, string) {
+	return nil, wire.FileEntry{}, wire.VaultCodeUnavailable, vaultUnavailable
+}
+
+func (UnavailableVaultBrowse) OpenFileByPath(string, string, string) (io.ReadCloser, wire.FileEntry, string, string) {
 	return nil, wire.FileEntry{}, wire.VaultCodeUnavailable, vaultUnavailable
 }
 
