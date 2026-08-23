@@ -111,6 +111,32 @@ func (s *Store) CountUnattributedVersions() (int, error) {
 	return n, err
 }
 
+// DeleteStorage removes a storage's row by name. It is the second half of forgetting a storage,
+// and its absence was the whole of quince#1525: `ForgetStorage` splices the entry out of
+// `config.yml` and nothing removed the row, so `GetStorage(name)` kept answering `Known` for a
+// storage nobody had declared for weeks. A reachable path plus no marker plus a known row is
+// MISSING MEDIUM, which refuses — so the path stayed claimed and could not be re-added, and the
+// only lever that appeared to exist was deleting `quince-storage.json` by hand, which moves the
+// state sideways rather than freeing it.
+//
+// KEYED ON NAME, like every other operation on this table, and that is what makes it safe to run
+// after the config write: the row is only ever consulted for a name the config declares, so a row
+// whose entry has just been removed is unreachable until someone re-declares that name — which is
+// precisely the case this exists to unblock.
+//
+// IT DOES NOT TOUCH `versions`. Rows there join to `storages` by `storage_id`, and removing a
+// storage that still has versions would orphan that join and silently detach a real backup history
+// from the disk holding it. The refusal that prevents it is the CALLER'S, because it must produce
+// a sentence naming what blocks it rather than a bare no — see the forget handler. This function
+// is deliberately unguarded so that the guard lives where it can be explained.
+//
+// Missing rows are not an error: forgetting a storage quince has never resolved is a no-op, not a
+// failure, and a caller that had to distinguish them would be handling a case with no remedy.
+func (s *Store) DeleteStorage(name string) error {
+	_, err := s.db.Exec(`DELETE FROM storages WHERE name = ?`, name)
+	return err
+}
+
 func scanStorage(sc rowScanner) (StorageRow, error) {
 	var (
 		r       StorageRow

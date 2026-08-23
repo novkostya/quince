@@ -256,3 +256,69 @@ func TestPromoteLatestGivesUnattributedRowsTheirOwnLatest(t *testing.T) {
 		t.Error("an unattributed row must be promotable within the NULL group (IS, not =)")
 	}
 }
+
+// quince#1525: forgetting a storage left its row, so `GetStorage` kept answering Known for a
+// storage nobody declared — and a reachable path with no marker plus a known row is MISSING
+// MEDIUM, which refuses. The path stayed claimed and could not be re-added from any interface.
+//
+// THE SECOND HALF IS THE ASSERTION THAT MATTERS: after the delete, `GetStorage` must report
+// ok=false, because ok=false is the ONLY state that permits a creation moment. A delete that
+// removed the row but left `GetStorage` answering Known would fix nothing.
+func TestDeleteStorageFreesTheNameForANewCreationMoment(t *testing.T) {
+	st := openTemp(t)
+	id, backend := "01JS00000000000000000000", "zfs"
+	created := ts(t)
+	if err := st.UpsertStorage(StorageRow{
+		Name: "cache", StorageID: &id, Backend: &backend, Path: "/cache",
+		CreatedAt: &created, SeenAt: created,
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	// The control: without it a pass below could mean the row was never written.
+	if _, ok, err := st.GetStorage("cache"); err != nil || !ok {
+		t.Fatalf("control failed — the row must exist before it can be deleted: ok=%v err=%v", ok, err)
+	}
+
+	if err := st.DeleteStorage("cache"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, ok, err := st.GetStorage("cache"); err != nil || ok {
+		t.Fatalf("the name is still claimed after forget — quince#1525: ok=%v err=%v", ok, err)
+	}
+}
+
+// Forgetting a storage quince has never resolved is a no-op, not a failure. A caller that had to
+// distinguish "no row" from "row removed" would be handling a case with no remedy — and this is
+// the state a user most wants to forget, so it must not error.
+func TestDeleteStorageIsANoOpForANameWithNoRow(t *testing.T) {
+	st := openTemp(t)
+	if err := st.DeleteStorage("never-seen"); err != nil {
+		t.Fatalf("deleting an unknown storage must not error: %v", err)
+	}
+}
+
+// It removes ONE row. A DELETE with a mistaken WHERE would take the whole table with it, and
+// nothing else in this package would notice — every other test declares a single storage.
+func TestDeleteStorageLeavesItsNeighbourAlone(t *testing.T) {
+	st := openTemp(t)
+	created := ts(t)
+	for _, n := range []string{"cache", "archive"} {
+		id, backend := "01JS0000000000000000000"+string(n[0]), "copy"
+		if err := st.UpsertStorage(StorageRow{
+			Name: n, StorageID: &id, Backend: &backend, Path: "/" + n,
+			CreatedAt: &created, SeenAt: created,
+		}); err != nil {
+			t.Fatalf("upsert %s: %v", n, err)
+		}
+	}
+	if err := st.DeleteStorage("cache"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	rows, err := st.ListStorages()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Name != "archive" {
+		t.Fatalf("expected only 'archive' to survive, got %+v", rows)
+	}
+}

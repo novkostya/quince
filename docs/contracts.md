@@ -1797,6 +1797,29 @@ DELETE /api/config/storage/{name}
                     Splices SERVER-SIDE, which is the whole reason it is not a PUT —
                     see the gap B ruling above for what a reconstructed full document
                     silently loses.
+                    IT ALSO RELEASES THE `storages` DB ROW, and that is not a detail:
+                    without it the row survives, `ResolveStorage` asks the DB first on
+                    every path, and a reachable path with no marker plus a known row is
+                    MISSING MEDIUM — so the path stayed CLAIMED by a storage nobody
+                    declared and could not be re-added from any interface (quince#1525).
+                    The row goes AFTER the config write, never before: the row is only
+                    consulted for a name the config declares, and dropping it first
+                    would leave a declared entry with no row, which is the state that
+                    PERMITS a creation moment — quince would mint a new identity for a
+                    storage the user has not finished removing.
+                    422 ALSO WHEN COMMITTED VERSIONS REFERENCE IT, naming how many and
+                    across how many devices. `versions.storage_id` joins against the
+                    marker UUID, so removing the row would orphan that join and detach
+                    a real backup history from the disk holding it. A storage quince has
+                    never REACHED carries a nil storage_id, so nothing can reference it
+                    and the forget is allowed — that is the storage a user most wants to
+                    forget, and a guard reading "no count" as "unknown, refuse" would
+                    block exactly it.
+                    A ROW THAT CANNOT BE RELEASED IS A WARNING, NOT A FAILURE. The
+                    forget has succeeded and the config is written by then, so failing
+                    the request would misreport what happened — but a silent miss puts
+                    the caller back in quince#1525 with no sign of it, so it rides the
+                    `warnings` channel the response already carries.
 POST /api/config/storage/{name}/default
                   → make one storage the default: 200 {config, warnings, source} | 404.
                     MOVES THE FLAG AND LEAVES FILE ORDER ALONE — the flag decides

@@ -122,6 +122,26 @@ func (d Deps) handleConfigStorageDelete() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
 
+		// THE VERSIONS REFUSAL, AND IT RUNS BEFORE `ForgetStorage` RATHER THAN INSIDE IT
+		// (quince#1525). Two reasons, and the first is why this is not the mistake `story8` caught.
+		//
+		// `story8`'s lesson was that a TRANSIENT refusal must not preempt a permanent one: a backup
+		// running on the default storage made quince say *wait for the backup* when waiting could
+		// never help, because the storage was undeletable anyway. This refusal is PERMANENT — a
+		// committed backup does not stop referencing a storage by itself — so ordering it ahead of
+		// the declaration refusals costs a user nothing: both sentences are actionable, and neither
+		// expires.
+		//
+		// And `config` must keep knowing nothing about the storage subsystem, which is the property
+		// the liveness callback exists to preserve — *config gets a sentence, never a job*. A
+		// versions count is that same kind of fact, one table over.
+		if why := d.versionsBlockingForget(name); why != "" {
+			writeJSON(w, d.Log, http.StatusUnprocessableEntity, struct {
+				Errors []wire.ConfigError `json:"errors"`
+			}{Errors: []wire.ConfigError{{Path: "storage", Message: why}}})
+			return
+		}
+
 		// THE LIVENESS REFUSAL IS HANDED IN, NOT RUN HERE FIRST (qn.6g, Operator ruling 2026-08-06 —
 		// quince#577, option (b)). A forget while a backup runs on that storage would leave
 		// `CommitJob` unable to resolve its slot between verify passing and commit completing, and
@@ -173,9 +193,88 @@ func (d Deps) handleConfigStorageDelete() http.HandlerFunc {
 		// thing `no silent caps or fallbacks` forbids in its other direction — a remedy prescribed
 		// for a problem that no longer exists.
 		warns = append(warns, applied...) // qn.6g: anything an applier could not take
+		// THE ROW GOES TOO, AND THIS IS THE HALF THAT WAS MISSING (quince#1525). `ForgetStorage`
+		// splices the entry out of `config.yml`; without this the `storages` row survives, and
+		// `ResolveStorage` asks the DB first on every path — so a reachable path with no marker and
+		// a known row is MISSING MEDIUM, and the path stays claimed by a storage nobody declares.
+		//
+		// AFTER the write, not before, and the ordering is load-bearing. The row is only ever
+		// consulted for a name the config declares, so between the two statements it is already
+		// unreachable. Deleting first would leave a declared entry with no row, which is the state
+		// that PERMITS a creation moment — quince would silently mint a new identity for a storage
+		// the user has not finished removing.
+		//
+		// A FAILURE HERE IS SURFACED, NEVER SWALLOWED. The forget itself has succeeded and the
+		// config is written, so this cannot fail the request without lying about what happened —
+		// but a silent miss puts the user back in exactly the state quince#1525 reports, with no
+		// sign of it. It rides the `warnings` channel the response already carries.
+		if err := d.Store.DeleteStorage(name); err != nil {
+			d.Log.Error("storage forgotten but its row survived", "error", err, "storage", name)
+			warns = append(warns, config.Warning{Message: fmt.Sprintf(
+				"storage %q was removed from config.yml, but quince could not release its database "+
+					"row: %v. The path stays claimed, so re-adding a storage under this name will "+
+					"be refused as a missing medium. Retry the forget, or declare it under a "+
+					"different name.", name, err)})
+		}
 		d.Log.Info("storage forgotten", "storage", name, "applier_warnings", len(applied))
 		writeJSON(w, d.Log, http.StatusOK, d.configResponse(cfg2, warns, src))
 	}
+}
+
+// versionsBlockingForget reports why a storage cannot be forgotten, or "" when nothing blocks it.
+//
+// `versions.storage_id` joins against a storage's marker UUID, so removing the row while backups
+// reference it would orphan that join — silently detaching a real backup history from the disk
+// holding it. A committed backup is data that cannot be regenerated, which is why this refuses
+// rather than cascading.
+//
+// IT NAMES WHAT BLOCKS IT, which is the difference between a refusal a user can act on and a bare
+// no (Operator, quince#940). Counts rather than version ids: a user with two hundred backups
+// cannot act on two hundred identifiers, and *3 backups across 2 devices* is the fact that decides
+// what they do next.
+//
+// A STORAGE WITH NO ID CANNOT HAVE VERSIONS, and that is a fact rather than an assumption — the id
+// is written at the creation moment, so a nil one means quince has never reached the storage and
+// nothing can have been committed to it. That is also the state a user most wants to forget, which
+// is why it must not be blocked by a lookup that finds nothing.
+//
+// A FAILED COUNT DOES NOT BLOCK. This is a guard over a user's own destructive action, and a
+// database read that errors is not evidence that backups exist; refusing on it would make a
+// transient failure look like a permanent one. The error is logged and the forget proceeds — the
+// row deletion is itself guarded by the same join in the other direction.
+func (d Deps) versionsBlockingForget(name string) string {
+	if d.Store == nil {
+		return ""
+	}
+	row, ok, err := d.Store.GetStorage(name)
+	if err != nil || !ok || row.StorageID == nil {
+		if err != nil {
+			d.Log.Error("could not read storage row before forget", "error", err, "storage", name)
+		}
+		return ""
+	}
+	counts, err := d.Store.CountVersionsByStorage()
+	if err != nil {
+		d.Log.Error("could not count versions before forget", "error", err, "storage", name)
+		return ""
+	}
+	c, ok := counts[*row.StorageID]
+	if !ok || c.Backups == 0 {
+		return ""
+	}
+	devices := "1 device"
+	if c.Devices != 1 {
+		devices = fmt.Sprintf("%d devices", c.Devices)
+	}
+	backups := "1 backup"
+	if c.Backups != 1 {
+		backups = fmt.Sprintf("%d backups", c.Backups)
+	}
+	return fmt.Sprintf(
+		"storage %q still holds %s across %s, and forgetting it would detach them from the disk "+
+			"they are on — quince would no longer know where those backups live. Restore or delete "+
+			"them first, or leave the storage declared. Nothing on the disk is deleted either way.",
+		name, backups, devices)
 }
 
 // jobsRunningOn resolves a storage NAME to its id and asks which jobs are bound to it.
