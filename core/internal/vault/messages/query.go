@@ -150,138 +150,106 @@ func decodeThreadCursor(s string) (threadCursor, bool, error) {
 	return c, true, nil
 }
 
-// Thread returns one page of a conversation, newest first, and BUILDS THE PROJECTION if this
-// is the first read that needs it. onProgress may be nil.
-func (r *Reader) Thread(ctx context.Context, chatID int64, cursor string, limit int, onProgress func(Progress)) (Page, error) {
+// Thread returns one page of a conversation, newest first, and BUILDS NOTHING.
+//
+// D2 SAID THIS ROUTE PAID FOR THE PROJECTION. It no longer does — ruled 2026-08-23,
+// quince#1531, on a measurement that inverted the premise. D2's argument was that search must
+// read every message once, so the scan is unavoidable and a projection built from it solves
+// paging for free. **"Unavoidable" was only true if the user searches.** Reading a conversation
+// needs ~50 rows, and the parser now answers exactly that (`ChatMessages`, v0.4.0): about a
+// millisecond of SQL against the database, versus ~11 s to build a projection first.
+//
+// SO THE SCAN MOVES TO SEARCH, WHICH IS THE ONE ACTION THAT ASKS FOR SOMETHING NEEDING IT.
+// `Search` still calls `ensure`; this does not. A reader who never searches never pays.
+//
+// ONE READ PATH, ALWAYS — this does NOT switch to the projection once a search has built one.
+// A session whose read path changes underneath the user is where cursor semantics drift: the
+// two orderings would have to agree forever, and the projection's `(date, ROWID)` is a copy of
+// the parser's. One path cannot disagree with itself.
+//
+// `onProgress` IS ACCEPTED AND UNUSED, deliberately rather than removed. The signature is
+// shared with `Search`, which still reports; a nil-vs-set caller should not have to know which
+// route builds. There is no progress to report because there is no build.
+func (r *Reader) Thread(ctx context.Context, chatID int64, cursor string, limit int, _ func(Progress)) (Page, error) {
 	cur, hasCur, err := decodeThreadCursor(cursor)
 	if err != nil {
 		return Page{}, err
 	}
 	limit, clamped := clampLimit(limit)
 
-	if err := r.ensure(ctx, onProgress); err != nil {
-		return Page{}, err
-	}
-
-	r.mu.Lock()
-	db, warnings := r.proj, append([]string(nil), r.warnings...)
-	r.mu.Unlock()
-
-	// One row beyond the page, so "is there a next page" is answered by the query rather
-	// than by a second count — and an exactly-full last page does not advertise a next one
-	// that turns out to be empty.
-	q := `SELECT m.id, m.guid, m.date, m.from_me, m.handle, m.body, m.body_undecoded,
-	             m.assoc_type, m.assoc_guid, m.edited, m.retracted, m.balloon
-	      FROM msg_chat j JOIN msg m ON m.id = j.msg_id
-	      WHERE j.chat_id = ?`
-	args := []any{chatID}
-	if hasCur {
-		q += ` AND (j.date < ? OR (j.date = ? AND j.msg_id < ?))`
-		args = append(args, cur.Date, cur.Date, cur.ID)
-	}
-	q += ` ORDER BY j.date DESC, j.msg_id DESC LIMIT ?`
-	args = append(args, limit+1)
-
-	rows, err := db.QueryContext(ctx, q, args...)
+	m, err := parser.Open(r.fsys)
 	if err != nil {
-		return Page{}, fmt.Errorf("messages: thread: %w", err)
+		return Page{}, translate(err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() { _ = m.Close() }()
 
-	page := Page{Warnings: warnings, LimitClamped: clamped}
-	var ids []int64
-	for rows.Next() {
-		var m Message
-		var date, edited, retracted int64
-		var fromMe, undecoded int64
-		var handle, body, assocGUID, balloon *string
-		var assocType int64
-		if err := rows.Scan(&m.ID, &m.GUID, &date, &fromMe, &handle, &body, &undecoded,
-			&assocType, &assocGUID, &edited, &retracted, &balloon); err != nil {
-			return Page{}, fmt.Errorf("messages: scan thread row: %w", err)
-		}
-		m.Time = time.Unix(0, date)
-		m.FromMe = fromMe != 0
-		m.BodyUnknown = undecoded != 0
-		m.Handle = deref(handle)
-		m.Body = deref(body)
-		m.ReactsTo = deref(assocGUID)
-		m.Balloon = deref(balloon)
-		m.IsTapback = isTapback(assocType)
-		m.Edited = edited != 0
-		m.Retracted = retracted != 0
-		page.Messages = append(page.Messages, m)
-		ids = append(ids, m.ID)
+	var before parser.ChatCursor
+	if hasCur {
+		// The cursor stores Unix nanoseconds; ChatCursor takes a time. The parser converts to
+		// the stored Cocoa epoch itself, which is why this cannot get the 31-year offset wrong.
+		before = parser.ChatCursor{At: time.Unix(0, cur.Date), ID: cur.ID}
 	}
-	if err := rows.Err(); err != nil {
-		return Page{}, fmt.Errorf("messages: thread rows: %w", err)
+
+	page := Page{Warnings: []string{}, LimitClamped: clamped}
+	var rowErrs int
+	// ONE BEYOND THE PAGE, so "is there a next page" is answered by the read rather than by a
+	// second count — and an exactly-full last page does not advertise an empty next one.
+	for msg, err := range m.ChatMessages(chatID, before, limit+1) {
+		if err := ctx.Err(); err != nil {
+			return Page{}, err
+		}
+		if err != nil {
+			var re *backup.RowError
+			if asRowError(err, &re) {
+				rowErrs++
+				continue
+			}
+			return Page{}, translate(err)
+		}
+		page.Messages = append(page.Messages, fromParser(msg))
+	}
+	if rowErrs > 0 {
+		// THE SAME SENTENCE THE BUILD USED, now scoped to the page rather than the database.
+		// It means what it says either way: these messages exist and quince could not read
+		// them, so the page is short and says so.
+		page.Warnings = append(page.Warnings,
+			fmt.Sprintf("%d message(s) could not be read and are missing from this view", rowErrs))
 	}
 
 	if len(page.Messages) > limit {
 		page.Messages = page.Messages[:limit]
-		ids = ids[:limit]
 		last := page.Messages[len(page.Messages)-1]
 		page.NextCursor = encodeThreadCursor(threadCursor{Date: last.Time.UnixNano(), ID: last.ID})
-	}
-
-	if err := r.attachTo(ctx, db, page.Messages, ids); err != nil {
-		return Page{}, err
 	}
 	return page, nil
 }
 
-// attachTo fills the page's attachments in ONE query rather than one per message. The
-// per-message shape is what makes the parser itself slow, and repeating it here would import
-// the cost this package exists to remove.
-// attachTo fills the page's attachments in ONE query rather than one per message. The
-// per-message shape is exactly what makes the parser slow — fillAttachments runs a query per
-// row, which is the 127× case when the join is unindexed — and repeating it here would import
-// the cost this package exists to remove.
-func (r *Reader) attachTo(ctx context.Context, db *sql.DB, msgs []Message, ids []int64) error {
-	if len(ids) == 0 {
-		return nil
+// fromParser maps a parser message onto the domain type. SHARED SHAPE WITH THE PROJECTION READ
+// used by search, so a field that carries a distinction cannot be mapped on one path and dropped
+// on the other.
+func fromParser(msg parser.Message) Message {
+	m := Message{
+		ID: msg.ID, GUID: msg.GUID, Time: msg.Time,
+		FromMe: msg.IsFromMe, Body: msg.Text, BodyUnknown: msg.BodyUndecoded,
+		ReactsTo: msg.AssociatedGUID, Balloon: msg.BalloonBundleID,
+		IsTapback: isTapback(msg.AssociatedType),
+		// NOT `.IsZero()` INVERTED CARELESSLY: an absent edit date is the zero time, and
+		// `time.Time{}.UnixNano()` is not zero — that mistake cost every message its body once
+		// already (quince#1528). Asking the time itself is the form that cannot repeat it.
+		Edited:    !msg.DateEdited.IsZero(),
+		Retracted: !msg.DateRetracted.IsZero(),
 	}
-	q := `SELECT msg_id, domain, rel_path, mime, name, bytes, sticker FROM att WHERE msg_id IN (`
-	args := make([]any, 0, len(ids))
-	for i, id := range ids {
-		if i > 0 {
-			q += ","
+	if msg.Handle != nil {
+		m.Handle = msg.Handle.Identifier
+	}
+	for _, a := range msg.Attachments {
+		att := Attachment{MIMEType: a.MIMEType, Name: a.TransferName, IsSticker: a.IsSticker}
+		if a.File != nil {
+			att.Domain, att.RelativePath, att.Present = a.File.Domain, a.File.RelativePath, true
 		}
-		q += "?"
-		args = append(args, id)
+		m.Attachments = append(m.Attachments, att)
 	}
-	q += `) ORDER BY msg_id, rowid`
-
-	rows, err := db.QueryContext(ctx, q, args...)
-	if err != nil {
-		return fmt.Errorf("messages: attachments: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	byMsg := map[int64][]Attachment{}
-	for rows.Next() {
-		var msgID int64
-		var a Attachment
-		var domain, rel, mime, name *string
-		var sticker int64
-		if err := rows.Scan(&msgID, &domain, &rel, &mime, &name, &a.Bytes, &sticker); err != nil {
-			return fmt.Errorf("messages: scan attachment: %w", err)
-		}
-		a.Domain, a.RelativePath = deref(domain), deref(rel)
-		a.MIMEType, a.Name = deref(mime), deref(name)
-		a.IsSticker = sticker != 0
-		// Present is the difference between "quince can serve these bytes" and "this
-		// file is not in the backup". A surface must not offer a link for the second.
-		a.Present = a.Domain != "" && a.RelativePath != ""
-		byMsg[msgID] = append(byMsg[msgID], a)
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("messages: attachment rows: %w", err)
-	}
-	for i := range msgs {
-		msgs[i].Attachments = byMsg[msgs[i].ID]
-	}
-	return nil
+	return m
 }
 
 func clampLimit(limit int) (int, bool) {
