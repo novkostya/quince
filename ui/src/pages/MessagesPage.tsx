@@ -188,6 +188,15 @@ export function MessagesPage() {
               the flag that is true in that render (quince#1517 review). VaultBrowsePage carries
               the same guard.
 
+              NOT COVERED BY A TEST, AND THAT IS DECLARED RATHER THAN ASSUMED. A one-frame
+              flicker is not observable through React Testing Library's settled-DOM queries:
+              both sentences live in mutually exclusive arms of this ternary, so by the time
+              `findByText` resolves on the banner, the error node is already gone and
+              `queryByText` sees only the current DOM. MEASURED — the test that claimed to
+              check this passed with the guard REMOVED (997/997), so it was asserting the end
+              state, which was always right. It was deleted rather than kept under a name that
+              promised more than it could check (quince#1519 review).
+
               "could not read this backup's Messages domain" and a
               session that has gone are different facts with different remedies. */}
           <p className="text-sm text-danger">

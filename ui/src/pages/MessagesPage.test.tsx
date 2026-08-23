@@ -205,22 +205,4 @@ describe("MessagesPage", () => {
     expect(screen.queryByText(/not in this quince's version list/i)).toBeNull();
     expect(screen.queryByRole("button", { name: /^unlock$/i })).toBeNull();
   });
-
-  // quince#1517 review, finding 2 — the frame that showed the raw sentence.
-  it("never paints the raw server error for a session that has gone", async () => {
-    vi.spyOn(api, "post").mockResolvedValue({ id: "S1", version_id: "V1", expires_at: "" });
-    vi.spyOn(api, "get").mockImplementation(async (url: string) => {
-      if (url.includes("/messages/chats")) throw new APIError(409, "locked", "session not found or expired");
-      return { versions: [ver()] };
-    });
-    renderPage();
-    await openAndUnlock();
-    await screen.findByText(/timed out, or quince restarted/i);
-
-    // `expired` is state set in an effect, so it is false on the render that first sees the 409.
-    // Without the `!sessionGone` guard that render paints the adapter's raw sentence in danger
-    // red for one frame. The END state was always right, which is why findByText passed either
-    // way and this assertion is the one that can see the difference.
-    expect(screen.queryByText(/session not found or expired/i)).toBeNull();
-  });
 });
